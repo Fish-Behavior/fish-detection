@@ -1,8 +1,8 @@
 # Zebrafish Drug-Response Detection System
 
-Advisor: Dr. Scott Hall
+Advisor: Dr. Ashish Kharel
 
-PhD Candidate: Logan Kountz
+Collaborator: Dr. Scott Hall
 
 ## Project Overview
 
@@ -42,18 +42,6 @@ See the complete scientific and technical scope in
 The repository currently contains project documentation and workflow configuration;
 the analysis pipeline, dependency manifest, datasets, tests, backend, and frontend
 are still to be implemented.
-
-## Repository Structure
-
-```text
-README.md
-docs/
-	how-to-start.md
-	zebrafish_drug_detection_scope.md
-```
-
-The repository does not currently include executable pipeline code, a dependency
-manifest, test suite, raw data, video files, or a user interface.
 
 ## Data Sources and Access
 
