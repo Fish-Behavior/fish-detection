@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fishbehavior"
+version = "0.1.0"
+description = "Automated zebrafish behavior-state labeling pipeline (tracking -> features -> ethogram segments)."
+readme = "README.md"
+# 3.10+ keeps the package usable on lab machines and on Google Colab.
+requires-python = ">=3.10"
+# Runtime dependencies. Each pipeline step adds only what it needs, in its own PR.
+dependencies = [
+    "python-dotenv>=1.0",  # reads the local .env file with data paths
+    "PyYAML>=6.0",         # reads the tunable settings file (default_config.yaml)
+]
+
+[project.optional-dependencies]
+# Tools for contributors: `pip install -e ".[dev]"`
+dev = ["pytest>=7"]
+
+[project.scripts]
+# Installs a `fishbehavior` command, same as `python -m fishbehavior`.
+fishbehavior = "fishbehavior.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Ship the default settings file inside the package so it works after `pip install`.
+fishbehavior = ["default_config.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -39,9 +39,46 @@ integration, streaming inference, and real-time narration.
 See the complete scientific and technical scope in
 [docs/zebrafish_drug_detection_scope.md](docs/zebrafish_drug_detection_scope.md).
 
-The repository currently contains project documentation and workflow configuration;
-the analysis pipeline, dependency manifest, datasets, tests, backend, and frontend
-are still to be implemented.
+The behavior-labeling pipeline (`fishbehavior` package) is being built one step at a
+time, one pull request per step. The project setup (settings loading, command-line
+entry point, tests) is in place; the analysis steps listed under
+[Project Structure](#project-structure) as *planned* are added in later PRs. The
+classifier, backend, and frontend are not yet implemented.
+
+## Project Structure
+
+```text
+fish-detection/
+├── .env.example              # template for your local .env (data paths); copy it, never commit .env
+├── .gitignore                # keeps data, outputs, and .env out of Git
+├── pyproject.toml            # package definition and dependencies
+├── requirements.txt          # one-line install: the package + developer tools
+├── docs/                     # project scope and contribution workflow
+├── src/fishbehavior/         # the pipeline package
+│   ├── __main__.py           # enables `python -m fishbehavior <command>`
+│   ├── cli.py                # command-line entry point; one sub-command per pipeline step
+│   ├── config.py             # reads paths from .env / environment and parameters from YAML
+│   └── default_config.yaml   # default, data-independent parameters
+└── tests/                    # automated tests (synthetic data only, never real trials)
+```
+
+Pipeline steps planned for later PRs, in order:
+
+| Step | Module | What it does |
+|---|---|---|
+| Workbook catalog | `catalog.py` | cleans the trial workbook and matches each row to its video |
+| Scene setup | `video.py`, `roi.py` | reads video timing; finds the empty background, water area, and waterline |
+| Fish tracking | `tracking.py` | locates the fish in every frame (position, size, tilt) |
+| Features | `features.py` | speed, turning, smoothness, height, and posture per frame and per time bin |
+| Behavior labeling | `labeling.py` | assigns one of the five ethogram states to each time bin and merges them into segments |
+| Slide digitizer | `reference.py` | turns the reference ethogram figures into approximate timelines for tuning |
+| Priors and calibration | `priors.py`, `calibrate.py` | tunes thresholds against the reference and sanity checks |
+| Dataset export | `export.py` | writes segments, per-subject summaries, and training datasets |
+| Plots | `plots.py` | ethogram charts, summary bar charts, and review videos |
+| Colab and docs | `notebooks/`, `docs/` | Google Colab quick start and full usage guide |
+
+Everything the pipeline generates is written to the output folder (`outputs/` by
+default), which is ignored by Git.
 
 ## Data Sources and Access
 
@@ -68,22 +105,20 @@ the appropriate project channels. Do not commit them to this repository.
 
 ## Prerequisites
 
-Implementation prerequisites are pending because the runtime and dependency
-manifests have not yet been created. The planned stack includes:
+- Python 3.10 or newer (developed on 3.11) in a virtual environment (`venv`);
+- Windows, macOS, Linux, or Google Colab.
 
-- Python and a project-managed virtual environment;
+The pipeline's own dependencies are listed in `pyproject.toml` and grow as steps are
+added. The planned stack beyond the labeling pipeline includes:
+
 - TensorFlow for learned components;
 - OpenCV for computer-vision tracking;
 - a mid-range GPU for the classifier and tracking experiments; and
 - either a hosted language-model API or a self-hosted model for reporting.
 
-Supported Python, TensorFlow, OpenCV, GPU, language-model, and network requirements
-will be recorded here when implementation begins. Do not install or run commands
-from this section yet; no executable application entry point exists.
-
 ## Quick Start
 
-The project is not yet runnable. The intended Phase 1 workflow is:
+The intended Phase 1 workflow is:
 
 ```text
 data acquisition
@@ -98,22 +133,38 @@ data acquisition
 
 ### Environment Setup
 
-Create the project environment and install dependencies once the implementation
-adds a supported Python version and dependency manifest.
+From the repository folder:
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+pytest                      # runs the automated tests (no real data needed)
+```
 
 ### Data Placement
 
-Place the approved workbook and videos in the project data location defined by the
-future pipeline configuration. Keep restricted data outside Git and document the
-local path through environment or configuration settings rather than hard-coding
-it.
+Keep the approved workbook and videos outside Git (for example in a `data/` folder,
+which is ignored) and tell the pipeline where they are through a local `.env` file:
+
+```bash
+cp .env.example .env        # Windows: copy .env.example .env
+# then edit .env and set FISH_VIDEO_DIR, FISH_DB_PATH, FISH_REFERENCE_PDF, FISH_OUTPUT_DIR
+python -m fishbehavior check-config
+```
+
+`check-config` prints every path the pipeline will use and marks it `ok`, `not set`,
+or `MISSING`. Environment variables with the same names override the `.env` file,
+which is how Google Colab is configured. Parameters can be changed without editing
+the code by pointing `FISH_CONFIG` to a YAML file with only the values to change.
 
 ### Run the Phase 1 Pipeline
 
-The future pipeline will clean and validate the trial database, match each trial to
-its video, extract kinematic features, discover behavior states, train and evaluate
-the classifier, and run anomaly detection. Script and module names will be added
-when those components exist.
+Each pipeline step adds its own command (`python -m fishbehavior <command>`) as it
+is merged; `python -m fishbehavior --help` lists the commands available so far. The
+full pipeline will clean and validate the trial database, match each trial to its
+video, extract kinematic features, discover behavior states, train and evaluate
+the classifier, and run anomaly detection.
 
 ### Generate a Report
 
