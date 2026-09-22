@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: fishbehavior
+Version: 0.1.0
+Summary: Automated zebrafish behavior-state labeling pipeline (tracking -> features -> ethogram segments).
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: PyYAML>=6.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+
 # Zebrafish Drug-Response Detection System
 
 Advisor: Dr. Ashish Kharel
