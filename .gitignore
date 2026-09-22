@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Restricted research data — NEVER commit (see README "Data Handling and Privacy")
+# ---------------------------------------------------------------------------
+# Local secrets / machine-specific paths (copy .env.example -> .env)
+.env
+.env.*
+!.env.example
+# Default local folders for raw data and everything the pipeline generates
+data/
+outputs/
+# Raw inputs by type, in case they are placed somewhere else in the repo
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.parquet
+*.npz
+# ---------------------------------------------------------------------------
+# Python tooling
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
