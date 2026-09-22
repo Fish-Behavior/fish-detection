@@ -10,3 +10,14 @@
 run:
   # How much the pipeline prints: DEBUG, INFO, WARNING or ERROR
   log_level: INFO
+
+catalog:
+  # Worksheet holding the trial table: its name, or 0 for the first sheet.
+  sheet: 0
+  # File types treated as videos when scanning FISH_VIDEO_DIR (case does not matter).
+  video_extensions: [".mp4", ".avi", ".mov", ".mkv"]
+  # Pattern searched in each video file name (without extension). It must capture
+  # `sex` (M/F) and `subject` (number); `part` (a letter) is optional and marks
+  # recordings split into several files. Accepts e.g. F_0042, M_0012a, M_0012_b,
+  # M_0012-b, and tolerates a prefix such as "copy-F_0042".
+  video_name_pattern: '(?<![A-Za-z0-9])(?P<sex>[MF])_(?P<subject>\d+)(?:[_-]?(?P<part>[A-Z]))?$'

@@ -13,6 +13,8 @@ requires-python = ">=3.10"
 dependencies = [
     "python-dotenv>=1.0",  # reads the local .env file with data paths
     "PyYAML>=6.0",         # reads the tunable settings file (default_config.yaml)
+    "pandas>=2.0",         # tables: cleaned trial catalog, reports
+    "openpyxl>=3.1",       # lets pandas read the .xlsx trial workbook
 ]
 
 [project.optional-dependencies]

@@ -1,9 +1,10 @@
 """Command-line entry point: `python -m fishbehavior <command> [options]`.
 
 Each pipeline step registers one sub-command here in its own PR
-(validate, track, label, ...). This first version only has `check-config`,
-which shows what the pipeline will read so a new `.env` can be verified
-before any data is processed.
+(validate, track, label, ...). Available so far:
+
+    check-config   show what the pipeline will read, to verify a new `.env`
+    validate       clean the trial workbook and match every trial to its video(s)
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import logging
 from typing import Sequence
 
 from fishbehavior import __version__
+from fishbehavior.catalog import CatalogError, build_catalog
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -33,6 +35,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = commands.add_parser("check-config", help="show the resolved paths and settings, then exit")
     check.set_defaults(handler=run_check_config)  # each command points to the function that runs it
+
+    validate = commands.add_parser(
+        "validate", help="clean the workbook, match trials to videos, write the catalog + report"
+    )
+    validate.add_argument(
+        "--strict", action="store_true", help="exit with code 1 if the report lists any issue"
+    )
+    validate.set_defaults(handler=run_validate)
 
     return parser
 
@@ -60,6 +70,30 @@ def run_check_config(settings: Settings, args: argparse.Namespace) -> int:
     print(f"{'FISH_OUTPUT_DIR':<19}: {settings.paths.output_dir}  [{output_note}]")
     print(f"{'FISH_WORKERS':<19}: {settings.workers}")
     return 1 if problems else 0
+
+
+def run_validate(settings: Settings, args: argparse.Namespace) -> int:
+    """Build the catalog (see catalog.py) and print a short summary.
+
+    The full details are in the written validation_report.md. Returns 0, or 1
+    when --strict is given and the report lists any issue.
+    """
+    try:
+        result = build_catalog(settings)
+    except CatalogError as error:
+        print(f"Workbook error: {error}")  # e.g. a required column is missing
+        return 2
+
+    notes = result.notes
+    print(f"Workbook   : {notes['trial_rows']} trial rows -> {notes['subjects']} subjects "
+          f"({len(notes['split_list'])} split recordings joined)")
+    print(f"NTT        : {notes['untracked_subjects']} subjects untracked (all 8 movement values missing)")
+    statuses = ", ".join(f"{name} {count}" for name, count in sorted(notes["status_counts"].items()))
+    print(f"Videos     : {notes['video_files']} files found; {statuses}")
+    issue_count = sum(len(entries) for entries in result.issues.values())
+    print(f"Issues     : {issue_count}")
+    print(f"Written to : {result.output_dir}  (trials.csv, videos.csv, validation_report.md)")
+    return 1 if args.strict and result.has_issues else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

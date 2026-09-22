@@ -41,7 +41,8 @@ See the complete scientific and technical scope in
 
 The behavior-labeling pipeline (`fishbehavior` package) is being built one step at a
 time, one pull request per step. The project setup (settings loading, command-line
-entry point, tests) is in place; the analysis steps listed under
+entry point, tests) and the workbook catalog (cleaning + video matching) are in
+place; the analysis steps listed under
 [Project Structure](#project-structure) as *planned* are added in later PRs. The
 classifier, backend, and frontend are not yet implemented.
 
@@ -56,6 +57,7 @@ fish-detection/
 ├── docs/                     # project scope and contribution workflow
 ├── src/fishbehavior/         # the pipeline package
 │   ├── __main__.py           # enables `python -m fishbehavior <command>`
+│   ├── catalog.py            # cleans the trial workbook and matches each trial to its video(s)
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
 │   └── default_config.yaml   # default, data-independent parameters
@@ -66,7 +68,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Workbook catalog | `catalog.py` | cleans the trial workbook and matches each row to its video |
 | Scene setup | `video.py`, `roi.py` | reads video timing; finds the empty background, water area, and waterline |
 | Fish tracking | `tracking.py` | locates the fish in every frame (position, size, tilt) |
 | Features | `features.py` | speed, turning, smoothness, height, and posture per frame and per time bin |
@@ -161,7 +162,31 @@ the code by pointing `FISH_CONFIG` to a YAML file with only the values to change
 ### Run the Phase 1 Pipeline
 
 Each pipeline step adds its own command (`python -m fishbehavior <command>`) as it
-is merged; `python -m fishbehavior --help` lists the commands available so far. The
+is merged; `python -m fishbehavior --help` lists the commands available so far.
+
+**1. Validate the workbook and videos**
+
+```bash
+python -m fishbehavior validate            # add --strict to exit with code 1 if any issue is found
+```
+
+This reads the workbook (`FISH_DB_PATH`), applies the data-preparation rules below,
+matches every subject to its video file(s) in `FISH_VIDEO_DIR`, and writes to
+`<FISH_OUTPUT_DIR>/catalog/`:
+
+- `trials.csv`: one row per subject with the cleaned values, `ntt_tracked`,
+  `video_status` (`matched`, `missing`, `sex_mismatch`, `part_mismatch`,
+  `duplicate_videos`, or `not_checked`), and `video_paths`;
+- `videos.csv`: every video file found and what was read from its name;
+- `validation_report.md`: everything that needs attention, plus reference lists.
+
+Video names must contain the sex and subject number, such as `F_0042.mp4`. A
+recording split into several files uses a part letter (`M_0012a.mp4`,
+`M_0012_b.mp4`, or `M_0012-b.mp4`); a subject number that appears on several
+workbook rows is treated as one fish recorded in parts and joined into one subject.
+Without `FISH_VIDEO_DIR`, only the workbook is checked.
+
+The
 full pipeline will clean and validate the trial database, match each trial to its
 video, extract kinematic features, discover behavior states, train and evaluate
 the classifier, and run anomaly detection.
@@ -219,6 +244,10 @@ stretch goal or subsequent milestone.
 - Trials missing all eight movement columns are treated as untracked and masked
 	out of training rather than imputed. The scope identifies 104 such trials.
 - `Body Tissue` is excluded because it is empty for all real trials.
+- `N/A` and other text in numeric columns is treated as missing; the raw UV exposure
+  text (for example `10*`) is kept in `uv_min_raw`.
+- Workbook rows that share a subject number are one recording split into parts and
+  are joined into one subject; conflicting values between parts are reported.
 
 ### Modeling
 
