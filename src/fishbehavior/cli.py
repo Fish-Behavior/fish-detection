@@ -11,6 +11,7 @@ Each pipeline step registers one sub-command here in its own PR
     features       per subject: movement features per frame and per time bin, plus endpoints
     features-qa    per subject: which bin features are stable (frame rate / smoothing checks)
     label          per subject: ethogram state of every time bin, merged into segments
+    reference      digitize the reference ethogram figures into approximate timelines (for tuning)
 """
 
 from __future__ import annotations
@@ -23,7 +24,8 @@ from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from fishbehavior.features import run_features, run_features_qa
-from fishbehavior.labeling import LABELS, run_labeling
+from fishbehavior.labeling import LABELS, STATES, run_labeling
+from fishbehavior.reference import MAPPING_FILE, SLIDE18_FILE, run_reference
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
 from fishbehavior.tracking import run_tracking
@@ -96,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_subject_options(label)
     label.set_defaults(handler=run_label_command)
+
+    reference = commands.add_parser(
+        "reference", help="digitize the reference ethogram figures into per-subject timelines (for tuning)"
+    )
+    reference.add_argument("--force", action="store_true", help="re-extract the figures and redo the digitizing")
+    reference.set_defaults(handler=run_reference_command)
 
     return parser
 
@@ -323,6 +331,43 @@ def run_label_command(settings: Settings, args: argparse.Namespace) -> int:
         print(f"{'Time share':<11}: {shares}")
     print(f"{'Written to':<11}: {result.labels_dir}  (<subject>_bins.csv, segments.csv, summary.csv, swim_model.json)")
     return 1 if failed else 0
+
+
+def run_reference_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Digitize the reference figures; returns 1 while mapping.yaml still has to be filled in."""
+    result = run_reference(settings, force=args.force)
+    out = result.reference_dir
+    pages = ", ".join(f"page {page}: {sum(p.page == page for p in result.panels)}"
+                      for page in dict.fromkeys(p.page for p in result.panels))
+    print(f"{'Panels':<11}: {pages}")
+    if result.mapping_created:
+        print(f"{'Mapping':<11}: template written to {out / MAPPING_FILE}. Fill in group and subject_ids "
+              f"(top -> bottom) for every panel, or skip: true, then run `reference` again (see README).")
+        return 1
+
+    timelines = result.timelines
+    unknown = 100 * (timelines["label"] == "unknown").mean()
+    print(f"{'Digitized':<11}: {timelines['subject_id'].nunique()} subjects in "
+          f"{timelines['group'].nunique()} groups{' (cached)' if result.cached else ''}, "
+          f"{result.skipped_panels} panel(s) skipped, unknown color {unknown:.1f}% of seconds")
+    means = result.group_means
+    width = max(9, *(len(group) for group in means["group"]))  # align the columns under long group names
+    print(f"{'Mean s':<{width + 2}}: " + "  ".join(f"{state:>15}" for state in STATES) + f"  {'no_data':>8}")
+    for row in means.itertuples():
+        print(f"  {row.group:<{width}}: " + "  ".join(f"{getattr(row, state):>15.0f}" for state in STATES)
+              + f"  {row.no_data:>8.0f}")
+    if result.slide18_created:
+        print(f"{'Slide 18':<11}: optional template {out / SLIDE18_FILE}: fill in values read from the bar "
+              f"charts to check the digitizer")
+    elif result.slide18_check is not None:
+        check = result.slide18_check
+        print(f"{'Slide 18':<11}: {len(check)} values compared, median |digitized - slide| "
+              f"{check['difference_s'].abs().median():.0f} s, largest {check['difference_s'].abs().max():.0f} s "
+              f"(slide18_check.csv)")
+    else:
+        print(f"{'Slide 18':<11}: no values in {out / SLIDE18_FILE} yet (optional check of the digitizer)")
+    print(f"{'Written to':<11}: {out}  (timelines.csv, group_means.csv, digitize_check.png)")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

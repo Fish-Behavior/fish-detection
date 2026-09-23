@@ -208,3 +208,56 @@ labeling:
     lorr: 1
     surface_breach: 1
     untracked: 0
+
+reference:
+  # Digitizing the reference ethogram figures (FISH_REFERENCE_PDF) into approximate
+  # per-subject timelines, used only to tune the labeling. Page numbers count from 1.
+  # Pages that each hold one ethogram image (stacked panels, one row per subject).
+  ethogram_pages: [16, 17]
+  # Every panel's x axis runs from 0 to this many seconds.
+  axis_seconds: 1200
+  # Legend colors of the figures (RGB 0-255), one per state; no_data is the white
+  # background shown where a subject has no data.
+  palette:
+    controlled_swim: [190, 190, 190]  # gray
+    erratic: [255, 0, 0]              # red
+    freeze_drift: [0, 0, 255]         # blue
+    lorr: [255, 192, 203]             # pink
+    surface_breach: [0, 255, 0]       # green
+    no_data: [255, 255, 255]          # white
+  # Pixels are matched to the nearest palette color by CIELAB distance, with lightness
+  # differences multiplied by this weight: JPEG keeps brightness sharp but smears color
+  # over ~2 px, which on rows only ~4 px tall turns a gray row under a pink one pinkish
+  # (gray and pink differ mostly in color, a little in brightness). 1 = plain CIELAB.
+  lightness_weight: 3
+  # A pixel farther than this (weighted) distance from its nearest palette color is
+  # "unknown" (the purple JPEG mix where red and blue meet, text); per color. Gray to pink
+  # is ~31, so pink needs a closer match.
+  max_color_distance:
+    controlled_swim: 80
+    erratic: 80
+    freeze_drift: 80
+    lorr: 30
+    surface_breach: 80
+    no_data: 80
+  # Pink is almost exactly a red + white mix, so the blurred 1-3 px edge of a red bout next
+  # to white or gray looks pinkish, but never close to pink. A run of pixels matched to a
+  # color listed here therefore only counts if at least one of its pixels is within this
+  # distance (a solid pink stretch has many pixels far closer); otherwise its pixels take
+  # their next-nearest color (gray or red, the colors that blurred into pink).
+  seed_color_distance:
+    lorr: 15
+  # Plot area: a column is part of the plot when it has at least this fraction of the
+  # state-colored pixels of the most colored column (subject labels and legend have far fewer).
+  plot_min_column_fraction: 0.3
+  # A pixel row is part of a panel when at least this share of the plot columns have a
+  # state color (mostly-white rows of subjects without data count via the gap below).
+  panel_min_row_fraction: 0.3
+  # Gaps of weakly colored rows up to this fraction of the image height are joined into
+  # the panel around them; the white space between panels (the titles) is far larger.
+  panel_max_gap_fraction: 0.02
+  # Colored runs shorter than this fraction of the image height (legend boxes) are not panels.
+  panel_min_height_fraction: 0.03
+  # Page with the bar charts (seconds per state per group). Not read automatically: it
+  # is saved as page<N>.png so the values can be read by eye into slide18_values.yaml.
+  barchart_page: 18

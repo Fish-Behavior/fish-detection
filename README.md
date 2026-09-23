@@ -43,7 +43,7 @@ The behavior-labeling pipeline (`fishbehavior` package) is being built one step 
 time, one pull request per step. The project setup (settings loading, command-line
 entry point, tests), the workbook catalog (cleaning + video matching), scene setup
 (background, waterline, fish region per video), tracking, movement features and
-behavior labeling are in place; the analysis steps listed under
+behavior labeling, and the reference-figure digitizer are in place; the analysis steps listed under
 [Project Structure](#project-structure) as *planned* are added in later PRs. The
 classifier, backend, and frontend are not yet implemented.
 
@@ -65,6 +65,7 @@ fish-detection/
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
+│   ├── reference.py          # digitizes the reference ethogram figures into approximate per-subject timelines
 │   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
 │   ├── review_page.html      # the review page template (self-contained, no external files)
 │   ├── roi.py                # per video: empty-beaker background, waterline, fish region (ROI), QA image
@@ -78,7 +79,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Slide digitizer | `reference.py` | turns the reference ethogram figures into approximate timelines for tuning |
 | Priors and calibration | `priors.py`, `calibrate.py` | tunes thresholds against the reference and sanity checks |
 | Dataset export | `export.py` | writes segments, per-subject summaries, and training datasets |
 | Plots | `plots.py` | ethogram charts, summary bar charts, and review videos |
@@ -556,6 +556,91 @@ Results go to `<FISH_OUTPUT_DIR>/labels/`:
 
 A subject is skipped when its results exist, unless `--force` is given, its features
 are newer, or the swim model was refitted.
+
+**7. Reference ethograms (for tuning)**
+
+```bash
+python -m fishbehavior reference            # extract, digitize, compare
+python -m fishbehavior reference --force    # re-extract the figures and redo everything
+```
+
+There are no hand labels, so the labeling is tuned against the published reference
+figures in `FISH_REFERENCE_PDF`. This step turns them into approximate second-by-second
+timelines. It needs only the PDF (not the videos). Everything it writes stays in the
+git-ignored `<FISH_OUTPUT_DIR>/reference/`.
+
+The ethogram pages (`reference.ethogram_pages`, default 16 and 17) each hold one picture
+with five stacked panels, one per group, and one thin row per subject. The x axis runs
+0 to `reference.axis_seconds` (1200). The step:
+
+1. saves the largest image of each ethogram page as `page16.png` / `page17.png`, and the
+   bar-chart page (`reference.barchart_page`, 18) rendered as `page18.png`;
+2. finds the plot: the columns and rows where the legend colors dominate. Each block of
+   colored rows is a panel, and panels are numbered from the top. All panels of a page share
+   one time axis, so a row whose data stops early (white) is still placed right;
+3. splits each panel into as many equal rows as its `subject_ids` in `mapping.yaml`, reads
+   the middle line of each row pixel by pixel, and keeps the most common color per second.
+
+**First run: fill in `mapping.yaml`.** The subject labels on the left of the figures
+overlap and cannot be read, so the first run writes a template and stops (exit code 1):
+
+```yaml
+panels:
+- page: 16
+  panel: 1
+  rows: 12          # estimated from the image; count the rows in page16.png and correct it if needed
+  group: ''         # fill in, e.g. VEH
+  subject_ids: []   # fill in, TOP to BOTTOM, exactly `rows` of them
+  skip: false       # true for a panel that repeats another one
+```
+
+For each panel:
+
+- `group`: the panel title (e.g. `VEH`, `COMPOUND_A 30uM`). It names the group in the outputs.
+- `subject_ids`: the subjects of that group, **top row first**. Take the group's subjects
+  from the workbook (or `catalog/trials.csv`: same compound and dose). The figures were
+  made with R/ggplot, which puts a group's first subject at the **bottom**. So the list from
+  top to bottom is usually the subject numbers in **descending** order, e.g.
+  `[F_0048, F_0045, F_0042, ...]`. `42`, `0042` and `F_0042` all work. Check the order
+  against the top and bottom labels, which are usually readable because nothing overlaps them.
+- `rows`: the row count estimated from where the colors change between rows. The number
+  of `subject_ids` must equal it. If they differ, the step stops and names the panel, for
+  example `page 16 panel 2: 9 subject_ids but rows: 10`. Then either a subject is missing from
+  your list or the estimate is off; count the rows in the zoomed `page<N>.png` and fix
+  whichever is wrong.
+- `skip: true` for a repeated panel, e.g. the control group drawn on both pages. It needs no
+  group or subject_ids and is not digitized. Listing a subject in two panels is an error, so it
+  cannot be counted twice.
+
+Run `reference` again after editing. Digitizing is redone automatically when
+`mapping.yaml` is newer than the results. Use `--force` after changing a `reference:`
+setting or the PDF.
+
+**Outputs** (`<FISH_OUTPUT_DIR>/reference/`):
+
+- `timelines.csv`: `subject_id, group, second, label`, one row per subject and second.
+  `label` is one of the five states, `no_data` (white: the subject has no data there), or
+  `unknown` (no pixel of that second matched a legend color);
+- `group_means.csv`: per group, `n_subjects` and the mean seconds of every label;
+- `digitize_check.png`: **look at this first.** Every digitized panel is drawn as the
+  original figure crop (left) next to the redrawn ethogram (right), in the style of the
+  reference: subject IDs down the side, time 0–1200 s across, colored by state, one titled
+  panel per group, with the legend at the bottom (black = unknown). Rows line up across both
+  sides, so a row shifted by one subject or a wrong row count is obvious;
+- `slide18_values.yaml` (optional): a template of group × state, all `null`. Fill in the
+  mean seconds you read **by eye** from the bar charts in `page18.png` (they are not stored
+  as numbers in the PDF). The next run compares them with `group_means.csv` and writes
+  `slide18_check.csv` (`group, state, slide18_s, digitized_s, difference_s`), and prints the
+  median and largest difference. This checks the digitizer; it is not an input to it.
+
+How colors are read (all in `reference:`): each pixel gets the nearest `palette` color
+by CIELAB distance, with lightness differences weighted by `lightness_weight` (3).
+JPEG keeps brightness sharp but smears color over about 2 px, so a thin gray row under a
+pink one turns pinkish while its brightness stays gray. A pixel farther than
+`max_color_distance` from its nearest color is unknown. Pink is nearly a red + white mix,
+so the blurred edge of every red bout looks pinkish. A pink stretch therefore counts as
+LORR only if at least one of its pixels is within `seed_color_distance.lorr` (15) of the
+palette pink; otherwise it takes its next-nearest color.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its
