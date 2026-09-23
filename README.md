@@ -39,12 +39,12 @@ integration, streaming inference, and real-time narration.
 See the complete scientific and technical scope in
 [docs/zebrafish_drug_detection_scope.md](docs/zebrafish_drug_detection_scope.md).
 
-The behavior-labeling pipeline (`fishbehavior` package) is being built one step at a
-time, one pull request per step. The project setup (settings loading, command-line
-entry point, tests), the workbook catalog (cleaning + video matching), scene setup
-(background, waterline, fish region per video), tracking, movement features and
-behavior labeling, and the reference-figure digitizer are in place; the analysis steps listed under
-[Project Structure](#project-structure) as *planned* are added in later PRs. The
+The behavior-labeling pipeline (`fishbehavior` package) is complete: workbook catalog,
+scene setup, tracking, movement features, behavior labeling, reference digitizing, sanity
+checks and calibration, dataset export and plots, plus one `all` command that runs everything
+and a Google Colab notebook. **Start with the user guide:
+[docs/behavior-labeling.md](docs/behavior-labeling.md)** (setup on every platform, every
+command, how the states are decided, calibration and its limits, troubleshooting). The
 classifier, backend, and frontend are not yet implemented.
 
 ## Project Structure
@@ -55,7 +55,12 @@ fish-detection/
 ├── .gitignore                # keeps data, outputs, and .env out of Git
 ├── pyproject.toml            # package definition and dependencies
 ├── requirements.txt          # one-line install: the package + developer tools
-├── docs/                     # project scope and contribution workflow
+├── docs/
+│   ├── behavior-labeling.md  # user guide: setup, every command, states, calibration, troubleshooting
+│   ├── how-to-start.md       # contribution workflow
+│   └── zebrafish_drug_detection_scope.md  # project scope
+├── notebooks/
+│   └── colab_quickstart.ipynb  # Google Colab: mount Drive, install, run `all` (saved without outputs)
 ├── src/fishbehavior/         # the pipeline package
 │   ├── __main__.py           # enables `python -m fishbehavior <command>`
 │   ├── calibrate.py          # tunes the labeling thresholds against the reference timelines (random search, K-fold)
@@ -76,14 +81,8 @@ fish-detection/
 │   ├── tracking.py           # per subject: fish position, outline size and tilt in every frame (parts joined)
 │   └── video.py              # video timing (fps, frames, duration) and frame reading
 └── tests/                    # automated tests (synthetic data only, never real trials)
-    └── synthetic.py          # draws synthetic beaker/fish videos for the tests
-```
-
-Pipeline steps planned for later PRs, in order:
-
-| Step | Module | What it does |
-|---|---|---|
-| Colab and docs | `notebooks/`, `docs/` | Google Colab quick start and full usage guide |
+    ├── synthetic.py          # draws synthetic beaker/fish videos for the tests
+    └── test_all.py           # `all` end to end on a tiny synthetic project (workbook, 20 s video, reference PDF)
 
 Everything the pipeline generates is written to the output folder (`outputs/` by
 default), which is ignored by Git.
@@ -92,7 +91,7 @@ default), which is ignored by Git.
 
 ### Trial database
 
-The planned tabular source is `00_NTT_DataBase.xlsx`, which contains 720 rows:
+The planned tabular source is the trial workbook (`FISH_DB_PATH`), which contains 720 rows:
 
 - 353 rows contain real trial data; the remaining rows are blank templates;
 - metrics include distance moved, velocity, and time-in-zone measurements;
@@ -168,8 +167,20 @@ the code by pointing `FISH_CONFIG` to a YAML file with only the values to change
 
 ### Run the Phase 1 Pipeline
 
-Each pipeline step adds its own command (`python -m fishbehavior <command>`) as it
-is merged; `python -m fishbehavior --help` lists the commands available so far.
+**Everything at once:**
+
+```bash
+python -m fishbehavior all                        # every step, every subject
+python -m fishbehavior all --subjects 42          # try one subject first
+python -m fishbehavior all --skip-reference       # without reference / priors / calibration
+```
+
+`all` runs validate → scene → track → features → label → (reference → priors → calibrate →
+label again, when `FISH_REFERENCE_PDF` is set and `mapping.yaml` is filled in) → export →
+plot. It skips finished work (a second run only redoes what changed), stops with a clear
+message at the first failing step, and prints the seconds per step. On Google Colab use
+[notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb). The steps below can also
+be run one at a time (`python -m fishbehavior --help` lists them all).
 
 **1. Validate the workbook and videos**
 
@@ -868,15 +879,15 @@ stretch goal or subsequent milestone.
 - Compound and dose are separate label dimensions; each compound-and-dose pair is
 	treated as a classification class.
 - Four very small classes are pooled into adjacent doses of the same compound,
-	producing a 31-class working label set pending the decision for HS-1-51 @ 0.03.
+	producing a 31-class working label set pending the decision for COMPOUND_G @ 0.03.
 - Cross-validation is planned instead of a single held-out test split because
 	several classes remain small.
 
 ### Open decisions
 
-- HS-1-51 @ 0.03 has one trial and cannot be pooled with an adjacent dose. It may
+- COMPOUND_G @ 0.03 has one trial and cannot be pooled with an adjacent dose. It may
 	be excluded, retained as a singleton, or handled through another approved rule.
-- The meaning of probability examples such as `60% MDMA, 30% DOB, 10% Veh` must
+- The meaning of probability examples such as `60% COMPOUND_A, 30% COMPOUND_B, 10% Veh` must
 	be confirmed as mutually exclusive class probabilities or a mixture/multi-label
 	result.
 - Observation windows, confidence thresholds, calibration, stopping rules, report

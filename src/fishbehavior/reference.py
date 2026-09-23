@@ -307,6 +307,10 @@ def subject_text(value: Any, where: str) -> str:
         raise ConfigError(f"{where}: {value!r} is not a subject id") from None
 
 
+class MappingIncomplete(ConfigError):
+    """mapping.yaml still has panels without group / subject_ids (the user has not filled it in yet)."""
+
+
 def load_mapping(path: Path, panels: list[Panel]) -> list[dict[str, Any]]:
     """The filled-in mapping, one entry per detected panel (page/panel order), or ConfigError listing every problem."""
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -342,7 +346,7 @@ def load_mapping(path: Path, panels: list[Panel]) -> list[dict[str, Any]]:
         problems.insert(0, f"not filled in yet: {listed}. Give each a group and its subject_ids "
                            f"(top -> bottom), or skip: true (README, step 7)")
     if problems:
-        raise ConfigError(f"{path}: " + "; ".join(problems))
+        raise (MappingIncomplete if empty else ConfigError)(f"{path}: " + "; ".join(problems))
     return mapping
 
 

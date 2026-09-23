@@ -9,7 +9,7 @@
 
 This project develops an AI system that observes zebrafish behavior on video —
 recorded initially, live in a later phase — and estimates the probability that the
-fish was exposed to a given compound and dose (e.g. "60% MDMA, 30% DOB, 10% Veh").
+fish was exposed to a given compound and dose (e.g. "60% COMPOUND_A, 30% COMPOUND_B, 10% Veh").
 The system combines supervised learning (trained on labeled trial data) with
 unsupervised learning (behavior-state discovery and novelty detection), and
 produces its output as a natural-language explanation, a timestamped behavior log,
@@ -17,7 +17,7 @@ and a flag for unusual or novel behavioral patterns.
 
 ## 2. Background and Data Sources
 
-### 2.1 Trial database (`00_NTT_DataBase.xlsx`)
+### 2.1 Trial database (the trial workbook)
 
 Per-trial summary metrics from Novel Tank Test (NTT) tracking software: distance
 moved, velocity, and time-in-zone, each split by full arena, top half, and bottom
@@ -27,7 +27,7 @@ half of the tank.
   remaining rows are blank template rows and are excluded from the pipeline.
 - The compounds tested span 17 distinct families across 35 compound+dose
   combinations, including two combination treatments (an experimental compound
-  paired with methylone). Class sizes range from 77 trials (vehicle control) down
+  paired with a reference compound). Class sizes range from 77 trials (vehicle control) down
   to single-digit counts for several experimental compounds.
 - One column ("Body Tissue") is empty across all 353 trials and is excluded from
   the dataset.
@@ -98,13 +98,13 @@ and unsupervised methods:
 - **Label strategy:** compound and dose are treated as separate classes. The four
   smallest classes are pooled into an adjacent dose of the same compound to reach a
   workable sample size:
-  - FD-2-95 @ 0.1 (n=3) pooled into FD-2-95 @ 0.03 (n=7 → 10)
-  - FD-2-67 @ 0.2 (n=3) pooled into FD-2-67 @ 0.1 (n=16 → 19)
-  - FD-2-66 @ 0.2 (n=3) pooled into FD-2-66 @ 0.1 (n=6 → 9)
-  - FD-2-97 @ 0.1 (n=1) pooled into FD-2-97 @ 0.03 (n=6 → 7)
-  - HS-1-51 @ 0.03 (n=1) remains unresolved: it is the only dose tested for that
+  - COMPOUND_C @ 0.1 (n=3) pooled into COMPOUND_C @ 0.03 (n=7 → 10)
+  - COMPOUND_D @ 0.2 (n=3) pooled into COMPOUND_D @ 0.1 (n=16 → 19)
+  - COMPOUND_E @ 0.2 (n=3) pooled into COMPOUND_E @ 0.1 (n=6 → 9)
+  - COMPOUND_F @ 0.1 (n=1) pooled into COMPOUND_F @ 0.03 (n=6 → 7)
+  - COMPOUND_G @ 0.03 (n=1) remains unresolved: it is the only dose tested for that
     compound, so no adjacent dose exists to pool into (see Section 8).
-  - This produces a working label set of 31 classes, pending resolution of HS-1-51.
+  - This produces a working label set of 31 classes, pending resolution of COMPOUND_G.
 - Given the resulting class sizes, cross-validation is used in place of a single
   held-out test split, and a hierarchical model — predicting compound family first,
   then dose within family — is planned to make the smaller classes more tractable.
@@ -182,9 +182,9 @@ timeline)
 
 ## 8. Outstanding Decisions
 
-- **HS-1-51 @ 0.03 (n=1):** the only dose tested for this compound, so it cannot be
+- **COMPOUND_G @ 0.03 (n=1):** the only dose tested for this compound, so it cannot be
   pooled by dose as the other small classes were. Pending decision: exclude it from
-  Phase 1 training, or merge it with the related HS-1-151 compound (a distinct
+  Phase 1 training, or merge it with the related COMPOUND_H compound (a distinct
   compound, not simply a different dose).
 - **LLM sourcing:** whether the natural-language reporting module (4.4) calls a
   hosted API or runs a self-hosted local model. A hosted API requires no additional

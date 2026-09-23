@@ -16,12 +16,14 @@ Each pipeline step registers one sub-command here in its own PR
     calibrate      tune the labeling thresholds against the reference timelines (random search)
     export         write the final datasets (segments, per-second labels, per-subject table, windows)
     plot           ethograms per group, bar charts per state, optional overlay review videos
+    all            every step in order, skipping finished work, with a timing summary
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -29,12 +31,13 @@ from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from fishbehavior.calibrate import run_calibration
+from fishbehavior.features import bins_path, features_dir
 from fishbehavior.export import run_export
 from fishbehavior.features import run_features, run_features_qa
 from fishbehavior.labeling import LABELS, STATES, run_labeling
-from fishbehavior.plots import run_plots
 from fishbehavior.priors import EXPECTATIONS_FILE, run_priors
-from fishbehavior.reference import MAPPING_FILE, SLIDE18_FILE, run_reference
+from fishbehavior.labeling import CALIBRATED_FILE
+from fishbehavior.reference import MAPPING_FILE, SLIDE18_FILE, MappingIncomplete, reference_dir, run_reference
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
 from fishbehavior.tracking import run_tracking
@@ -146,6 +149,14 @@ def build_parser() -> argparse.ArgumentParser:
     plot.add_argument("--end", type=float, metavar="S", help="overlay up to this second (default: end of the video)")
     plot.add_argument("--force", action="store_true", help="rewrite overlay videos that already exist")
     plot.set_defaults(handler=run_plot_command)
+
+    run_all = commands.add_parser(
+        "all", help="run every step in order (finished work is skipped) and print a timing summary"
+    )
+    add_subject_options(run_all)
+    run_all.add_argument("--skip-reference", action="store_true",
+                         help="skip reference -> priors -> calibrate -> label again, even with FISH_REFERENCE_PDF set")
+    run_all.set_defaults(handler=run_all_command)
 
     return parser
 
@@ -471,6 +482,8 @@ def run_export_command(settings: Settings, args: argparse.Namespace) -> int:
 
 def run_plot_command(settings: Settings, args: argparse.Namespace) -> int:
     """Draw the figures (and overlays); returns 1 if any overlay failed."""
+    from fishbehavior.plots import run_plots  # here, so other commands start without loading matplotlib
+
     trials = load_trials(settings)
     selected = select_subjects(trials, args.subjects) if args.subjects else None
     result = run_plots(settings, trials, selected, overlay=args.overlay, start_s=args.start, end_s=args.end,
@@ -485,6 +498,103 @@ def run_plot_command(settings: Settings, args: argparse.Namespace) -> int:
     print(f"{'Written to':<11}: {result.out}  (ethogram_<group>.png, bars_<state>.png"
           f"{', overlay/' if args.overlay else ''})")
     return 1 if failed else 0
+
+
+def calibration_is_fresh(settings: Settings, trials) -> bool:
+    """calibrated.yaml is newer than the reference timelines and every subject's feature bins."""
+    calibrated = settings.paths.output_dir / CALIBRATED_FILE
+    if not calibrated.is_file():
+        return False
+    inputs = [reference_dir(settings) / "timelines.csv", reference_dir(settings) / "group_means.csv",
+              *(bins_path(features_dir(settings), s) for s in trials["subject_id"])]
+    made = calibrated.stat().st_mtime
+    return all(not path.is_file() or path.stat().st_mtime <= made for path in inputs)
+
+
+def run_all_command(settings: Settings, args: argparse.Namespace) -> int:
+    """validate -> scene -> track -> features -> label -> [reference -> priors -> calibrate -> label]
+    -> export -> plot, stopping at the first step that fails.
+
+    Every per-subject step skips subjects whose results exist (unless --force), so a second
+    run only redoes what changed. The tuning steps run when FISH_REFERENCE_PDF is set and
+    mapping.yaml is filled in; calibrate is skipped while calibrated.yaml is newer than its inputs.
+    """
+    per_subject = argparse.Namespace(subjects=args.subjects, force=args.force)
+    timings: list[tuple[str, float, str]] = []
+
+    def step(name: str, handler, namespace: argparse.Namespace) -> int:
+        """Run one step's command; returns its exit code (a config error counts as 2)."""
+        print(f"\n=== {name} ===")
+        start = time.perf_counter()
+        try:
+            code = handler(settings, namespace)
+        except MappingIncomplete:
+            raise  # handled by the caller: not a failure, the tuning steps are skipped
+        except ConfigError as error:
+            print(f"Configuration error: {error}")
+            code = 2
+        timings.append((name, time.perf_counter() - start, "ok" if code == 0 else f"FAILED (exit {code})"))
+        return code
+
+    def summary() -> None:
+        print("\n=== timing ===")
+        for name, seconds, status in timings:
+            print(f"  {name:<11} {seconds:>8.1f} s  {status}")
+        print(f"  {'total':<11} {sum(t for _, t, _ in timings):>8.1f} s")
+
+    plan = [("validate", run_validate, argparse.Namespace(strict=False)),
+            ("scene", run_scene_command, per_subject), ("track", run_track, per_subject),
+            ("features", run_features_command, per_subject), ("label", run_label_command, per_subject)]
+    for name, handler, namespace in plan:
+        if step(name, handler, namespace) != 0:
+            summary()
+            print(f"\nStopped at `{name}`: fix the problem above, then run `all` again (finished work is skipped).")
+            return 1
+
+    if args.skip_reference or settings.paths.reference_pdf is None:
+        reason = "--skip-reference" if args.skip_reference else "FISH_REFERENCE_PDF not set"
+        timings.append(("reference", 0.0, f"skipped ({reason}), no calibration"))
+    else:
+        tuning = True
+        try:
+            code = step("reference", run_reference_command, argparse.Namespace(force=False))
+        except MappingIncomplete as error:
+            print(f"{error}")
+            timings.append(("reference", 0.0, "mapping.yaml not filled in: priors / calibrate skipped"))
+            tuning, code = False, 0
+        if code == 1 and timings[-1][0] == "reference":  # first run: the mapping template was just written
+            timings[-1] = ("reference", timings[-1][1], "template written: fill in mapping.yaml, then run `all` again")
+            tuning, code = False, 0
+        if code != 0:
+            summary()
+            print("\nStopped at `reference`: fix the problem above, then run `all` again.")
+            return 1
+        if tuning:
+            trials = load_trials(settings)
+            tuning_plan = [("priors", run_priors_command, argparse.Namespace())]
+            if args.force or not calibration_is_fresh(settings, trials):
+                tuning_plan += [("calibrate", run_calibrate_command, argparse.Namespace()),
+                                ("label again", run_label_command, per_subject)]
+            else:
+                timings.append(("calibrate", 0.0, "skipped (calibrated.yaml is up to date)"))
+            for name, handler, namespace in tuning_plan:
+                if step(name, handler, namespace) != 0:
+                    summary()
+                    print(f"\nStopped at `{name}`: fix the problem above, then run `all` again.")
+                    return 1
+
+    # ponytail: export and plot always rewrite (about 2 min for ~300 subjects); per-subject
+    # freshness would need every upstream table to be rewritten only when its content changes.
+    finish = [("export", run_export_command, argparse.Namespace(clips=False, subjects=None, force=False, labels=None)),
+              ("plot", run_plot_command, argparse.Namespace(subjects=args.subjects, overlay=False, start=0.0,
+                                                           end=None, force=False))]
+    for name, handler, namespace in finish:
+        if step(name, handler, namespace) != 0:
+            summary()
+            print(f"\nStopped at `{name}`: fix the problem above, then run `all` again.")
+            return 1
+    summary()
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
