@@ -222,7 +222,7 @@ def test_scan_videos_parses_names_parts_and_skips_hidden_files(tmp_path):
 
     assert set(videos.index) == {"F_0042.mp4", "copy-M_0001.MP4", "M_0012a.mp4", "M_0012_b.avi",
                                  "M_0013-A.mov", "random.mp4", "F_0002.mkv"}
-    assert videos.loc["F_0042.mp4", ["sex", "subject_num", "part"]].tolist() == ["F", 42, ""]
+    assert videos.loc["F_0042.mp4", ["subject_num", "part"]].tolist() == [42, ""]
     assert videos.loc["copy-M_0001.MP4", "subject_num"] == 1  # prefix tolerated
     assert videos.loc["M_0012a.mp4", "part"] == "a"
     assert videos.loc["M_0012_b.avi", "part"] == "b"
@@ -248,7 +248,7 @@ def test_match_videos_statuses(tmp_path):
 
     assert status == {
         "0001": "matched",
-        "0002": "sex_mismatch",  # file says M, workbook says F
+        "0002": "matched",  # the letter prefix is not a sex code; sex comes from the workbook
         "0003": "matched",  # "F_0003_copy" is not a video name for subject 3 -> unrecognized
         "0004": "matched",  # both parts present
         "0005": "part_mismatch",  # only part a
@@ -256,7 +256,7 @@ def test_match_videos_statuses(tmp_path):
     }
     paths = dict(zip(matched["subject_id"], matched["video_paths"]))
     assert [Path(p).name for p in paths["0004"].split(";")] == ["M_0004a.mp4", "M_0004b.mp4"]  # part order
-    assert paths["0002"] == ""  # doubtful matches get no path
+    assert paths["0005"] == ""  # doubtful matches get no path
     assert issues["Videos without a workbook row"] == ["F_0099.mp4: no workbook row for subject 99"]
     assert sorted(issues["Unrecognized video file names"]) == [
         "F_0003_copy.mp4: name does not match the video name pattern",
