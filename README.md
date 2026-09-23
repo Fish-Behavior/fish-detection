@@ -275,16 +275,17 @@ date, then opens a review page in your browser. The page runs only on this compu
 | Action | How |
 |---|---|
 | Set the waterline | click on the water surface; `↑`/`↓` nudge 1 px (`Shift`: 5 px) |
-| Set the ROI | drag a box around the water the fish can reach (not the reflection below the beaker) |
+| Set the ROI (the crop) | drag a box around the water the fish can reach (not the reflection below the beaker) |
+| Adjust the crop | `C` crop mode: drag edges/corners to resize, inside to move; outside is darkened. Or type exact x0, y0, x1, y1 (and the waterline) under "Current values" |
 | Accept the result | `Enter` (or "Looks right"), which also jumps to the next unchecked video |
 | Undo your changes for a video | `Z` (back to the automatic values) |
 | Real frames / background | `V` (press again for the next frame, or use the slider), `B` |
-| Fix a wrong heatmap | opacity and "hide weak" sliders; `E` eraser to paint away red on glare, light or reflections |
+| Fix a wrong heatmap | opacity and "hide weak" sliders; `E` eraser to remove red on glare, light or reflections; `P` paint (orange) to add water the fish can reach but that has no red |
 | ROI from the heatmap | `F` fits the ROI to the red that is left (padded, top above the waterline) |
 | Browse / hide the red tint | `←`/`→`, `M` |
 
-Erasing only changes the heatmap on the page, to guide "Fit ROI"; what is saved is
-the resulting ROI. Every change is saved immediately to `overrides.yaml`. When you press **Finish** (or
+Painting and erasing only change the heatmap on the page, to guide "Fit ROI"; what
+is saved is the resulting ROI. Every change is saved immediately to `overrides.yaml`. When you press **Finish** (or
 Ctrl+C in the terminal), the corrected videos are updated and `video_check.csv` shows
 which videos are `checked`. The page can be reopened any time; it continues where you
 left off. On Google Colab, or wherever a local page cannot be opened, use
