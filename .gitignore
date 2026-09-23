@@ -9,6 +9,7 @@
 data/
 outputs/
 agents/
+graphify-out/
 # Raw inputs by type, in case they are placed somewhere else in the repo
 *.mp4
 *.avi
@@ -37,3 +38,5 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+CLAUDE.md
+prompts.md
