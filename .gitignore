@@ -8,6 +8,7 @@
 # Default local folders for raw data and everything the pipeline generates
 data/
 outputs/
+agents/
 # Raw inputs by type, in case they are placed somewhere else in the repo
 *.mp4
 *.avi
