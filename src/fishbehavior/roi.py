@@ -19,9 +19,11 @@ background, and `overrides.yaml` replaces automatic values.
 Outputs (in ``<FISH_OUTPUT_DIR>/scene/``, git-ignored):
     <video_stem>.json             video info, waterline_y, roi, confidence, method
     <video_stem>_background.png   the empty-beaker background (grayscale)
+    <video_stem>_activity.png     activity map (white = fish seen there often), for review
     <video_stem>_qa.png           QA image: waterline blue, ROI green, activity faint red
     video_check.csv               one row per video with duration / fps / waterline flags
-    overrides.yaml                (written by a person, optional) manual corrections
+    overrides.yaml                manual corrections and "checked" marks (written by a
+                                  person, or by the `scene-review` page, see review.py)
 
 Coordinates are pixels of the original video; ``roi = [x0, y0, x1, y1]`` with x1/y1
 exclusive, so ``frame[y0:y1, x0:x1]`` is the ROI.
@@ -49,7 +51,8 @@ log = logging.getLogger(__name__)
 
 OVERRIDES_FILE = "overrides.yaml"
 VIDEO_CHECK_FILE = "video_check.csv"
-OVERRIDE_KEYS = {"waterline_y", "roi"}
+GEOMETRY_KEYS = ("waterline_y", "roi")  # values that replace automatic results
+OVERRIDE_KEYS = {*GEOMETRY_KEYS, "checked"}  # checked: a person confirmed this video
 
 # Flag names used in the JSON files and video_check.csv (';'-joined there).
 FLAG_LOW_CONFIDENCE = "low_waterline_confidence"
@@ -149,6 +152,8 @@ class SceneDetection:
     roi: Box
     method: str  # "auto" or "override"
     overrides: dict[str, Any]
+    base_roi: Box  # padded activity box before the waterline raises its top (review preview)
+    auto: dict[str, Any]  # automatic waterline_y / roi, kept even when overridden (review "reset")
     flags: list[str] = field(default_factory=list)
 
 
@@ -182,6 +187,8 @@ def detect_scene(video_path: Path, params: dict[str, Any], override: dict[str, A
     waterline, confidence = find_waterline(
         background, search_box, params["waterline_search"], float(params["waterline_central_fraction"])
     )
+    base_roi = pad_box(search_box, info.width, info.height, float(params["roi_padding_fraction"]))
+    auto = {"waterline_y": int(waterline), "roi": list(raise_roi_top(base_roi, waterline, info.height, params))}
     if "waterline_y" in override:
         waterline = int(override["waterline_y"])  # a person checked it; confidence is kept for the record
     elif confidence < float(params["min_waterline_confidence"]):
@@ -190,10 +197,7 @@ def detect_scene(video_path: Path, params: dict[str, Any], override: dict[str, A
     if "roi" in override:
         roi = tuple(int(v) for v in override["roi"])  # taken as-is: the person drew the final box
     else:
-        x0, y0, x1, y1 = pad_box(search_box, info.width, info.height, float(params["roi_padding_fraction"]))
-        # Raise the top to just above the waterline so a fish breaking the surface is inside.
-        margin = round(float(params["waterline_margin_fraction"]) * info.height)
-        roi = (x0, max(0, min(y0, waterline - margin)), x1, y1)
+        roi = raise_roi_top(base_roi, waterline, info.height, params)
 
     return SceneDetection(
         info=info,
@@ -205,8 +209,17 @@ def detect_scene(video_path: Path, params: dict[str, Any], override: dict[str, A
         roi=roi,  # type: ignore[arg-type]
         method="override" if override else "auto",
         overrides=dict(override),
+        base_roi=base_roi,
+        auto=auto,
         flags=flags,
     )
+
+
+def raise_roi_top(box: Box, waterline: int, height: int, params: dict[str, Any]) -> Box:
+    """Raise the box top to just above the waterline so a fish breaking the surface is inside."""
+    margin = round(float(params["waterline_margin_fraction"]) * height)
+    x0, y0, x1, y1 = box
+    return x0, max(0, min(y0, waterline - margin)), x1, y1
 
 
 def draw_qa(detection: SceneDetection) -> np.ndarray:
@@ -247,25 +260,42 @@ def draw_qa(detection: SceneDetection) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def load_overrides(scene_dir: Path) -> dict[str, dict[str, Any]]:
-    """Read `<scene_dir>/overrides.yaml` ({video file name: {waterline_y, roi}}); {} if absent."""
-    path = scene_dir / OVERRIDES_FILE
-    if not path.is_file():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+def validate_overrides(data: Any, source: str) -> dict[str, dict[str, Any]]:
+    """Check an overrides mapping ({video file name: entry}); raise ConfigError naming `source`.
+
+    An entry holds waterline_y (int), roi ([x0, y0, x1, y1] ints) and/or checked (true/false).
+    Shared by load_overrides and the review page's save, so both accept exactly the same file.
+    """
     if not isinstance(data, dict):
-        raise ConfigError(f"{path} must map video file names to settings, e.g. 'F_0042.mp4: {{waterline_y: 120}}'")
+        raise ConfigError(f"{source} must map video file names to settings, e.g. 'F_0042.mp4: {{waterline_y: 120}}'")
     overrides: dict[str, dict[str, Any]] = {}
     for name, entry in data.items():
         if not isinstance(entry, dict) or not entry or set(entry) - OVERRIDE_KEYS:
-            raise ConfigError(f"{path}: entry {name!r} must contain only waterline_y and/or roi")
-        if "waterline_y" in entry and not isinstance(entry["waterline_y"], int):
-            raise ConfigError(f"{path}: {name}: waterline_y must be a whole number of pixels")
+            raise ConfigError(f"{source}: entry {name!r} must contain only waterline_y, roi and/or checked")
+        # bool is a subclass of int in Python, so exclude it explicitly.
+        if "waterline_y" in entry and (not isinstance(entry["waterline_y"], int) or isinstance(entry["waterline_y"], bool)):
+            raise ConfigError(f"{source}: {name}: waterline_y must be a whole number of pixels")
         roi = entry.get("roi")
-        if roi is not None and not (isinstance(roi, list) and len(roi) == 4 and all(isinstance(v, int) for v in roi)):
-            raise ConfigError(f"{path}: {name}: roi must be [x0, y0, x1, y1] in whole pixels")
+        if roi is not None and not (isinstance(roi, list) and len(roi) == 4
+                                    and all(isinstance(v, int) and not isinstance(v, bool) for v in roi)):
+            raise ConfigError(f"{source}: {name}: roi must be [x0, y0, x1, y1] in whole pixels")
+        if "checked" in entry and not isinstance(entry["checked"], bool):
+            raise ConfigError(f"{source}: {name}: checked must be true or false")
         overrides[str(name)] = entry
     return overrides
+
+
+def load_overrides(scene_dir: Path) -> dict[str, dict[str, Any]]:
+    """Read `<scene_dir>/overrides.yaml` ({video file name: entry}); {} if absent."""
+    path = scene_dir / OVERRIDES_FILE
+    if not path.is_file():
+        return {}
+    return validate_overrides(yaml.safe_load(path.read_text(encoding="utf-8")) or {}, str(path))
+
+
+def geometry_of(entry: dict[str, Any]) -> dict[str, Any]:
+    """The part of an override entry that changes results (everything except `checked`)."""
+    return {key: entry[key] for key in GEOMETRY_KEYS if key in entry}
 
 
 def override_for(overrides: dict[str, dict[str, Any]], video_path: Path) -> dict[str, Any]:
@@ -304,8 +334,19 @@ def _load_cached(job: SceneJob) -> dict[str, Any] | None:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None  # damaged file: redo it
-    # An edited overrides.yaml must take effect without --force.
-    return record if record.get("overrides", {}) == job.override else None
+    if "auto" not in record:
+        return None  # written before the review data existed: redo it once to add it
+    # An edited waterline/roi must take effect without --force.
+    return record if record.get("overrides", {}) == geometry_of(job.override) else None
+
+
+def _update_checked(record: dict[str, Any], job: SceneJob) -> dict[str, Any]:
+    """Store a changed `checked` mark in a cached JSON (no need to redo the analysis for it)."""
+    checked = bool(job.override.get("checked", False))
+    if record.get("checked", False) != checked:
+        record = {**record, "checked": checked}
+        json_path(job.scene_dir, job.video_path).write_text(json.dumps(record, indent=2), encoding="utf-8")
+    return record
 
 
 def process_video(job: SceneJob) -> dict[str, Any]:
@@ -315,16 +356,20 @@ def process_video(job: SceneJob) -> dict[str, Any]:
     """
     cached = _load_cached(job)
     if cached is not None:
-        return {**cached, "cached": True}
+        return {**_update_checked(cached, job), "cached": True}
     try:
-        detection = detect_scene(job.video_path, job.params, job.override)
+        detection = detect_scene(job.video_path, job.params, geometry_of(job.override))
     except Exception as error:  # noqa: BLE001 - reported per video in the summary and video_check.csv
         log.error("%s: %s", job.video_path.name, error)
         return {"subject_id": job.subject_id, "file": job.video_path.name, "error": str(error)}
 
     stem = job.video_path.stem
     background_name, qa_name = f"{stem}_background.png", f"{stem}_qa.png"
+    activity_name = f"{stem}_activity.png"
     cv2.imwrite(str(job.scene_dir / background_name), detection.background)
+    # Activity fraction scaled so the most active pixel is white (shown as a tint when reviewing).
+    peak = float(detection.activity.max()) or 1.0
+    cv2.imwrite(str(job.scene_dir / activity_name), (detection.activity / peak * 255).astype(np.uint8))
     cv2.imwrite(str(job.scene_dir / qa_name), draw_qa(detection))
     record = {
         "subject_id": job.subject_id,
@@ -334,10 +379,14 @@ def process_video(job: SceneJob) -> dict[str, Any]:
         "waterline_confidence": detection.waterline_confidence,
         "roi": list(detection.roi),
         "activity_box": list(detection.activity_box) if detection.activity_box else None,
+        "base_roi": list(detection.base_roi),
+        "auto": detection.auto,
         "method": detection.method,
         "overrides": detection.overrides,
+        "checked": bool(job.override.get("checked", False)),
         "flags": detection.flags,
         "background_image": background_name,
+        "activity_image": activity_name,
         "qa_image": qa_name,
     }
     json_path(job.scene_dir, job.video_path).write_text(json.dumps(record, indent=2), encoding="utf-8")
@@ -392,8 +441,11 @@ def video_check(records: list[dict[str, Any]], params: dict[str, Any]) -> pd.Dat
             "width": video.get("width"),
             "height": video.get("height"),
             "flags": flags,
+            # True once a person confirmed or corrected this video (scene-review / overrides.yaml).
+            "checked": bool(record.get("checked", False)),
         })
-    table = pd.DataFrame(rows, columns=["subject_id", "file", "fps", "frames", "duration_s", "width", "height", "flags"])
+    columns = ["subject_id", "file", "fps", "frames", "duration_s", "width", "height", "flags", "checked"]
+    table = pd.DataFrame(rows, columns=columns)
 
     expected = float(params["expected_duration_s"])
     tolerance = float(params["duration_tolerance"])

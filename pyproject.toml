@@ -31,8 +31,8 @@ fishbehavior = "fishbehavior.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Ship the default settings file inside the package so it works after `pip install`.
-fishbehavior = ["default_config.yaml"]
+# Ship the default settings file and the review page template inside the package so they work after `pip install`.
+fishbehavior = ["default_config.yaml", "review_page.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

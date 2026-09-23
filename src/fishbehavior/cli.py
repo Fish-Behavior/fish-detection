@@ -6,6 +6,7 @@ Each pipeline step registers one sub-command here in its own PR
     check-config   show what the pipeline will read, to verify a new `.env`
     validate       clean the trial workbook and match every trial to its video(s)
     scene          per video: empty-beaker background, waterline and fish ROI (+ QA images)
+    scene-review   browser page to check / correct waterlines and ROIs (writes overrides.yaml)
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from typing import Sequence
 from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
-from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, run_scene
+from fishbehavior.review import REVIEW_FILE, collect_items, make_server, render_page, serve_review
+from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -51,6 +53,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_subject_options(scene)
     scene.set_defaults(handler=run_scene_command)
+
+    review = commands.add_parser(
+        "scene-review", help="open a page to check and correct each video's waterline and ROI"
+    )
+    review.add_argument("--subjects", nargs="+", metavar="ID", help="only these subjects (default: all)")
+    review.add_argument("--port", type=int, default=8765, help="local port for the page (default: 8765)")
+    review.add_argument(
+        "--no-serve", action="store_true",
+        help="only write scene/review.html (e.g. on Colab); save with its Download button",
+    )
+    review.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
+    review.set_defaults(handler=run_scene_review)
 
     return parser
 
@@ -142,6 +156,43 @@ def run_scene_command(settings: Settings, args: argparse.Namespace) -> int:
         print(f"{title:<25}: {len(hits)}" + (f"  {details}" if details else ""))
     print(f"{'Written to':<25}: {result.scene_dir}  (<video>.json, _background.png, _qa.png, video_check.csv)")
     return 1 if failed else 0
+
+
+def run_scene_review(settings: Settings, args: argparse.Namespace) -> int:
+    """Bring scene results up to date, open the review page, then apply the saved overrides."""
+    trials = load_trials(settings)
+    selected = select_subjects(trials, args.subjects)
+    before = run_scene(settings, trials, selected)  # cached videos are instant; new ones are analysed
+    scene_dir = before.scene_dir
+    items, missing = collect_items(scene_dir, selected)
+    if missing:
+        print(f"No scene result (failed) for {len(missing)} video(s): {', '.join(missing)}")
+    if not items:
+        print("Nothing to review.")
+        return 1 if missing else 0
+
+    page = render_page(items, load_overrides(scene_dir), settings.params["scene"], serve=not args.no_serve)
+    if args.no_serve:
+        path = scene_dir / REVIEW_FILE
+        path.write_text(page, encoding="utf-8")
+        print(f"Review page written to {path}. Open it in a browser, then put the downloaded "
+              f"overrides.yaml in {scene_dir} and run `python -m fishbehavior scene`.")
+        return 0
+
+    sizes = {item["file"]: (item["width"], item["height"]) for item in items}
+    try:
+        server = make_server(scene_dir, page, sizes, args.port)
+    except OSError as error:
+        raise ConfigError(f"cannot start the review page on port {args.port} ({error}); try --port 8766") from None
+    serve_review(server, open_browser=not args.no_browser)
+
+    # Apply what was saved: only videos whose waterline/ROI changed are recomputed.
+    after = run_scene(settings, trials, selected)
+    checked = sum(bool(r.get("checked")) for r in after.records)
+    overridden = sum(r.get("method") == "override" for r in after.records)
+    print(f"Applied    : {checked} of {len(after.records)} videos checked, {overridden} with corrections")
+    print(f"Written to : {scene_dir}  (overrides.yaml, <video>.json, video_check.csv)")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

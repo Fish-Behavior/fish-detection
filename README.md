@@ -61,6 +61,8 @@ fish-detection/
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
 │   ├── default_config.yaml   # default, data-independent parameters
+│   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
+│   ├── review_page.html      # the review page template (self-contained, no external files)
 │   ├── roi.py                # per video: empty-beaker background, waterline, fish region (ROI), QA image
 │   └── video.py              # video timing (fps, frames, duration) and frame reading
 └── tests/                    # automated tests (synthetic data only, never real trials)
@@ -216,12 +218,14 @@ Videos are processed in `FISH_WORKERS` parallel processes. Results go to
   `waterline_confidence`, `roi` as `[x0, y0, x1, y1]` in original pixels (x1/y1
   exclusive), `method` (`auto` or `override`), and flags;
 - `<video>_background.png`: the empty-beaker background;
+- `<video>_activity.png`: where the fish moved (white = often), used by the review page;
 - `<video>_qa.png`: the check image (below);
 - `video_check.csv`: one row per video (`subject_id, file, fps, frames, duration_s,
   width, height, flags`). Flags: `duration` (the subject's parts together differ from
   `scene.expected_duration_s` by more than `scene.duration_tolerance`), `fps_mismatch`
   (parts of one subject have different frame rates), `low_waterline_confidence`,
-  `no_activity` (nothing moved; the ROI falls back to the whole frame), `error`.
+  `no_activity` (nothing moved; the ROI falls back to the whole frame), `error`; plus a
+  `checked` column that is `True` once a person confirmed or corrected the video.
 
 The command prints how many videos were done or taken from the cache, and lists
 the low-confidence waterlines and the duration/fps flags. Existing results are reused
@@ -241,7 +245,43 @@ and ROI. On the image:
 If the background still shows a fish-shaped ghost, the fish stayed in one place for
 more than half of the video. Look at the QA images of every flagged video first.
 
-**Correcting a result (`overrides.yaml`).** Create `<FISH_OUTPUT_DIR>/scene/overrides.yaml`
+**3. Review and correct scenes in the browser (recommended)**
+
+```bash
+python -m fishbehavior scene-review                 # all matched subjects
+python -m fishbehavior scene-review --subjects 347  # only some
+```
+
+Beakers, zoom, cropping and camera height differ between recordings, so every automatic
+result should be looked at once. `scene-review` first brings the scene results up to
+date, then opens a review page in your browser. The page runs only on this computer
+(127.0.0.1) and uses no internet. It shows one video at a time:
+
+- the empty-beaker background with a **red tint where the fish swam**, which marks the
+  water it can reach;
+- the waterline (blue) and ROI (green), dashed while automatic and solid once set by hand;
+- the cursor position in **original video pixels** plus a magnifier, so you can read
+  the exact row of the surface without any zoom arithmetic;
+- hints (listed first) for results that look wrong: a weak waterline edge, a waterline
+  at the very top of the frame, an ROI reaching the top edge, or a fish that hardly moved.
+
+| Action | How |
+|---|---|
+| Set the waterline | click on the water surface; `↑`/`↓` nudge 1 px (`Shift`: 5 px) |
+| Set the ROI | drag a box around the water the fish can reach (not the reflection below the beaker) |
+| Accept the result | `Enter` (or "Looks right"), which also jumps to the next unchecked video |
+| Undo your changes for a video | `Z` (back to the automatic values) |
+| Browse / hide the red tint | `←`/`→`, `M` |
+
+Every change is saved immediately to `overrides.yaml`. When you press **Finish** (or
+Ctrl+C in the terminal), the corrected videos are updated and `video_check.csv` shows
+which videos are `checked`. The page can be reopened any time; it continues where you
+left off. On Google Colab, or wherever a local page cannot be opened, use
+`scene-review --no-serve`: it writes `scene/review.html`, whose **Download
+overrides.yaml** button gives the file to copy into the scene folder before running
+`scene` again.
+
+**Correcting a result by hand (`overrides.yaml`).** Create `<FISH_OUTPUT_DIR>/scene/overrides.yaml`
 (it stays in the git-ignored output folder) with an entry per video *file name*.
 Values are pixels of the original video (the QA header shows the current values; divide
 positions measured on an enlarged QA image by the zoom factor):
@@ -252,6 +292,8 @@ F_0042.mp4:
   roi: [30, 95, 290, 215]     # x0, y0, x1, y1 (x1/y1 exclusive)
 M_0012a.mp4:
   waterline_y: 121            # only the waterline; the ROI top is re-derived from it
+M_0012b.mp4:
+  checked: true               # looked at, the automatic result is fine
 ```
 
 Then run `scene` again. Videos whose override changed are redone automatically, and
