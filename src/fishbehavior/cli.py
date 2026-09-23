@@ -15,6 +15,7 @@ Each pipeline step registers one sub-command here in its own PR
     priors         sanity checks: video labels vs workbook (NTT hints) and reference group means
     calibrate      tune the labeling thresholds against the reference timelines (random search)
     export         write the final datasets (segments, per-second labels, per-subject table, windows)
+    plot           ethograms per group, bar charts per state, optional overlay review videos
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from fishbehavior.calibrate import run_calibration
 from fishbehavior.export import run_export
 from fishbehavior.features import run_features, run_features_qa
 from fishbehavior.labeling import LABELS, STATES, run_labeling
+from fishbehavior.plots import run_plots
 from fishbehavior.priors import EXPECTATIONS_FILE, run_priors
 from fishbehavior.reference import MAPPING_FILE, SLIDE18_FILE, run_reference
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
@@ -133,6 +135,17 @@ def build_parser() -> argparse.ArgumentParser:
         "written to datasets_<DIR name>/",
     )
     export.set_defaults(handler=run_export_command)
+
+    plot = commands.add_parser(
+        "plot", help="ethograms per group, bar charts per state, and (--overlay) review videos"
+    )
+    plot.add_argument("--subjects", nargs="+", metavar="ID",
+                      help="only the ethograms of these subjects' groups; needed for --overlay")
+    plot.add_argument("--overlay", action="store_true", help="write a review video per subject (plots/overlay/)")
+    plot.add_argument("--start", type=float, default=0.0, metavar="S", help="overlay from this second (default 0)")
+    plot.add_argument("--end", type=float, metavar="S", help="overlay up to this second (default: end of the video)")
+    plot.add_argument("--force", action="store_true", help="rewrite overlay videos that already exist")
+    plot.set_defaults(handler=run_plot_command)
 
     return parser
 
@@ -453,6 +466,24 @@ def run_export_command(settings: Settings, args: argparse.Namespace) -> int:
         print(f"{'  failed':<11}: {record['subject_id']}: {record['error']}")
     print(f"{'Written to':<11}: {result.out}  (segments.csv, per_second_labels.csv, behavior_dataset.csv/.xlsx, "
           f"behavior_windows.csv{', clips/' if args.clips else ''})")
+    return 1 if failed else 0
+
+
+def run_plot_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Draw the figures (and overlays); returns 1 if any overlay failed."""
+    trials = load_trials(settings)
+    selected = select_subjects(trials, args.subjects) if args.subjects else None
+    result = run_plots(settings, trials, selected, overlay=args.overlay, start_s=args.start, end_s=args.end,
+                       force=args.force)
+    print(f"{'Ethograms':<11}: {len(result.ethograms)} group(s)")
+    print(f"{'Bar charts':<11}: {len(result.bars)} (one per state)")
+    failed = [r for r in result.overlays if "error" in r]
+    for record in result.overlays:
+        status = (f"failed: {record['error']}" if "error" in record else "cached (use --force)" if record.get("cached")
+                  else f"{record['frames']} frames")
+        print(f"{'  overlay':<11}: {record['subject_id']}: {status}  {record['path'].name}")
+    print(f"{'Written to':<11}: {result.out}  (ethogram_<group>.png, bars_<state>.png"
+          f"{', overlay/' if args.overlay else ''})")
     return 1 if failed else 0
 
 

@@ -311,3 +311,12 @@ export:
   # ... and this many frames per window, spread evenly (every frame of a 20-min video
   # would be ~150 MB per subject).
   clip_frames: 8
+
+plots:
+  # Resolution of the saved figures (dots per inch).
+  dpi: 150
+  # Overlay review video (plot --overlay): playback speed, 1 = real time, 4 = four times
+  # faster (every 4th frame is kept, so the file stays small), 0.5 = slow motion.
+  overlay_speed: 4.0
+  # Height of the timeline bar under the picture, as a fraction of the frame height.
+  timeline_fraction: 0.08

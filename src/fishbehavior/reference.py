@@ -413,6 +413,12 @@ INK, AXIS = (30, 30, 30), (120, 120, 120)
 UNKNOWN_RGB = (0, 0, 0)  # drawn for pixels that matched no palette color
 
 
+def label_colors(params: dict[str, Any]) -> dict[str, tuple[int, int, int]]:
+    """RGB per label for every drawing (digitize check, plots): the figures' legend palette
+    (`reference.palette`, the one place colors are defined) plus black for unknown."""
+    return {**{name: tuple(int(c) for c in params["palette"][name]) for name in PALETTE_NAMES}, UNKNOWN: UNKNOWN_RGB}
+
+
 def put_text(canvas: np.ndarray, text: str, x: float, y: float, scale: float = 0.4,
              align: str = "left", bold: bool = False) -> None:
     """Text with its baseline at y; align left / center / right at x."""
@@ -439,7 +445,7 @@ def draw_check(images: dict[int, np.ndarray], digitized: list[dict[str, Any]], p
     left to right, colored by state, one titled panel per group, legend at the bottom.
     """
     seconds = int(params["axis_seconds"])
-    colors = np.array([params["palette"][name] for name in PALETTE_NAMES] + [UNKNOWN_RGB], np.uint8)
+    colors = np.array([label_colors(params)[name] for name in LABEL_NAMES], np.uint8)
     left, right = PAD, PAD + PLOT_W + 2 * PAD + LABEL_W  # x of the original crop / the redrawn plot
     width = right + PLOT_W + PAD
     header, legend_h = 56, 64

@@ -67,6 +67,7 @@ fish-detection/
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
+│   ├── plots.py              # ethograms per group, bar charts per state, overlay review videos
 │   ├── priors.py             # sanity checks: video labels vs workbook (NTT hints) and reference group means
 │   ├── reference.py          # digitizes the reference ethogram figures into approximate per-subject timelines
 │   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
@@ -82,7 +83,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Plots | `plots.py` | ethogram charts, summary bar charts, and review videos |
 | Colab and docs | `notebooks/`, `docs/` | Google Colab quick start and full usage guide |
 
 Everything the pipeline generates is written to the output folder (`outputs/` by
@@ -760,6 +760,34 @@ subjects whose clip file already exists. Everything goes to `<FISH_OUTPUT_DIR>/d
   20-minute video would be about 150 MB per subject. Even with 8 frames per window, expect
   roughly 15 MB per subject.
 
+**10. Plots**
+
+```bash
+python -m fishbehavior plot                                     # ethograms for every group + bar charts
+python -m fishbehavior plot --subjects 42                       # only the ethogram of subject 42's group
+python -m fishbehavior plot --subjects 42 --overlay             # + review video of the whole recording
+python -m fishbehavior plot --subjects 42 --overlay --start 600 --end 720   # a 2-minute stretch
+```
+
+Needs `label` (and `track` + `scene` for `--overlay`). Everything goes to
+`<FISH_OUTPUT_DIR>/plots/`. The colors are the reference legend colors (`reference.palette`),
+so our figures and the slides read the same way.
+
+- `ethogram_<group>.png`: one per workbook group (compound + concentration), in the style of
+  the reference ethograms. One row per subject, highest subject number on top; x = 0 to
+  `reference.axis_seconds` (1200); white = untracked. When any subject of the group has a
+  digitized reference row (`reference`), a second panel shows the reference rows lined up
+  with ours ("(no ref)" marks subjects without one).
+- `bars_<state>.png`: one per state, like the summary bar charts. Seconds in that state per
+  group: mean ± SEM, with every subject as a dot.
+- `overlay/<subject>_<start>-<end>s.mp4` (with `--overlay`): the original video with the ROI
+  (green), waterline (blue), fitted body ellipse (yellow), track point (red), and the current
+  second, label and confidence at the top. A timeline bar of the whole recording, with a moving
+  cursor, sits under the picture. `--start`/`--end` pick a stretch in seconds on the joined
+  timeline, so a split recording plays on from part a into part b.
+  `plots.overlay_speed` (4) sets the playback speed; above 1, every n-th frame is kept, so the
+  file stays small. Existing videos are kept unless `--force`.
+
 The
 full pipeline will clean and validate the trial database, match each trial to its
 video, extract kinematic features, discover behavior states, train and evaluate
@@ -825,6 +853,15 @@ stretch goal or subsequent milestone.
 
 ### Modeling
 
+- **LORR (listing / loss of righting) is not detected yet**: it is about 0% of the labeled
+	time, before and after calibration. In the seconds the reference marks as LORR, the fish lies
+	rolled or curled, low in the dish, with its body axis nearly horizontal (median tilt about 9°,
+	the same as a freezing fish). The tilt rule never fires, so these seconds are labeled
+	`freeze_drift`. A tested roll / belly-up cue (brightness and color of the body above vs
+	below its axis, eye position, outline fill) did not separate LORR from freezing consistently
+	across fish. Only a few reference fish show LORR. LORR is left to the behavior classifier
+	trained on `behavior_windows.csv` / clips with the reference LORR seconds, and
+	`lorr_*` calibration values carry no meaning until then.
 - No frame-level behavior annotations exist, so Phase 1 behavior-state extraction
 	uses tracking, rules, and unsupervised methods rather than a supervised video
 	classifier.

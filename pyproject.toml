@@ -22,6 +22,7 @@ dependencies = [
     "scikit-learn>=1.3",   # Gaussian mixture that splits swimming into controlled vs erratic (label)
     "hmmlearn>=0.3",       # optional hidden Markov swim split, labeling.swim_split: hmm (label)
     "pymupdf>=1.24.3",     # extracts the ethogram images from the reference PDF (reference)
+    "matplotlib>=3.7",     # ethograms and bar charts (plot)
 ]
 
 [project.optional-dependencies]
