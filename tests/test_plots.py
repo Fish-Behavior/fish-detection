@@ -4,7 +4,6 @@ import json
 
 import cv2
 import matplotlib
-import numpy as np
 import pandas as pd
 import pytest
 import yaml

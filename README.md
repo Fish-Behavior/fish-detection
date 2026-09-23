@@ -1,5 +1,7 @@
 # Zebrafish Drug-Response Detection System
 
+[![CI](https://github.com/Fish-Behavior/fish-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/Fish-Behavior/fish-detection/actions/workflows/ci.yml)
+
 Advisor: Dr. Ashish Kharel
 
 Collaborator: Dr. Scott Hall
@@ -32,9 +34,9 @@ Movement, Freezing/Drift, Listing/LORR, and Surface Breach.
 
 ## Current Scope and Status
 
-Scoping is complete and Phase 1 is ready to begin. The committed near-term scope
-is offline analysis of recorded video. Phase 2 is planned for live camera
-integration, streaming inference, and real-time narration.
+Scoping is complete and the first Phase 1 stage, behavior labeling, is done. The
+committed near-term scope is offline analysis of recorded video. Phase 2 is planned
+for live camera integration, streaming inference, and real-time narration.
 
 See the complete scientific and technical scope in
 [docs/zebrafish_drug_detection_scope.md](docs/zebrafish_drug_detection_scope.md).
@@ -42,10 +44,11 @@ See the complete scientific and technical scope in
 The behavior-labeling pipeline (`fishbehavior` package) is complete: workbook catalog,
 scene setup, tracking, movement features, behavior labeling, reference digitizing, sanity
 checks and calibration, dataset export and plots, plus one `all` command that runs everything
-and a Google Colab notebook. **Start with the user guide:
-[docs/instruction.md](docs/instruction.md)** (setup on every platform, every
-command, how the states are decided, calibration and its limits, troubleshooting). The
-classifier, backend, and frontend are not yet implemented.
+a Google Colab notebook, and a local `live` page that shows one video going through every step.
+**Start with the user guide: [docs/instruction.md](docs/instruction.md)** (setup on every
+platform, every command, how the states are decided, calibration and its limits,
+troubleshooting). The compound classifier, anomaly detection, and reporting are not yet
+implemented.
 
 ## Project Structure
 
@@ -53,6 +56,7 @@ classifier, backend, and frontend are not yet implemented.
 fish-detection/
 ├── .env.example              # template for your local .env (data paths); copy it, never commit .env
 ├── .gitignore                # keeps data, outputs, and .env out of Git
+├── .github/workflows/ci.yml  # pull-request checks: privacy/lint, tests on 3 OSes, pages, installed wheel
 ├── pyproject.toml            # package definition and dependencies
 ├── requirements.txt          # one-line install: the package + developer tools
 ├── docs/
@@ -84,8 +88,10 @@ fish-detection/
 │   └── video.py              # video timing (fps, frames, duration) and frame reading
 └── tests/                    # automated tests (synthetic data only, never real trials)
     ├── synthetic.py          # draws synthetic beaker/fish videos for the tests
+    ├── test_<module>.py      # one file per module above
     ├── test_all.py           # `all` end to end on a tiny synthetic project (workbook, 20 s video, reference PDF)
     └── test_live.py          # live view: labels grow while reading and end equal to the batch labels; the server
+```
 
 Everything the pipeline generates is written to the output folder (`outputs/` by
 default), which is ignored by Git.
@@ -438,7 +444,7 @@ detected frames, and the time between rows comes from the track's `time_s`, so t
 settings work at any frame rate, resolution or `tracking.frame_stride`. x and y are
 smoothed with a Savitzky-Golay filter over `features.smooth_s` seconds (default 0.2)
 before speeds are computed; untracked frames stay empty. All `features` settings are
-starting values, to be calibrated in a later step.
+starting values (`calibrate` tunes the labeling thresholds, not these).
 
 Results go to `<FISH_OUTPUT_DIR>/features/`:
 
@@ -850,11 +856,6 @@ that multiple of real time for demos. The labels use the pooled swim model from 
 so. Uploads go to `live/uploads/` (up to `live.max_upload_mb`, 4096 MB). Settings are in `live:`.
 On Colab, see the last cells of the notebook.
 
-The
-full pipeline will clean and validate the trial database, match each trial to its
-video, extract kinematic features, discover behavior states, train and evaluate
-the classifier, and run anomaly detection.
-
 ### Generate a Report
 
 The future reporting step will combine the behavior log, classifier probabilities,
@@ -951,6 +952,18 @@ stretch goal or subsequent milestone.
 
 Use a feature branch for every change and submit work through a pull request. Do
 not commit or push directly to `master`.
+
+Every pull request into `master` is checked by [CI](.github/workflows/ci.yml). The jobs run
+in parallel on GitHub's machines, against the PR merged with the current `master`, with
+read-only access, so nothing reaches `master` until the PR is merged:
+
+| Job | What it checks |
+|---|---|
+| Privacy and lint | no data, outputs, or `.env` tracked; notebooks saved without outputs; `ruff` finds no unused or undefined names |
+| Tests (backend) | the full `pytest` suite on Linux, macOS, and Windows, with Python 3.10 and 3.13 |
+| Pages (frontend) | the live and scene-review pages: their JavaScript parses and they load nothing from the internet |
+| Installed package (production) | the wheel builds, installs (not editable), and runs `all`, `live`, and `scene-review` end to end |
+| CI passed | green only when all of the above are; make it the required check for `master` |
 
 The complete workflow, including branch creation, review, commits, pushes, PRs,
 branch synchronization, and cleanup, is documented in

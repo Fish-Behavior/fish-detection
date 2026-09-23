@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from fishbehavior import video as video_module
-from fishbehavior.video import VideoError, iter_frames, probe, sample_frames
+from fishbehavior.video import VideoError, iter_frames, iter_sampled_frames, probe
 from synthetic import make_video
 
 
@@ -91,12 +91,12 @@ def test_iter_frames_rejects_bad_arguments(tmp_path):
         next(iter_frames(truth["path"], scale=0))
 
 
-def test_sample_frames_spreads_over_the_whole_video(tmp_path):
+def test_sampled_frames_spreads_over_the_whole_video(tmp_path):
     # A fish moving left to right at constant speed: its x in a sampled frame tells the time.
     truth = make_video(tmp_path / "clip.avi", duration_s=2.0, reflection=False,
                        fish_path=lambda t: (40 + 120 * t, 150, 0))
 
-    frames = sample_frames(truth["path"], 5)
+    frames = np.stack(list(iter_sampled_frames(truth["path"], 5)))
 
     assert frames.shape == (5, 240, 320)
     fish_x = [np.nonzero(frame < 110)[1].mean() for frame in frames]  # centre of the dark pixels
@@ -104,7 +104,7 @@ def test_sample_frames_spreads_over_the_whole_video(tmp_path):
     assert fish_x == pytest.approx(expected, abs=3)
 
 
-def test_sample_frames_never_returns_more_than_the_video_has(tmp_path):
+def test_sampled_frames_never_returns_more_than_the_video_has(tmp_path):
     truth = make_video(tmp_path / "clip.avi", duration_s=0.2)  # 6 frames
 
-    assert len(sample_frames(truth["path"], 100)) == truth["frame_count"]
+    assert len(list(iter_sampled_frames(truth["path"], 100))) == truth["frame_count"]

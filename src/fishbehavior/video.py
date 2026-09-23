@@ -149,8 +149,3 @@ def iter_sampled_frames(path: str | Path, n: int, gray: bool = True) -> Iterator
         raise VideoError(f"{info.path}: none of the {len(indices)} sampled frames could be read")
     if read < len(indices):
         log.debug("%s: %d of %d sampled frames unreadable", info.path.name, len(indices) - read, len(indices))
-
-
-def sample_frames(path: str | Path, n: int, gray: bool = True) -> np.ndarray:
-    """Up to `n` evenly spread frames stacked into one array (see iter_sampled_frames)."""
-    return np.stack(list(iter_sampled_frames(path, n, gray)))

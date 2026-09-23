@@ -310,6 +310,9 @@ fast videos:
 - Before committing, run `pytest`, then check `git status` and `git diff --cached` for anything
   from `data/`, `outputs/`, `.env`, real IDs or compound names.
 - The notebook is saved without outputs. Clear outputs before committing it again.
+- CI checks every pull request for tracked data files, `.env` and notebook outputs
+  ([docs/how-to-start.md](how-to-start.md), section 6). It cannot recognize real IDs, compound
+  names or fitted numbers, so checking for those is still up to you.
 
 ## 10. Troubleshooting
 

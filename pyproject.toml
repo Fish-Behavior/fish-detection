@@ -9,7 +9,7 @@ description = "Automated zebrafish behavior-state labeling pipeline (tracking ->
 readme = "README.md"
 # 3.10+ keeps the package usable on lab machines and on Google Colab.
 requires-python = ">=3.10"
-# Runtime dependencies. Each pipeline step adds only what it needs, in its own PR.
+# Runtime dependencies; each comment names the step that needs it.
 dependencies = [
     "python-dotenv>=1.0",  # reads the local .env file with data paths
     "PyYAML>=6.0",         # reads the tunable settings file (default_config.yaml)

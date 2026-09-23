@@ -96,7 +96,7 @@ def fill_mapping(path, drop_one=False):
             continue
         entry["group"] = f"G{entry['page']}{entry['panel']}"
         ids = [f"F_{next_id + k:04d}" for k in range(entry["rows"])]
-        for row, subject in enumerate(ids):
+        for row in range(len(ids)):
             where[f"{next_id + row:04d}"] = (entry["page"], entry["panel"], row)
         next_id += entry["rows"]
         entry["subject_ids"] = ids[:-1] if drop_one and entry["panel"] == 2 else ids
