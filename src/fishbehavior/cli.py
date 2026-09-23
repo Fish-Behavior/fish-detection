@@ -14,18 +14,21 @@ Each pipeline step registers one sub-command here in its own PR
     reference      digitize the reference ethogram figures into approximate timelines (for tuning)
     priors         sanity checks: video labels vs workbook (NTT hints) and reference group means
     calibrate      tune the labeling thresholds against the reference timelines (random search)
+    export         write the final datasets (segments, per-second labels, per-subject table, windows)
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 from typing import Sequence
 
 from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from fishbehavior.calibrate import run_calibration
+from fishbehavior.export import run_export
 from fishbehavior.features import run_features, run_features_qa
 from fishbehavior.labeling import LABELS, STATES, run_labeling
 from fishbehavior.priors import EXPECTATIONS_FILE, run_priors
@@ -118,6 +121,18 @@ def build_parser() -> argparse.ArgumentParser:
         "calibrate", help="tune the labeling thresholds against the reference timelines (writes calibrated.yaml)"
     )
     calibrate.set_defaults(handler=run_calibrate_command)
+
+    export = commands.add_parser(
+        "export", help="write the datasets: segments, per-second labels, one row per subject, training windows"
+    )
+    export.add_argument("--clips", action="store_true", help="also save fish-centered crops per window (slow)")
+    export.add_argument("--subjects", nargs="+", metavar="ID", help="--clips only for these (tables: always all)")
+    export.add_argument("--force", action="store_true", help="redo clips that already exist")
+    export.add_argument(
+        "--labels", metavar="DIR", help="export this labels folder instead (e.g. a backup copy); "
+        "written to datasets_<DIR name>/",
+    )
+    export.set_defaults(handler=run_export_command)
 
     return parser
 
@@ -418,6 +433,27 @@ def run_calibrate_command(settings: Settings, args: argparse.Namespace) -> int:
     print(f"{'Tuned':<11}: " + ", ".join(f"{k} {v}" for k, v in result.tuned.items()))
     print(f"{'Written to':<11}: {result.calibrated_path} (run `label` again to use it), {result.report_path}")
     return 0
+
+
+def run_export_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Write the datasets (and clips); returns 1 if any clip subject failed."""
+    trials = load_trials(settings)
+    clips = select_subjects(trials, args.subjects) if args.clips else None
+    labels = Path(args.labels).expanduser() if args.labels else None
+    result = run_export(settings, trials, clips, force=args.force, labels=labels)
+    windows = result.windows
+    print(f"{'Subjects':<11}: {len(result.dataset)} in behavior_dataset, {result.n_labeled} with behavior labels")
+    print(f"{'Windows':<11}: {len(windows)} ({int(windows['use_for_training'].sum())} use_for_training), "
+          f"{windows['fold'].nunique()} folds by subject")
+    failed = [r for r in result.clip_records if "error" in r]
+    if args.clips:
+        cached = sum(1 for r in result.clip_records if r.get("cached"))
+        print(f"{'Clips':<11}: {len(result.clip_records) - len(failed)} subjects ({cached} cached), {len(failed)} failed")
+    for record in failed:
+        print(f"{'  failed':<11}: {record['subject_id']}: {record['error']}")
+    print(f"{'Written to':<11}: {result.out}  (segments.csv, per_second_labels.csv, behavior_dataset.csv/.xlsx, "
+          f"behavior_windows.csv{', clips/' if args.clips else ''})")
+    return 1 if failed else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

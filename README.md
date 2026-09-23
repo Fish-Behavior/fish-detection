@@ -63,6 +63,7 @@ fish-detection/
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
 │   ├── default_config.yaml   # default, data-independent parameters
+│   ├── export.py             # final datasets: segments, per-second labels, one row per subject, training windows, clips
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
@@ -81,7 +82,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Dataset export | `export.py` | writes segments, per-subject summaries, and training datasets |
 | Plots | `plots.py` | ethogram charts, summary bar charts, and review videos |
 | Colab and docs | `notebooks/`, `docs/` | Google Colab quick start and full usage guide |
 
@@ -708,6 +708,57 @@ Limits: the reference is digitized from figures, so it is approximate. Calibrati
 move thresholds; it cannot create a state that the features do not see (check the per-state
 F1 and the confusion matrix). With few subjects, or subjects from only a few groups, the
 values fit those groups.
+
+**9. Export the datasets**
+
+```bash
+python -m fishbehavior export                          # all tables, every subject
+python -m fishbehavior export --clips --subjects 42    # + fish-centered crops for these subjects
+python -m fishbehavior export --clips                  # crops for everyone (slow: reads every video)
+```
+
+Needs `label` (run it again after `calibrate`), `features` and `track`. The tables always
+cover every subject. `--subjects` and `--force` only apply to `--clips`, which skips
+subjects whose clip file already exists. Everything goes to `<FISH_OUTPUT_DIR>/datasets/`:
+
+- `segments.csv`: every labeled segment (see step 6) plus `sex, compound,
+  concentration_raw, concentration_mm` from `trials.csv`.
+- `per_second_labels.csv`: `subject_id, second, label, confidence` plus the key bin
+  features `tracked_fraction, speed_mean_bl_s, speed_median_bl_s, speed_cv,
+  jerk_abs_mean_bl_s3, turn_rate_var_deg2_s2, meander_deg_per_bl, depth_bl_min,
+  nose_up_surface_fraction, tilt_fraction` of the bin that covers that second.
+- `behavior_dataset.csv` and `behavior_dataset.xlsx`: **one row per subject**. The xlsx has a
+  second sheet, `column_guide`, that explains every column in plain words. Columns, in order:
+  - all cleaned workbook columns of `trials.csv` (NTT values, compound, dose, video status...);
+  - per state (`controlled_swim, erratic, freeze_drift, lorr, surface_breach`):
+    `<state>_s` (seconds), `<state>_pct` (% of the recording), `<state>_bouts`,
+    `<state>_mean_bout_s`, `<state>_latency_s` (seconds until the first bout; empty if never).
+    A bout cut in two by a part boundary counts once;
+  - `<from>_to_<to>`: how often a bout of one label is directly followed by another, for
+    every pair of the five states and `untracked`;
+  - `untracked_s`;
+  - the video endpoints from `features/endpoints.csv` (`body_length_px, duration_s,
+    tracked_s, distance_bl, mean_velocity_bl_s, highly_mobile_s, immobile_s, top_half_pct,
+    latency_top_half_s, meander_deg_per_bl, mean_angular_velocity_deg_s`).
+
+  Subjects without a usable video keep their workbook values; their behavior and endpoint
+  columns are empty. The state seconds plus `untracked_s` add up to the recording length.
+- `behavior_windows.csv`: the training manifest for a behavior classifier, one row per
+  `export.window_s` (1 s) window: `subject_id, video_path, part, part_start_frame,
+  part_end_frame, start_s, end_s, label, confidence, fold, use_for_training`. `video_path`
+  is the **part file** the window lies in, and the frame numbers count inside that file
+  (inclusive), so a clip can be cut straight from it. A window that crosses the end of a part
+  is split in two. `label` is the most common label over the window's frames. `fold` (0 to
+  `export.folds` - 1) is assigned by subject, so one fish is never in both train and test.
+  `use_for_training` is False for untracked windows and for confidence below
+  `export.min_confidence` (0.5; bins merged by the bout cleanup have confidence 0).
+- `clips/<subject_id>.npz` (with `--clips`): `frames` (windows x `export.clip_frames` (8)
+  x `crop_size` x `crop_size`, gray uint8), `window` (row number among that subject's
+  windows) and `label`. Each crop is a square of `export.crop_bl` (1.5) body lengths
+  centered on the tracked fish, resized to `export.crop_size` (64) px. Frames where the fish
+  was not found stay black. The frames are spread evenly over each window; all frames of a
+  20-minute video would be about 150 MB per subject. Even with 8 frames per window, expect
+  roughly 15 MB per subject.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its

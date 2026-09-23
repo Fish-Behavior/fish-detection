@@ -294,3 +294,20 @@ calibration:
     lorr_max_speed_bl_s: {low: 0.1, high: 1.5}
     lorr_min_s: [1, 2, 3, 5, 8]
     min_bout_s: [0, 1, 2, 3]
+
+export:
+  # Training manifest (behavior_windows.csv): one row per window of this many seconds.
+  window_s: 1.0
+  # A window is use_for_training only when it is tracked and its label confidence is at
+  # least this (bins merged by the bout cleanup have confidence 0).
+  min_confidence: 0.5
+  # Folds by subject (one fish is never in two folds), shuffled with this seed.
+  folds: 5
+  seed: 0
+  # --clips: a square of this many body lengths around the fish ...
+  crop_bl: 1.5
+  # ... resized to this many pixels (gray) ...
+  crop_size: 64
+  # ... and this many frames per window, spread evenly (every frame of a 20-min video
+  # would be ~150 MB per subject).
+  clip_frames: 8
