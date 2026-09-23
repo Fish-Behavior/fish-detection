@@ -17,7 +17,11 @@ catalog:
   # File types treated as videos when scanning FISH_VIDEO_DIR (case does not matter).
   video_extensions: [".mp4", ".avi", ".mov", ".mkv"]
   # Pattern searched in each video file name (without extension). It must capture
-  # `sex` (M/F) and `subject` (number); `part` (a letter) is optional and marks
-  # recordings split into several files. Accepts e.g. F_0042, M_0012a, M_0012_b,
-  # M_0012-b, and tolerates a prefix such as "copy-F_0042".
-  video_name_pattern: '(?<![A-Za-z0-9])(?P<sex>[MF])_(?P<subject>\d+)(?:[_-]?(?P<part>[A-Z]))?$'
+  # `subject` (number). Any letter prefix is skipped and carries no meaning -- the
+  # leading "F" is an archive prefix, not a sex code, and sex comes from the
+  # workbook. Three optional groups follow the number:
+  #   `part`     a letter -- F_0176A, F_0012_b, F_0012-b
+  #   `part_num` the number in "(P1)"/"(P2)" -- F_0021(P1); same meaning as `part`
+  #   `copy`     the number in a trailing " (2)" -- F_309 (2): a second COMPLETE
+  #              take of the trial, not a part of it, so it is never auto-matched.
+  video_name_pattern: '(?<![A-Za-z0-9])(?:[A-Za-z]+_)?(?P<subject>\d+)(?:\s*\(P(?P<part_num>\d+)\)|[_-]?(?P<part>[A-Z]))?(?:\s*\((?P<copy>\d+)\))?$'

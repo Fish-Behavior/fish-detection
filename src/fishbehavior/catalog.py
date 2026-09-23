@@ -7,9 +7,9 @@ video is processed:
    The workbook is read, its headers are mapped to stable column names, and the
    cleaning rules from docs/zebrafish_drug_detection_scope.md (Section 5) are applied.
 2. *Which video file belongs to which trial?*
-   Video file names (e.g. ``F_0042.mp4``) are parsed for sex + subject number and
-   matched to the workbook. Recordings split into parts (``M_0012a``/``M_0012b``)
-   are joined into one subject, with the videos kept in part order.
+   Video file names (e.g. ``F_0042.mp4``) are parsed for their subject number and
+   matched to the workbook. Recordings split into parts (``0012a``/``0012b``) are joined into one subject,
+   with the videos kept in part order.
 
 Outputs (written to ``<FISH_OUTPUT_DIR>/catalog/``, which Git ignores):
     trials.csv             one row per subject, cleaned values + matched video paths
@@ -86,7 +86,6 @@ OTHER_NUMERIC_COLUMNS = ["age", "exposure_min", "ntt_min", "uv_min"]
 # Possible values of `video_status` in trials.csv.
 STATUS_MATCHED = "matched"  # every expected video found
 STATUS_MISSING = "missing"  # no video for this subject
-STATUS_SEX_MISMATCH = "sex_mismatch"  # a video has the right number but the other sex
 STATUS_PART_MISMATCH = "part_mismatch"  # split recording, but the part files do not line up
 STATUS_DUPLICATE = "duplicate_videos"  # several files for a single-part subject
 STATUS_NOT_CHECKED = "not_checked"  # FISH_VIDEO_DIR not configured
@@ -374,7 +373,7 @@ def scan_videos(video_dir: Path, pattern: str, extensions: Iterable[str]) -> pd.
     """List every video file under `video_dir` (sub-folders included).
 
     Each file name (without extension) is searched with `pattern`; the result has
-    one row per file with the parsed sex, subject number and part letter ('' if none).
+    one row per file with the parsed subject number and part letter ('' if none).
     Files whose name does not fit the pattern get `recognized=False`.
     """
     regex = re.compile(pattern, re.IGNORECASE)
@@ -390,12 +389,11 @@ def scan_videos(video_dir: Path, pattern: str, extensions: Iterable[str]) -> pd.
                 "path": str(path),
                 "file_name": path.name,
                 "recognized": match is not None,
-                "sex": match["sex"].upper() if match else None,
                 "subject_num": int(match["subject"]) if match else None,
                 "part": (match.groupdict().get("part") or "").lower() if match else None,
             }
         )
-    columns = ["path", "file_name", "recognized", "sex", "subject_num", "part"]
+    columns = ["path", "file_name", "recognized", "subject_num", "part"]
     videos = pd.DataFrame(records, columns=columns)
     videos["subject_num"] = videos["subject_num"].astype("Int64")  # integer that allows "missing"
     return videos
@@ -409,7 +407,7 @@ def scan_videos(video_dir: Path, pattern: str, extensions: Iterable[str]) -> pd.
 def match_videos(trials: pd.DataFrame, videos: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, list[str]]]:
     """Attach the video file(s) of each subject and give every subject a `video_status`.
 
-    Matching key = subject number; the sex in the file name must agree with the workbook.
+    Matching key = subject number, which is unique across the whole workbook.
     Single-part subjects need exactly one file. Split subjects need one file per
     part, each with a different part letter; files are listed in part order (a, b, ...).
     """
@@ -430,11 +428,7 @@ def match_videos(trials: pd.DataFrame, videos: pd.DataFrame) -> tuple[pd.DataFra
 
         counts.append(len(found))
         expected_parts = int(trial["n_workbook_rows"])
-        wrong_sex = found[found["sex"] != trial["sex"]]
-        if not wrong_sex.empty:
-            status = STATUS_SEX_MISMATCH
-            problems.append(f"{label}: file(s) {', '.join(wrong_sex['file_name'])} have the other sex")
-        elif expected_parts == 1 and len(found) > 1:
+        if expected_parts == 1 and len(found) > 1:
             status = STATUS_DUPLICATE
             problems.append(f"{label}: {len(found)} files for one recording: {', '.join(found['file_name'])}")
         elif expected_parts > 1 and (len(found) != expected_parts or found["part"].eq("").any()
@@ -501,7 +495,7 @@ def build_catalog(settings: Settings) -> CatalogResult:
         )
     else:
         log.warning("FISH_VIDEO_DIR is not set: videos are not checked.")
-        videos = pd.DataFrame(columns=["path", "file_name", "recognized", "sex", "subject_num", "part"])
+        videos = pd.DataFrame(columns=["path", "file_name", "recognized", "subject_num", "part"])
         trials["video_status"] = STATUS_NOT_CHECKED
         trials["video_paths"] = ""
         trials["n_videos_found"] = 0
