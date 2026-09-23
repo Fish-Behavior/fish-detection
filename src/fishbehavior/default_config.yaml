@@ -261,3 +261,36 @@ reference:
   # Page with the bar charts (seconds per state per group). Not read automatically: it
   # is saved as page<N>.png so the values can be read by eye into slide18_values.yaml.
   barchart_page: 18
+
+priors:
+  # Sanity checks of the video labels against the workbook (NTT, a different session: hints
+  # only) and the reference figures. A subject whose video measure is this many standard
+  # deviations off the rank trend of the matching workbook measure is flagged for a look.
+  flag_z: 2
+
+calibration:
+  # Random search over the labeling thresholds, scored against the digitized reference
+  # timelines. Fitted values go to <FISH_OUTPUT_DIR>/calibration/calibrated.yaml, never here.
+  # Candidates tried (the first is always the current settings) ...
+  n_trials: 200
+  # ... drawn with this seed, which also shuffles the subjects into folds (same run = same result).
+  seed: 0
+  # Score = macro-F1 per second + this weight x group agreement (1 - total-variation distance
+  # between our and the reference time budget per group, 0-1).
+  group_weight: 0.5
+  # Held-out check: the subjects are split into this many folds (by subject).
+  folds: 5
+  # Fewer subjects than this (bins + reference timeline) and the report warns that the
+  # calibrated values are not trustworthy.
+  min_subjects: 30
+  # labeling keys to tune: a list = try these values; {low, high} = uniform in that range.
+  # min_bout_s is one value used for every state (untracked keeps its own). Set a key to null
+  # in your FISH_CONFIG file to leave it untuned.
+  search:
+    freeze_speed_bl_s: {low: 0.03, high: 0.4}
+    freeze_min_s: [1, 2, 3, 4, 5]
+    surface_breach_fraction: {low: 0.1, high: 0.7}
+    lorr_tilt_fraction: {low: 0.2, high: 0.9}
+    lorr_max_speed_bl_s: {low: 0.1, high: 1.5}
+    lorr_min_s: [1, 2, 3, 5, 8]
+    min_bout_s: [0, 1, 2, 3]

@@ -12,6 +12,8 @@ Each pipeline step registers one sub-command here in its own PR
     features-qa    per subject: which bin features are stable (frame rate / smoothing checks)
     label          per subject: ethogram state of every time bin, merged into segments
     reference      digitize the reference ethogram figures into approximate timelines (for tuning)
+    priors         sanity checks: video labels vs workbook (NTT hints) and reference group means
+    calibrate      tune the labeling thresholds against the reference timelines (random search)
 """
 
 from __future__ import annotations
@@ -23,8 +25,10 @@ from typing import Sequence
 from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
+from fishbehavior.calibrate import run_calibration
 from fishbehavior.features import run_features, run_features_qa
 from fishbehavior.labeling import LABELS, STATES, run_labeling
+from fishbehavior.priors import EXPECTATIONS_FILE, run_priors
 from fishbehavior.reference import MAPPING_FILE, SLIDE18_FILE, run_reference
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
@@ -104,6 +108,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reference.add_argument("--force", action="store_true", help="re-extract the figures and redo the digitizing")
     reference.set_defaults(handler=run_reference_command)
+
+    priors = commands.add_parser(
+        "priors", help="sanity checks: video labels vs workbook (NTT hints) and reference group means"
+    )
+    priors.set_defaults(handler=run_priors_command)
+
+    calibrate = commands.add_parser(
+        "calibrate", help="tune the labeling thresholds against the reference timelines (writes calibrated.yaml)"
+    )
+    calibrate.set_defaults(handler=run_calibrate_command)
 
     return parser
 
@@ -367,6 +381,42 @@ def run_reference_command(settings: Settings, args: argparse.Namespace) -> int:
     else:
         print(f"{'Slide 18':<11}: no values in {out / SLIDE18_FILE} yet (optional check of the digitizer)")
     print(f"{'Written to':<11}: {out}  (timelines.csv, group_means.csv, digitize_check.png)")
+    return 0
+
+
+def run_priors_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Run the sanity checks and print the headline numbers; details are in priors_report.md."""
+    result = run_priors(settings, load_trials(settings))
+    print(f"{'Subjects':<11}: {result.n_subjects} with video labels and NTT workbook values (hints only)")
+    for row in result.spearman.itertuples():
+        print(f"  {row.video:<17} ~ {row.workbook:<14}: rho {row.rho:+.2f} (n {row.n})")
+    print(f"{'Flagged':<11}: {result.flags['subject_id'].nunique()} subject(s) off the NTT rank trend")
+    if result.expectations_created:
+        print(f"{'Groups':<11}: template written to reference/{EXPECTATIONS_FILE}; link the empty groups and "
+              f"add expectations, then run `priors` again")
+    if result.unlinked:
+        print(f"{'Unlinked':<11}: {len(result.unlinked)} reference group(s) without workbook subjects")
+    if result.checks is not None and len(result.checks):
+        failed = int((result.checks["video"] == False).sum())  # noqa: E712 - None means "not linked"
+        print(f"{'Directions':<11}: {len(result.checks) - failed} of {len(result.checks)} hold in the video labels")
+    print(f"{'Written to':<11}: {result.report}")
+    return 0
+
+
+def run_calibrate_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Run the search and print before/after; details are in calibration_report.md."""
+    result = run_calibration(settings)
+    n = len(result.subjects)
+    print(f"{'Subjects':<11}: {n} with bins and a reference timeline"
+          + (f"  WARNING: fewer than {result.min_subjects}, not trustworthy" if n < result.min_subjects else ""))
+    for name in ("before", "after"):
+        s = getattr(result, name)
+        print(f"{name.capitalize():<11}: score {s['score']:.3f}, macro-F1 {s['macro_f1']:.3f}, "
+              f"group agreement {s['agreement']:.3f}")
+    print(f"{'Held-out':<11}: F1 tuned {result.folds['test_f1_tuned'].mean():.3f}, "
+          f"current {result.folds['test_f1_current'].mean():.3f} ({len(result.folds)} folds by subject)")
+    print(f"{'Tuned':<11}: " + ", ".join(f"{k} {v}" for k, v in result.tuned.items()))
+    print(f"{'Written to':<11}: {result.calibrated_path} (run `label` again to use it), {result.report_path}")
     return 0
 
 

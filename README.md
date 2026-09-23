@@ -58,6 +58,7 @@ fish-detection/
 ├── docs/                     # project scope and contribution workflow
 ├── src/fishbehavior/         # the pipeline package
 │   ├── __main__.py           # enables `python -m fishbehavior <command>`
+│   ├── calibrate.py          # tunes the labeling thresholds against the reference timelines (random search, K-fold)
 │   ├── catalog.py            # cleans the trial workbook and matches each trial to its video(s)
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
@@ -65,6 +66,7 @@ fish-detection/
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
+│   ├── priors.py             # sanity checks: video labels vs workbook (NTT hints) and reference group means
 │   ├── reference.py          # digitizes the reference ethogram figures into approximate per-subject timelines
 │   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
 │   ├── review_page.html      # the review page template (self-contained, no external files)
@@ -79,7 +81,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Priors and calibration | `priors.py`, `calibrate.py` | tunes thresholds against the reference and sanity checks |
 | Dataset export | `export.py` | writes segments, per-subject summaries, and training datasets |
 | Plots | `plots.py` | ethogram charts, summary bar charts, and review videos |
 | Colab and docs | `notebooks/`, `docs/` | Google Colab quick start and full usage guide |
@@ -641,6 +642,72 @@ pink one turns pinkish while its brightness stays gray. A pixel farther than
 so the blurred edge of every red bout looks pinkish. A pink stretch therefore counts as
 LORR only if at least one of its pixels is within `seed_color_distance.lorr` (15) of the
 palette pink; otherwise it takes its next-nearest color.
+
+**8. Sanity checks and calibration**
+
+```bash
+python -m fishbehavior priors      # video labels vs workbook and reference group means
+python -m fishbehavior calibrate   # tune the labeling thresholds, writes calibrated.yaml
+python -m fishbehavior label       # relabel with the calibrated values
+```
+
+`priors` needs `label`, `features` and (for the group checks) `reference`. It writes
+`<FISH_OUTPUT_DIR>/calibration/priors_report.md` with:
+
+1. **Video vs workbook.** Spearman correlation of freeze_drift seconds, distance (BL) and
+   surface_breach seconds with the workbook's `tdm_full`, `velocity_full` and `time_top_s`,
+   over the NTT-tracked subjects. The workbook is the Novel Tank Test, a **different**
+   10-minute session, so this is a hint only: a loose relation is expected. Subjects far off
+   the rank trend of a matching pair (|z| > `priors.flag_z`, 2) are listed. Look at their
+   track QA image first: it is often a tracking failure.
+2. **Group means.** Video-derived mean seconds per state next to `reference/group_means.csv`.
+3. **Direction checks** from `<FISH_OUTPUT_DIR>/reference/expectations.yaml`, a local file
+   (group names stay out of Git). The first run writes a template:
+
+   ```yaml
+   groups:            # reference group -> its workbook subjects (trials.csv columns)
+     VEH: {compound: '', concentration: ''}           # fill in by hand
+     COMPOUND_A 30uM: {compound: COMPOUND_A, concentration: '0.03'}  # filled from mapping.yaml
+   expectations:
+   - {group: COMPOUND_A 30uM, state: lorr, relation: greater_than, than: VEH}
+   ```
+
+   A group is filled in automatically when `mapping.yaml` lists some of its subjects. The
+   others (e.g. a group whose rows are all placeholders) need `compound` and `concentration`
+   exactly as in `catalog/trials.csv`. `relation` is `greater_than` or `less_than`. Each
+   expectation is tested on the reference means and on the video means.
+
+`calibrate` needs `label` (for `labels/swim_model.json`), `features` and `reference`. It uses
+the subjects that have both feature bins and a reference timeline. It tries
+`calibration.n_trials` (200) random threshold sets from `calibration.search`, with a fixed
+`seed`. The first set is always the current settings. Each set relabels the bins with the
+pure labeling functions (no video work, about a minute for 50 subjects) and is scored:
+
+    score = macro-F1 per second vs the reference + group_weight (0.5) x group agreement
+
+Group agreement is 1 minus the total-variation distance between our time budget and the
+reference one per group (0 to 1). It forgives the small timing offsets of the digitized
+rows, which the per-second F1 counts as errors. The search space is a list of values to
+try, or `{low, high}` for a uniform range. `min_bout_s` is one value used for every state.
+Set a key to `null` in your `FISH_CONFIG` file to leave it untuned.
+
+To show overfitting, the choice is repeated with `calibration.folds` (5) **K-fold by
+subject**. Values are chosen on four folds and scored on the fifth. Held-out F1 far below
+the in-sample F1 means the search fits noise. Held-out tuned at or below held-out current
+means calibration does not help.
+
+Outputs (`<FISH_OUTPUT_DIR>/calibration/`, git-ignored):
+
+- `calibrated.yaml`: only the tuned `labeling:` keys. `label` merges it over the settings
+  (run `label` again afterwards; delete the file to go back to the defaults);
+- `calibration_report.md`: before/after score, the tuned values, F1 per state, the
+  confusion matrix (seconds, reference x ours), the held-out check and the number of
+  subjects used, with a warning below `calibration.min_subjects` (30).
+
+Limits: the reference is digitized from figures, so it is approximate. Calibration can only
+move thresholds; it cannot create a state that the features do not see (check the per-state
+F1 and the confusion matrix). With few subjects, or subjects from only a few groups, the
+values fit those groups.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its
