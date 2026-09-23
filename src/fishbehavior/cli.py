@@ -10,6 +10,7 @@ Each pipeline step registers one sub-command here in its own PR
     track          per subject: fish position, size and tilt in every frame (parts joined)
     features       per subject: movement features per frame and per time bin, plus endpoints
     features-qa    per subject: which bin features are stable (frame rate / smoothing checks)
+    label          per subject: ethogram state of every time bin, merged into segments
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from fishbehavior.features import run_features, run_features_qa
+from fishbehavior.labeling import LABELS, run_labeling
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
 from fishbehavior.tracking import run_tracking
@@ -88,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     features_qa.add_argument("--subjects", nargs="+", metavar="ID", help="only these subjects (default: all)")
     features_qa.set_defaults(handler=run_features_qa_command)
+
+    label = commands.add_parser(
+        "label", help="give every time bin one of the five behavior states and merge them into segments"
+    )
+    add_subject_options(label)
+    label.set_defaults(handler=run_label_command)
 
     return parser
 
@@ -284,6 +292,36 @@ def run_features_qa_command(settings: Settings, args: argparse.Namespace) -> int
     print(f"Position jitter (median over subjects): {per_subject['jitter_bl'].median():.3f} BL; "
           f"body length variation: {per_subject['body_length_cv'].median():.0%}")
     print(f"Written to : {result.path}  (medians over {n} subject(s))")
+    return 1 if failed else 0
+
+
+def run_label_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Label the matched subjects and print the time share of each state; returns 1 if any failed."""
+    trials = load_trials(settings)
+    result = run_labeling(settings, trials, select_subjects(trials, args.subjects), force=args.force)
+
+    if result.calibrated:
+        print(f"{'Settings':<11}: calibrated values from {result.calibrated}")
+    model = result.model
+    print(f"{'Swim model':<11}: {model['method']}, {'fitted now' if result.model_refit else 'reused'} "
+          f"({model['n_bins']} swim bins of {model['n_subjects']} subjects)")
+    records = result.records
+    failed = [r for r in records if "error" in r]
+    cached = sum(1 for r in records if r.get("cached"))
+    print(f"{'Subjects':<11}: {len(records) - len(failed)} done ({cached} cached), {len(failed)} failed")
+    if result.skipped:
+        print(f"{'Skipped':<11}: {len(result.skipped)} subject(s) without a matched video: {', '.join(result.skipped)}")
+    for record in failed:
+        print(f"{'  failed':<11}: {record['subject_id']}: {record['error']}")
+
+    # Time share of each label over this run's subjects (summary.csv has one row per subject).
+    done = {r["subject_id"] for r in records if "error" not in r}
+    rows = result.summary[result.summary["subject_id"].isin(done)]
+    if len(rows):
+        total = rows["duration_s"].sum()
+        shares = ", ".join(f"{name} {100 * rows[f'{name}_s'].sum() / total:.1f}%" for name in LABELS)
+        print(f"{'Time share':<11}: {shares}")
+    print(f"{'Written to':<11}: {result.labels_dir}  (<subject>_bins.csv, segments.csv, summary.csv, swim_model.json)")
     return 1 if failed else 0
 
 

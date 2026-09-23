@@ -19,6 +19,8 @@ dependencies = [
     "opencv-python-headless>=4.8",  # video reading/writing and drawing (headless: no GUI libs, works on Colab/servers)
     "tqdm>=4.66",          # progress bars for long per-frame tracking runs
     "scipy>=1.10",         # Savitzky-Golay smoothing of the track before computing speeds (features)
+    "scikit-learn>=1.3",   # Gaussian mixture that splits swimming into controlled vs erratic (label)
+    "hmmlearn>=0.3",       # optional hidden Markov swim split, labeling.swim_split: hmm (label)
 ]
 
 [project.optional-dependencies]

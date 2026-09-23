@@ -41,8 +41,9 @@ See the complete scientific and technical scope in
 
 The behavior-labeling pipeline (`fishbehavior` package) is being built one step at a
 time, one pull request per step. The project setup (settings loading, command-line
-entry point, tests), the workbook catalog (cleaning + video matching), and scene
-setup (background, waterline, fish region per video) are in place; the analysis steps listed under
+entry point, tests), the workbook catalog (cleaning + video matching), scene setup
+(background, waterline, fish region per video), tracking, movement features and
+behavior labeling are in place; the analysis steps listed under
 [Project Structure](#project-structure) as *planned* are added in later PRs. The
 classifier, backend, and frontend are not yet implemented.
 
@@ -62,6 +63,7 @@ fish-detection/
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
 │   ├── default_config.yaml   # default, data-independent parameters
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
+│   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
 │   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
 │   ├── review_page.html      # the review page template (self-contained, no external files)
@@ -76,7 +78,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Behavior labeling | `labeling.py` | assigns one of the five ethogram states to each time bin and merges them into segments |
 | Slide digitizer | `reference.py` | turns the reference ethogram figures into approximate timelines for tuning |
 | Priors and calibration | `priors.py`, `calibrate.py` | tunes thresholds against the reference and sanity checks |
 | Dataset export | `export.py` | writes segments, per-subject summaries, and training datasets |
@@ -485,6 +486,76 @@ change_smooth_2x, stable, jitter_bl` (RMS distance between the raw and smoothed 
 centre, BL) and `body_length_cv` (how much the fitted length varies over the video).
 An empty `r_half_rate` means the feature did not vary (e.g. never at the surface), so
 it cannot fail.
+
+**6. Behavior labels**
+
+```bash
+python -m fishbehavior label                     # every matched subject with features
+python -m fishbehavior label --subjects 42 F_0043  # only these (reuses the saved swim model)
+python -m fishbehavior label --force             # redo all subjects and refit the swim model
+```
+
+Needs `features` and `track`. Every time bin (`features.bin_s`, default 1 s) gets one of
+the five behavior states, or `untracked`. The rules are checked in this order and the
+first one that fits wins (all numbers are `labeling:` settings, starting values until
+calibration):
+
+| # | Label | In plain words | Rule on the bin |
+|---|---|---|---|
+| 0 | `untracked` | not a behavior: the fish was not seen well enough to judge | seen in less than `min_tracked_fraction` (0.5) of the frames |
+| 1 | `surface_breach` | the fish pushes its head up to the surface, body angled nose-up | `nose_up_at_surface` (head at the waterline, head–tail line ≥ 25° nose-up) in at least `surface_breach_fraction` (0.3) of the frames |
+| 2 | `lorr` | listing / loss of righting: hangs steeply (e.g. head-down) and barely moves | seen side-on and tilted more than `features.tilt_threshold_deg` in at least `lorr_tilt_fraction` (0.5) of the frames, median speed below `lorr_max_speed_bl_s` (0.5 BL/s), for at least `lorr_min_s` (3 s) in a row |
+| 3 | `freeze_drift` | motionless, or only drifting | median speed below `freeze_speed_bl_s` (0.1 BL/s) for at least `freeze_min_s` (2 s) in a row |
+| 4a | `controlled_swim` | normal swimming: steady speed, smooth path, or slow cruising | any other bin with mean speed below `swim_min_speed_bl_s` (0.5 BL/s), or one the swim model calls smooth |
+| 4b | `erratic` | darting and zig-zagging: bursts of speed, sharp and frequent turns | any other bin the swim model calls erratic |
+
+Why the surface and tilt rules look at the head: in shallow dishes the water is often less
+than one body length deep, so the top of the fish is near the waterline almost all the
+time. A breach is therefore the head itself at the surface with the body angled nose-up.
+A resting fish facing the camera looks like a tall blob whose fitted angle is steep, so
+tilt only counts when the eye is near one end of the body (seen side-on).
+
+Bins slower than `swim_min_speed_bl_s` have no turning measure, so they would form a
+"hovering" group of their own instead of the smooth-versus-erratic split. They are
+`controlled_swim` and stay out of the model.
+
+The swim model sorts the remaining faster bins into two groups using four features: speed
+variation (`speed_cv`), jerkiness (mean \|jerk\|), turning variability (turn-rate
+variance) and `meander` (the last three log-compressed, all standardized). It is fitted
+on **all subjects together**, so "erratic" means the same for every fish, and the group
+with the higher values is `erratic`. `labeling.swim_split: gmm` (default) is a Gaussian
+mixture that judges each bin on its own; `hmm` is a hidden Markov model that also favors
+staying in the same state, giving smoother timelines. The model is saved as
+`labels/swim_model.json` and reused when labeling single subjects; it is refitted when
+it is missing, when any `labeling` setting changes, when any subject's features are newer
+than it, or with `--force` (without `--subjects`).
+
+After labeling, a bout shorter than `labeling.min_bout_s` (per label, default 1 s) is
+merged into its longer neighbor. `untracked` is never merged away, so tracking gaps stay
+visible. Each bin has a `confidence` from 0 to 1. For `untracked`, `surface_breach` and
+`lorr` it is the share of frames that met the rule. For `freeze_drift` it is how far
+the median speed is below the threshold (1 = not moving), and for slow `controlled_swim`
+how far the mean speed is below `swim_min_speed_bl_s`. For the swim states it is the
+model's probability of the chosen state. Bins merged by the cleanup get 0.
+
+If `<FISH_OUTPUT_DIR>/calibration/calibrated.yaml` exists, its `labeling:` values replace
+the configured ones (the command prints that calibrated values are in use).
+
+Results go to `<FISH_OUTPUT_DIR>/labels/`:
+
+- `<subject>_bins.csv`: the feature bins plus `label` and `confidence`;
+- `<subject>_segments.csv` and `segments.csv` (all subjects): runs of the same label,
+  `subject_id, label, start_s, end_s, duration_s, start_frame, end_frame, part,
+  mean_confidence`. Times are seconds on the joined timeline, and the segments tile the
+  whole video without gaps. `start_frame` / `end_frame` (inclusive) are frame numbers
+  inside that part's own video file. A segment that crosses from one part file to the
+  next is split there;
+- `summary.csv`: one row per subject: `duration_s`, then `<label>_s` and `<label>_pct`
+  (seconds and % of the video) for every label;
+- `swim_model.json`: the swim model and the settings it was made with.
+
+A subject is skipped when its results exist, unless `--force` is given, its features
+are newer, or the swim model was refitted.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its

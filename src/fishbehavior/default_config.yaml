@@ -167,3 +167,44 @@ features:
   # ... and its mean moves by at most this fraction (0.25 = 25%) both at half the frame
   # rate and with double the smoothing (smooth_s x 2).
   qa_max_change: 0.25
+
+labeling:
+  # STARTING values; the calibration step tunes them and writes the fitted values to
+  # <FISH_OUTPUT_DIR>/calibration/calibrated.yaml, which `label` merges over this section.
+  # Rules are applied in this order; the first that matches a bin wins.
+  #
+  # 0. untracked (QA label, not a behavior): the fish was seen in less than this share of
+  #    the bin's frames, so its behavior cannot be judged.
+  min_tracked_fraction: 0.5
+  # 1. surface_breach: head at the waterline and nose up (features.nose_up_at_surface) in at
+  #    least this share of the bin's frames.
+  surface_breach_fraction: 0.3
+  # 2. lorr (listing / loss of righting): at least this share of frames tilted more than
+  #    features.tilt_threshold_deg ...
+  lorr_tilt_fraction: 0.5
+  # ... while the median speed stays below this (BL/s): a steep but swimming fish is not LORR ...
+  lorr_max_speed_bl_s: 0.5
+  # ... for at least this many seconds in a row.
+  lorr_min_s: 3
+  # 3. freeze_drift: median speed below this (BL/s; same as features.immobile_bl_s) ...
+  freeze_speed_bl_s: 0.1
+  # ... for at least this many seconds in a row (shorter pauses are part of swimming).
+  freeze_min_s: 2
+  # 4. every other bin is swimming. Slower than this mean speed (BL/s; same as
+  #    features.min_speed_for_heading_bl_s, below which no turning is measured) it is
+  #    controlled_swim (slow cruising / hovering) ...
+  swim_min_speed_bl_s: 0.5
+  #    ... faster bins are split into controlled_swim / erratic by a model fitted on all
+  #    subjects together: gmm = 2-component Gaussian mixture, each bin on its own;
+  #    hmm = 2-state Gaussian hidden Markov model, which favours staying in a state
+  #    (smoother timelines).
+  swim_split: gmm
+  # Cleanup: a bout shorter than this (seconds, per label) is merged into its longer
+  # neighbour. untracked is 0 so gaps in tracking are never hidden.
+  min_bout_s:
+    controlled_swim: 1
+    erratic: 1
+    freeze_drift: 1
+    lorr: 1
+    surface_breach: 1
+    untracked: 0
