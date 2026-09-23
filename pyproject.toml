@@ -38,7 +38,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # Ship the default settings file and the review page template inside the package so they work after `pip install`.
-fishbehavior = ["default_config.yaml", "review_page.html"]
+fishbehavior = ["default_config.yaml", "review_page.html", "live_page.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

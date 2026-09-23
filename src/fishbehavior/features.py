@@ -63,6 +63,9 @@ FEATURE_PARAMS = (
     "smooth_s", "smooth_polyorder", "min_speed_for_heading_bl_s", "surface_margin_bl", "bin_s",
     "tilt_threshold_deg", "high_mobility_bl_s", "immobile_bl_s", "nose_up_threshold_deg", "side_on_min_head_offset_bl",
 )
+# Raised when a code change alters the outputs, so results cached by older code are redone too.
+# 2: nose_up_at_surface counts only frames seen side-on.
+FEATURES_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +171,17 @@ def frame_features(track: pd.DataFrame, bl_px: float, waterline_y: float, params
     # Posture and position relative to the waterline (y grows downward: depth > 0 = below).
     top_limit = waterline_y + float(params["surface_margin_bl"]) * bl_px
     median_area = track.loc[track["detected"].astype(bool), "area"].median()
+    # Seen side-on: the eye is near one end of the body, far from its centre. A fish facing
+    # the camera has its eyes mid-blob and a tall outline whose fitted angle is not a tilt.
+    side_on = np.hypot(track["head_x"] - track["x"], track["head_y"] - track["y"]).to_numpy(float) \
+        >= float(params["side_on_min_head_offset_bl"]) * bl_px  # no head (NaN) -> False
     # Surface breach: the head (eye) itself is at the waterline and the head-tail line points
     # nose-up. Only the top of the body touching the surface is not enough: in shallow dishes
-    # the fish is that close to the surface most of the time.
+    # the fish is that close to the surface most of the time. Side-on only, as for the tilt: a
+    # fish facing the camera is a near-round blob whose fitted axis (so its pitch) is noise.
     pitch = track["pitch_deg"].to_numpy(float)
     head_at_surface = track["head_y"].to_numpy(float) <= top_limit  # no head (NaN) -> False
-    nose_up = head_at_surface & (pitch >= float(params["nose_up_threshold_deg"]))
+    nose_up = head_at_surface & (pitch >= float(params["nose_up_threshold_deg"])) & side_on
     frames = pd.DataFrame({
         "subject_id": track["subject_id"],
         "part": track["part"],
@@ -188,10 +196,7 @@ def frame_features(track: pd.DataFrame, bl_px: float, waterline_y: float, params
         "pitch_deg": pitch,
         "nose_up_at_surface": nose_up,
         "tilt_deg": track["angle_deg"].abs(),  # -90..90 from horizontal folded to 0..90
-        # Seen side-on: the eye is near one end of the body, far from its centre. A fish facing
-        # the camera has its eyes mid-blob and a tall outline whose fitted angle is not a tilt.
-        "side_on": np.hypot(track["head_x"] - track["x"], track["head_y"] - track["y"]).to_numpy(float)
-        >= float(params["side_on_min_head_offset_bl"]) * bl_px,  # no head (NaN) -> False
+        "side_on": side_on,
         "aspect": track["major_axis"] / track["minor_axis"],
         "area_ratio": track["area"] / median_area,
     })
@@ -322,7 +327,7 @@ def meta_path(features_dir: Path, subject_id: str) -> Path:
 
 def feature_params(params: dict[str, Any]) -> dict[str, Any]:
     """The settings the outputs depend on, JSON-compatible (stored in the meta file)."""
-    return json.loads(json.dumps({key: params[key] for key in FEATURE_PARAMS}))
+    return json.loads(json.dumps({"version": FEATURES_VERSION, **{key: params[key] for key in FEATURE_PARAMS}}))
 
 
 def _load_cached(job: FeatureJob) -> dict[str, Any] | None:

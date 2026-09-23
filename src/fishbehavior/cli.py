@@ -17,6 +17,7 @@ Each pipeline step registers one sub-command here in its own PR
     export         write the final datasets (segments, per-second labels, per-subject table, windows)
     plot           ethograms per group, bar charts per state, optional overlay review videos
     all            every step in order, skipping finished work, with a timing summary
+    live           local page: process one video and watch every step (scene, tracking, features, labels)
 """
 
 from __future__ import annotations
@@ -157,6 +158,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_all.add_argument("--skip-reference", action="store_true",
                          help="skip reference -> priors -> calibrate -> label again, even with FISH_REFERENCE_PDF set")
     run_all.set_defaults(handler=run_all_command)
+
+    live = commands.add_parser(
+        "live", help="open a local page that processes one video and shows every step as it happens"
+    )
+    live.add_argument("--port", type=int, help="local port for the page (default: live.port, 8770)")
+    live.add_argument("--no-browser", action="store_true", help="do not open the browser (e.g. on Colab)")
+    live.set_defaults(handler=run_live_command)
 
     return parser
 
@@ -594,6 +602,19 @@ def run_all_command(settings: Settings, args: argparse.Namespace) -> int:
             print(f"\nStopped at `{name}`: fix the problem above, then run `all` again.")
             return 1
     summary()
+    return 0
+
+
+def run_live_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Serve the live page until Ctrl+C."""
+    from fishbehavior.live import make_server, serve  # the page and its server are only needed here
+
+    port = args.port or int(settings.params["live"]["port"])
+    try:
+        server = make_server(settings, port)
+    except OSError as error:
+        raise ConfigError(f"cannot start the live page on port {port} ({error}); try --port {port + 1}") from None
+    serve(server, open_browser=not args.no_browser)
     return 0
 
 

@@ -43,7 +43,7 @@ The behavior-labeling pipeline (`fishbehavior` package) is complete: workbook ca
 scene setup, tracking, movement features, behavior labeling, reference digitizing, sanity
 checks and calibration, dataset export and plots, plus one `all` command that runs everything
 and a Google Colab notebook. **Start with the user guide:
-[docs/behavior-labeling.md](docs/behavior-labeling.md)** (setup on every platform, every
+[docs/instruction.md](docs/instruction.md)** (setup on every platform, every
 command, how the states are decided, calibration and its limits, troubleshooting). The
 classifier, backend, and frontend are not yet implemented.
 
@@ -56,7 +56,7 @@ fish-detection/
 ├── pyproject.toml            # package definition and dependencies
 ├── requirements.txt          # one-line install: the package + developer tools
 ├── docs/
-│   ├── behavior-labeling.md  # user guide: setup, every command, states, calibration, troubleshooting
+│   ├── instruction.md        # user guide: setup, every command, states, calibration, troubleshooting
 │   ├── how-to-start.md       # contribution workflow
 │   └── zebrafish_drug_detection_scope.md  # project scope
 ├── notebooks/
@@ -71,6 +71,8 @@ fish-detection/
 │   ├── export.py             # final datasets: segments, per-second labels, one row per subject, training windows, clips
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
+│   ├── live.py               # live view: process one video step by step while a local page shows every stage
+│   ├── live_page.html        # the live page (self-contained: canvas ethogram, traces, no external files)
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
 │   ├── plots.py              # ethograms per group, bar charts per state, overlay review videos
 │   ├── priors.py             # sanity checks: video labels vs workbook (NTT hints) and reference group means
@@ -82,7 +84,8 @@ fish-detection/
 │   └── video.py              # video timing (fps, frames, duration) and frame reading
 └── tests/                    # automated tests (synthetic data only, never real trials)
     ├── synthetic.py          # draws synthetic beaker/fish videos for the tests
-    └── test_all.py           # `all` end to end on a tiny synthetic project (workbook, 20 s video, reference PDF)
+    ├── test_all.py           # `all` end to end on a tiny synthetic project (workbook, 20 s video, reference PDF)
+    └── test_live.py          # live view: labels grow while reading and end equal to the batch labels; the server
 
 Everything the pipeline generates is written to the output folder (`outputs/` by
 default), which is ignored by Git.
@@ -453,9 +456,9 @@ Results go to `<FISH_OUTPUT_DIR>/features/`:
   | `depth_bl` | (y − waterline) / BL: 0 = at the waterline, positive = below it |
   | `at_surface` | top of the fish outline within `features.surface_margin_bl` BL of the waterline (or above it) |
   | `pitch_deg` | head–tail line from the track, −90 to 90: positive = nose up; empty when the front end is unclear |
-  | `nose_up_at_surface` | the head (eye) is within `features.surface_margin_bl` BL of the waterline and `pitch_deg` ≥ `features.nose_up_threshold_deg` (25) |
+  | `nose_up_at_surface` | the head (eye) is within `features.surface_margin_bl` BL of the waterline, `pitch_deg` ≥ `features.nose_up_threshold_deg` (25), and the frame is `side_on` |
   | `tilt_deg` | body axis angle from horizontal, 0–90 |
-  | `side_on` | the eye is at least `features.side_on_min_head_offset_bl` (0.3) BL from the body centre, so the fish is seen from the side. A fish facing the camera has its eyes mid-blob and a tall outline whose angle is not a tilt |
+  | `side_on` | the eye is at least `features.side_on_min_head_offset_bl` (0.3) BL from the body centre, so the fish is seen from the side. A fish facing the camera has its eyes mid-blob and a tall or round outline whose angle is neither a tilt nor a pitch |
   | `aspect` | `major_axis` / `minor_axis` (low = fish seen end-on or bent) |
   | `area_ratio` | outline area / the subject's median area |
 
@@ -515,7 +518,7 @@ calibration):
 | # | Label | In plain words | Rule on the bin |
 |---|---|---|---|
 | 0 | `untracked` | not a behavior: the fish was not seen well enough to judge | seen in less than `min_tracked_fraction` (0.5) of the frames |
-| 1 | `surface_breach` | the fish pushes its head up to the surface, body angled nose-up | `nose_up_at_surface` (head at the waterline, head–tail line ≥ 25° nose-up) in at least `surface_breach_fraction` (0.3) of the frames |
+| 1 | `surface_breach` | the fish pushes its head up to the surface, body angled nose-up | `nose_up_at_surface` (head at the waterline, head–tail line ≥ 25° nose-up, seen side-on) in at least `surface_breach_fraction` (0.3) of the frames |
 | 2 | `lorr` | listing / loss of righting: hangs steeply (e.g. head-down) and barely moves | seen side-on and tilted more than `features.tilt_threshold_deg` in at least `lorr_tilt_fraction` (0.5) of the frames, median speed below `lorr_max_speed_bl_s` (0.5 BL/s), for at least `lorr_min_s` (3 s) in a row |
 | 3 | `freeze_drift` | motionless, or only drifting | median speed below `freeze_speed_bl_s` (0.1 BL/s) for at least `freeze_min_s` (2 s) in a row |
 | 4a | `controlled_swim` | normal swimming: steady speed, smooth path, or slow cruising | any other bin with mean speed below `swim_min_speed_bl_s` (0.5 BL/s), or one the swim model calls smooth |
@@ -524,8 +527,9 @@ calibration):
 Why the surface and tilt rules look at the head: in shallow dishes the water is often less
 than one body length deep, so the top of the fish is near the waterline almost all the
 time. A breach is therefore the head itself at the surface with the body angled nose-up.
-A resting fish facing the camera looks like a tall blob whose fitted angle is steep, so
-tilt only counts when the eye is near one end of the body (seen side-on).
+A resting fish facing the camera looks like a tall or round blob whose fitted angle is noise
+(steep, or "nose-up" with the eyes near the waterline), so tilt and nose-up only count when the
+eye is near one end of the body (seen side-on).
 
 Bins slower than `swim_min_speed_bl_s` have no turning measure, so they would form a
 "hovering" group of their own instead of the smooth-versus-erratic split. They are
@@ -798,6 +802,53 @@ so our figures and the slides read the same way.
   timeline, so a split recording plays on from part a into part b.
   `plots.overlay_speed` (4) sets the playback speed; above 1, every n-th frame is kept, so the
   file stays small. Existing videos are kept unless `--force`.
+
+**11. Live view: watch one video go through the pipeline**
+
+```bash
+python -m fishbehavior live                 # opens http://127.0.0.1:8770/ in your browser
+python -m fishbehavior live --port 8771 --no-browser
+```
+
+A local page (this computer only, no internet) that **shows how the pipeline works** on one
+video. `all` stays the way to process every subject. Pick a catalog subject (all its part files)
+or upload a video, press **Open**, and:
+
+1. **Scene**: the empty-beaker background with the detected waterline (blue) and fish region
+   (green). Click to move the waterline, or drag a new ROI; "Real frame" shows actual frames.
+   Your corrections from `scene-review` are already applied.
+2. **Start**: every frame is tracked. The video panel shows the frame with the ROI, waterline,
+   fitted body ellipse, track point, eye and the last 2 s of path (each layer can be switched off).
+3. About once per second, features and labels are recomputed over the track so far, with the
+   same functions as the batch steps. The page shows:
+   - **Now**: the current state, its plain-words meaning and confidence, and **why**: every rule
+     in priority order with this second's numbers against the thresholds in use;
+   - **Time per state**: seconds, % and bouts;
+   - **Progress**: frames, speed vs real time, time left, % of frames with the fish found, body
+     length;
+   - **Ethogram**: our labels (with a confidence strip) and, when the subject has one, the
+     digitized reference row. The last few seconds are hatched **provisional**, because the
+     sustained rules and the bout cleanup still wait for later frames. Every distance is in body
+     lengths, and the body length is the median over the whole video: for a subject that
+     `features` has already processed, the page uses that value while the video plays, so
+     labels before the hatched tail do not change. A new video has no such value; its body
+     length is measured on the frames so far (a fish facing the camera looks short), so its
+     whole timeline stays provisional until the final pass;
+   - **Measurements per second**: speed, depth below the waterline, and the nose-up / tilt /
+     tracked shares, with the thresholds as dashed lines;
+   - the segments so far, every setting in use (calibrated or default, swim model), the
+     workbook row, and a log.
+4. **Saved**: one final pass over the whole track gives exactly the labels `all` gives. Results go
+   to `<FISH_OUTPUT_DIR>/live/<name>/` (`scene.json, background.png, track.csv.gz, bins.csv,
+   segments.csv, summary.csv`, downloadable from the page). Click any second of the ethogram to
+   see that frame and its numbers.
+
+**Pace**: `Max` (default) processes as fast as possible, about 10 s for a 20-minute 320×240
+video on a laptop (roughly 100–150× real time). `1×`, `2×`, `4×`, `10×` or `30×` slow it down to
+that multiple of real time for demos. The labels use the pooled swim model from `label`
+(`labels/swim_model.json`). Without it, a model is fitted on this video alone and the page says
+so. Uploads go to `live/uploads/` (up to `live.max_upload_mb`, 4096 MB). Settings are in `live:`.
+On Colab, see the last cells of the notebook.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its

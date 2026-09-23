@@ -149,6 +149,14 @@ steps accept `--subjects` and `--force`. All outputs are under `FISH_OUTPUT_DIR`
 `export --labels <folder>` exports a copy of a labels folder (e.g. labels saved before
 calibration) to `datasets_<folder name>/` so two labelings can be compared.
 
+**Live view:** `python -m fishbehavior live` opens a local page that processes one video
+while you watch. It shows the scene (correctable), every tracked frame with its outline, the
+labels as they are decided, with the rule checks behind each second, the ethogram next to the
+reference row, and the measurements the rules read. It ends with exactly the batch labels. Labels
+shown while it plays are final except for the hatched last seconds when `features` has already run
+for that subject; for a new video the whole timeline stays provisional until the end. About
+10 s per 20-minute video at `Max` pace; choose `1×`–`30×` for demos. See the README, step 11.
+
 **Review video:** `plot --subjects 42 --overlay --start 600 --end 720` shows the original
 frames with ROI, waterline, fitted body ellipse, track point, the current label and a timeline
 bar with a moving cursor. Check it for a few subjects of every group before trusting the labels.
@@ -163,7 +171,7 @@ Each 1 s bin (`features.bin_s`) gets the first rule that matches, in this order.
 | # | Label | Rule on the bin |
 |---|---|---|
 | 0 | `untracked` | fish seen in less than `min_tracked_fraction` (0.5) of the frames |
-| 1 | `surface_breach` | head at the waterline and body ≥ 25° nose-up in at least `surface_breach_fraction` (0.3) of the frames |
+| 1 | `surface_breach` | seen side-on, head at the waterline and body ≥ 25° nose-up in at least `surface_breach_fraction` (0.3) of the frames |
 | 2 | `lorr` | seen side-on and tilted > 45° in ≥ `lorr_tilt_fraction` (0.5) of the frames, median speed < `lorr_max_speed_bl_s` (0.5 BL/s), for ≥ `lorr_min_s` (3 s) in a row |
 | 3 | `freeze_drift` | median speed < `freeze_speed_bl_s` (0.1 BL/s) for ≥ `freeze_min_s` (2 s) in a row |
 | 4a | `controlled_swim` | any other bin slower than `swim_min_speed_bl_s` (0.5 BL/s), or one the swim model calls smooth |

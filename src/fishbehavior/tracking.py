@@ -35,7 +35,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 
 import cv2
 import numpy as np
@@ -307,13 +307,14 @@ def to_original(blob: dict[str, float], scale: float) -> dict[str, float]:
     return out  # tilt and pitch do not change with uniform scaling
 
 
-def track_part(video_path: Path, background: np.ndarray, roi: list[int], params: dict[str, Any],
-               frame_count: int | None = None, progress: bool = False) -> pd.DataFrame:
-    """Track the fish in one video file; one row per analysed frame (part_frame, time in the file).
+def track_frames(frames: Iterable[tuple[int, float, np.ndarray]], background: np.ndarray, roi: list[int],
+                 params: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Track the fish frame by frame: one row per (index, time_s, gray frame at `tracking.scale`).
 
     `background` is the full-size grayscale scene background; `roi` is in original pixels.
+    A generator, so the live view can show every row as it comes; `track_part` collects them.
     """
-    stride, scale = int(params["frame_stride"]), float(params["scale"])
+    scale = float(params["scale"])
     if scale != 1.0:
         # Same call as iter_frames uses, so the background has exactly the frames' size.
         background = cv2.resize(background, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
@@ -321,13 +322,8 @@ def track_part(video_path: Path, background: np.ndarray, roi: list[int], params:
     window = deque(maxlen=int(params["body_length_window"]))  # recent body lengths (analysis px)
     max_jump_bl = float(params["max_jump_bl"])
     switch_area_ratio = float(params["switch_area_ratio"])
-
-    rows: list[dict[str, Any]] = []
     previous: tuple[float, float] | None = None
     previous_mask: np.ndarray | None = None  # last frame's fish outline; None after a missed frame
-    total = None if frame_count is None else -(-frame_count // stride)
-    frames = tqdm(iter_frames(video_path, stride=stride, scale=scale), total=total, desc=video_path.name,
-                  unit="frame", leave=False, disable=None if progress else True)
     for index, time_s, gray in frames:
         # The jump limit is in body lengths: a running median of the recent fitted lengths.
         max_jump = max_jump_bl * float(np.median(window)) if window else np.inf
@@ -338,10 +334,24 @@ def track_part(video_path: Path, background: np.ndarray, roi: list[int], params:
             if np.isfinite(blob["major_axis"]):
                 window.append(blob["major_axis"])
             row.update(to_original(blob, scale))
-        rows.append(row)
+        yield row
+
+
+def track_table(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    """Rows from `track_frames` as one part's table (every column present, `detected` added)."""
     table = pd.DataFrame(rows, columns=["part_frame", "part_time_s", "n_blobs", *MEASURED, "angle_deg"])
     table["detected"] = table["x"].notna()
     return table
+
+
+def track_part(video_path: Path, background: np.ndarray, roi: list[int], params: dict[str, Any],
+               frame_count: int | None = None, progress: bool = False) -> pd.DataFrame:
+    """Track the fish in one video file; one row per analysed frame (part_frame, time in the file)."""
+    stride, scale = int(params["frame_stride"]), float(params["scale"])
+    total = None if frame_count is None else -(-frame_count // stride)
+    frames = tqdm(iter_frames(video_path, stride=stride, scale=scale), total=total, desc=video_path.name,
+                  unit="frame", leave=False, disable=None if progress else True)
+    return track_table(list(track_frames(frames, background, roi, params)))
 
 
 # ---------------------------------------------------------------------------

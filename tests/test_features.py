@@ -155,14 +155,17 @@ def test_surface_flag_and_tilt_fraction_on_crafted_rows():
     assert frames["depth_bl"].to_numpy() == pytest.approx((80 - 50) / BL_PX)
 
 
-def test_surface_breach_needs_the_head_at_the_surface_and_the_nose_up():
-    # Surface limit = 55 (see above). Rows: breach; nose up but head deep; head up there but
-    # flat; nose up but no head found (no pitch).
-    track = make_track(np.full(4, 100.0), np.full(4, 80.0), 4.0, head_y=[52.0, 70.0, 54.0, np.nan],
-                       pitch_deg=[40.0, 40.0, 5.0, np.nan])
+def test_surface_breach_needs_the_head_at_the_surface_the_nose_up_and_a_side_view():
+    # Surface limit = 55 (see above); centre (100, 56), so head_x 107 is >= 0.35 BL away (side-on).
+    # Rows: breach; nose up but head deep; head up there but flat; nose up but no head found
+    # (no pitch); nose up at the surface but the eye mid-blob, 0.11 BL from the centre (a fish
+    # facing the camera: near-round outline, its fitted axis is noise).
+    track = make_track(np.full(5, 100.0), np.full(5, 56.0), 5.0, head_y=[52.0, 70.0, 54.0, np.nan, 54.0],
+                       head_x=[107.0, 107.0, 107.0, np.nan, 101.0], pitch_deg=[40.0, 40.0, 5.0, np.nan, 40.0])
     frames, bins, _ = features(track)
-    assert list(frames["nose_up_at_surface"]) == [True, False, False, False]
-    assert bins.loc[0, "nose_up_surface_fraction"] == pytest.approx(0.25)
+    assert list(frames["side_on"]) == [True, True, True, False, False]
+    assert list(frames["nose_up_at_surface"]) == [True, False, False, False, False]
+    assert bins.loc[0, "nose_up_surface_fraction"] == pytest.approx(0.2)
 
 
 def test_tilt_of_a_fish_facing_the_camera_does_not_count():

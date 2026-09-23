@@ -7,7 +7,7 @@ ethogram states, or the QA label ``untracked`` (not a behavior: the fish was not
 Rules, in priority order (the first that matches wins; thresholds in `labeling:`):
 
 0. untracked       tracked_fraction < min_tracked_fraction
-1. surface_breach  nose_up_surface_fraction >= surface_breach_fraction (head at the waterline, nose up)
+1. surface_breach  nose_up_surface_fraction >= surface_breach_fraction (seen side-on, head at the waterline, nose up)
 2. lorr            tilt_fraction >= lorr_tilt_fraction and speed_median < lorr_max_speed_bl_s,
                    for at least lorr_min_s seconds in a row
 3. freeze_drift    speed_median < freeze_speed_bl_s, for at least freeze_min_s seconds in a row
