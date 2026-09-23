@@ -2,9 +2,10 @@
 
 `python -m fishbehavior scene-review` brings the scene results up to date, then opens
 a page (served only on this computer, 127.0.0.1) showing one video at a time:
-its empty-beaker background, where the fish moved (red tint), the waterline (blue)
-and the ROI (green). A person clicks to move the waterline, drags to redraw the ROI,
-or confirms the automatic result. The cursor position is shown in ORIGINAL video
+its empty-beaker background or real color frames, where the fish moved (red tint),
+the waterline (blue) and the ROI (green). A person clicks to move the waterline,
+drags to redraw the ROI, erases false motion from the tint and fits the ROI to what
+is left, or confirms the automatic result. The cursor position is shown in ORIGINAL video
 pixels, so no zoom arithmetic is needed. Every change is saved straight into
 ``<FISH_OUTPUT_DIR>/scene/overrides.yaml`` and applied when the page is closed.
 
@@ -12,7 +13,8 @@ With ``--no-serve`` (e.g. on Google Colab) the page is only written to
 ``scene/review.html``; its "Download overrides.yaml" button gives the file to put in
 the scene folder.
 
-Nothing leaves the computer: the page embeds the images and has no external links.
+Nothing leaves the computer: images come from the local server (or are embedded in
+review.html) and the page has no external links.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import cv2
 import pandas as pd
@@ -58,11 +61,16 @@ HINT_TOP_FRACTION = 0.10  # waterline or ROI top in the top 10% of the frame is 
 # ---------------------------------------------------------------------------
 
 
-def _image_data_url(path: Path, jpeg: bool) -> str | None:
-    """Embed an image in the page (JPEG for the photo-like background keeps the page small)."""
+IMAGE_KEYS = ("background", "activity", "frames")  # item fields that name an image file
+
+
+def _image_data_url(path: Path) -> str | None:
+    """Embed an image in the page (for --no-serve). The PNG background is re-encoded as
+    JPEG, which keeps a page with hundreds of videos small; the activity map stays PNG."""
     image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if image is None:
         return None
+    jpeg = path.suffix == ".jpg" or path.name.endswith("_background.png")
     ext, mime, options = (".jpg", "image/jpeg", [cv2.IMWRITE_JPEG_QUALITY, 92]) if jpeg else (".png", "image/png", [])
     ok, buffer = cv2.imencode(ext, image, options)
     return f"data:{mime};base64,{base64.b64encode(buffer.tobytes()).decode('ascii')}" if ok else None
@@ -103,8 +111,11 @@ def collect_items(scene_dir: Path, trials: pd.DataFrame) -> tuple[list[dict[str,
                 "auto": record["auto"],
                 "base_roi": record["base_roi"],
                 "hints": review_hints(record),
-                "background": _image_data_url(scene_dir / record["background_image"], jpeg=True),
-                "activity": _image_data_url(scene_dir / record["activity_image"], jpeg=False),
+                # Image file names in the scene folder; render_page turns them into URLs.
+                "background": record["background_image"],
+                "activity": record["activity_image"],
+                "frames": record["frames_image"],
+                "n_frames": record["n_frames_image"],
             })
     # Videos with hints first (they most likely need fixing), then by file name.
     items.sort(key=lambda item: (not item["hints"], item["file"]))
@@ -112,15 +123,25 @@ def collect_items(scene_dir: Path, trials: pd.DataFrame) -> tuple[list[dict[str,
 
 
 def render_page(items: list[dict[str, Any]], overrides: dict[str, dict[str, Any]],
-                params: dict[str, Any], serve: bool) -> str:
-    """The review page with its data embedded (one self-contained HTML file)."""
+                params: dict[str, Any], serve: bool, scene_dir: Path | None = None) -> str:
+    """The review page with its data embedded.
+
+    Served (`serve=True`): images are fetched from the local server as they are needed.
+    Otherwise every image is embedded (needs `scene_dir`), so the file works on its own.
+    """
     files = {item["file"] for item in items}
+    if serve:
+        items = [{**item, **{key: "/files/" + item[key] for key in IMAGE_KEYS}} for item in items]
+    else:
+        assert scene_dir is not None, "scene_dir is needed to embed the images"
+        items = [{**item, **{key: _image_data_url(scene_dir / item[key]) for key in IMAGE_KEYS}} for item in items]
     data = {
         "items": items,
         # Current entries for the videos on the page; the others are kept untouched on save.
         "overrides": {name: entry for name, entry in overrides.items() if name in files},
         "other_overrides": {name: entry for name, entry in overrides.items() if name not in files},
         "margin_fraction": float(params["waterline_margin_fraction"]),
+        "padding_fraction": float(params["roi_padding_fraction"]),
         "serve": serve,
     }
     template = resources.files("fishbehavior").joinpath(TEMPLATE).read_text(encoding="utf-8")
@@ -182,12 +203,16 @@ def write_overrides(scene_dir: Path, overrides: dict[str, dict[str, Any]]) -> No
 # ---------------------------------------------------------------------------
 
 
-def make_server(scene_dir: Path, page: str, sizes: dict[str, tuple[int, int]], port: int) -> ThreadingHTTPServer:
+def make_server(scene_dir: Path, page: str, sizes: dict[str, tuple[int, int]], port: int,
+                images: set[str] | None = None) -> ThreadingHTTPServer:
     """An HTTP server on 127.0.0.1 that serves the page and saves overrides it posts.
 
-    Routes: GET / (the page), POST /save (JSON {file: entry}), POST /done (stop serving).
+    Routes: GET / (the page), GET /files/<name> (one of the page's `images`, from the
+    scene folder), POST /save (JSON {file: entry}), POST /done (stop serving).
     """
     lock = threading.Lock()  # one save at a time
+    allowed = set(images or ())  # only these exact names: nothing else on disk can be read
+    types = {".png": "image/png", ".jpg": "image/jpeg"}
 
     class Handler(BaseHTTPRequestHandler):
         def _reply(self, status: int, body: bytes, content_type: str) -> None:
@@ -202,8 +227,11 @@ def make_server(scene_dir: Path, page: str, sizes: dict[str, tuple[int, int]], p
             self._reply(status, json.dumps(data).encode("utf-8"), "application/json")
 
         def do_GET(self) -> None:  # noqa: N802 - name required by BaseHTTPRequestHandler
+            name = unquote(self.path[len("/files/"):]) if self.path.startswith("/files/") else None
             if self.path in ("/", "/index.html"):
                 self._reply(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            elif name in allowed and (scene_dir / name).is_file():
+                self._reply(200, (scene_dir / name).read_bytes(), types.get(Path(name).suffix, "application/octet-stream"))
             else:
                 self._reply(404, b"not found", "text/plain")
 

@@ -99,7 +99,7 @@ def test_sample_frames_spreads_over_the_whole_video(tmp_path):
     frames = sample_frames(truth["path"], 5)
 
     assert frames.shape == (5, 240, 320)
-    fish_x = [np.nonzero(frame < 90)[1].mean() for frame in frames]  # centre of the dark pixels
+    fish_x = [np.nonzero(frame < 110)[1].mean() for frame in frames]  # centre of the dark pixels
     expected = [40 + 120 * t for t in np.linspace(0, (truth["frame_count"] - 1) / 30.0, 5)]
     assert fish_x == pytest.approx(expected, abs=3)
 

@@ -18,7 +18,7 @@ from typing import Sequence
 from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
-from fishbehavior.review import REVIEW_FILE, collect_items, make_server, render_page, serve_review
+from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -171,7 +171,8 @@ def run_scene_review(settings: Settings, args: argparse.Namespace) -> int:
         print("Nothing to review.")
         return 1 if missing else 0
 
-    page = render_page(items, load_overrides(scene_dir), settings.params["scene"], serve=not args.no_serve)
+    page = render_page(items, load_overrides(scene_dir), settings.params["scene"],
+                       serve=not args.no_serve, scene_dir=scene_dir)
     if args.no_serve:
         path = scene_dir / REVIEW_FILE
         path.write_text(page, encoding="utf-8")
@@ -180,8 +181,9 @@ def run_scene_review(settings: Settings, args: argparse.Namespace) -> int:
         return 0
 
     sizes = {item["file"]: (item["width"], item["height"]) for item in items}
+    images = {item[key] for item in items for key in IMAGE_KEYS}
     try:
-        server = make_server(scene_dir, page, sizes, args.port)
+        server = make_server(scene_dir, page, sizes, args.port, images)
     except OSError as error:
         raise ConfigError(f"cannot start the review page on port {args.port} ({error}); try --port 8766") from None
     serve_review(server, open_browser=not args.no_browser)

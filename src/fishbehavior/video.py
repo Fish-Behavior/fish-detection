@@ -123,29 +123,34 @@ def iter_frames(
         capture.release()
 
 
-def sample_frames(path: str | Path, n: int, gray: bool = True) -> np.ndarray:
-    """Return up to `n` frames spread evenly from the first to the last frame, stacked.
+def iter_sampled_frames(path: str | Path, n: int, gray: bool = True) -> Iterator[np.ndarray]:
+    """Yield up to `n` frames spread evenly from the first to the last frame, one at a time.
 
     Seeking is fine here because only a few frames are needed. A frame that cannot
     be read (the header frame count sometimes overshoots by a frame or two) is
-    skipped, so the result can be slightly shorter than `n`.
+    skipped. One frame at a time keeps memory low for large videos.
     """
     if n < 1:
         raise ValueError(f"n must be >= 1, got {n}")
     info = probe(path)
     indices = np.unique(np.linspace(0, info.frame_count - 1, n).round().astype(int))
     capture = _open(info.path)
-    frames = []
+    read = 0
     try:
         for index in indices:
             capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
             ok, frame = capture.read()
             if ok:
-                frames.append(_prepare(frame, 1.0, gray))
+                read += 1
+                yield _prepare(frame, 1.0, gray)
     finally:
         capture.release()
-    if not frames:
+    if read == 0:
         raise VideoError(f"{info.path}: none of the {len(indices)} sampled frames could be read")
-    if len(frames) < len(indices):
-        log.debug("%s: %d of %d sampled frames unreadable", info.path.name, len(indices) - len(frames), len(indices))
-    return np.stack(frames)
+    if read < len(indices):
+        log.debug("%s: %d of %d sampled frames unreadable", info.path.name, len(indices) - read, len(indices))
+
+
+def sample_frames(path: str | Path, n: int, gray: bool = True) -> np.ndarray:
+    """Up to `n` evenly spread frames stacked into one array (see iter_sampled_frames)."""
+    return np.stack(list(iter_sampled_frames(path, n, gray)))

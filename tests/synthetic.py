@@ -5,9 +5,12 @@ Reusable by every step's tests. The scene, from top to bottom:
 * light background (the lab wall);
 * a darker rectangle = the beaker, with a horizontal brightness step at `waterline_y`
   (glass above is lighter than the water below), so the waterline is a clear edge;
-* a dark ellipse = the fish, placed each frame by ``fish_path(t) -> (x, y, angle_deg)``;
-* optionally a faint mirrored copy of the fish BELOW the beaker bottom = the reflection
-  (much weaker than the fish, like the real one).
+* a dark orange ellipse = the (colored) fish, placed each frame by
+  ``fish_path(t) -> (x, y, angle_deg)``;
+* optionally a faint, slightly tinted mirrored copy of the fish BELOW the beaker bottom
+  = the reflection (much weaker than the fish, like the real one);
+* optionally a whole-frame brightness drop in some frames = a light flicker / camera
+  exposure change, which must not count as fish movement.
 
 Videos are written as MJPG .avi, which OpenCV can read and write on every OS.
 """
@@ -27,8 +30,10 @@ FishPath = Callable[[float], tuple[float, float, float]]
 WALL = 205
 GLASS = 175  # beaker above the water
 WATER = 140  # beaker below the waterline: the 35-level step is the waterline edge
-FISH = 40
+FISH_BGR = (20, 60, 160)  # dark orange, like the real (colored) fish
+FISH = 85  # its approximate gray level, for tests that look for dark pixels
 REFLECTION_DROP = 10  # the reflection darkens the wall by only this much (under scene.diff_threshold)
+REFLECTION_TINT = (0, 12, 30)  # ...and tints it toward the fish color (BGR added)
 
 
 def default_beaker(size: tuple[int, int], waterline_y: int) -> tuple[int, int, int, int]:
@@ -60,26 +65,26 @@ def lissajous_path(beaker: tuple[int, int, int, int], waterline_y: int, fish_len
 
 def draw_frame(size: tuple[int, int], beaker: tuple[int, int, int, int], waterline_y: int,
                fish: tuple[float, float, float], fish_axes: tuple[float, float],
-               reflection: bool) -> np.ndarray:
-    """One BGR frame of the synthetic scene."""
+               reflection: bool, brightness: int = 0) -> np.ndarray:
+    """One BGR frame of the synthetic scene; `brightness` is added to every pixel."""
     width, height = size
-    frame = np.full((height, width), WALL, np.uint8)
+    gray = np.full((height, width), WALL, np.uint8)
     x0, y0, x1, y1 = beaker
-    frame[y0:y1, x0:x1] = GLASS
-    frame[waterline_y:y1, x0:x1] = WATER
+    gray[y0:y1, x0:x1] = GLASS
+    gray[waterline_y:y1, x0:x1] = WATER
+    frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
     x, y, angle = fish
     axes = (max(1, round(fish_axes[0])), max(1, round(fish_axes[1])))
-    cv2.ellipse(frame, (round(x), round(y)), axes, angle, 0, 360, FISH, -1, cv2.LINE_AA)
+    cv2.ellipse(frame, (round(x), round(y)), axes, angle, 0, 360, FISH_BGR, -1, cv2.LINE_AA)
     if reflection:
         # Mirror the fish about the beaker bottom and draw it faintly on the wall below.
-        mirror_y = 2 * y1 - y
-        mask = np.zeros_like(frame)
-        cv2.ellipse(mask, (round(x), round(mirror_y)), axes, -angle, 0, 360, 255, -1)
-        below = np.zeros_like(mask)
-        below[y1:, :] = 1  # only below the beaker
-        frame = np.where((mask > 0) & (below > 0), frame - REFLECTION_DROP, frame).astype(np.uint8)
-    return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        mask = np.zeros((height, width), np.uint8)
+        cv2.ellipse(mask, (round(x), round(2 * y1 - y)), axes, -angle, 0, 360, 255, -1)
+        mask[:y1, :] = 0  # only below the beaker
+        change = np.array(REFLECTION_TINT, np.int16) - REFLECTION_DROP
+        frame = np.where(mask[..., None] > 0, frame.astype(np.int16) + change, frame)
+    return np.clip(frame.astype(np.int16) + brightness, 0, 255).astype(np.uint8)
 
 
 def make_video(
@@ -92,10 +97,12 @@ def make_video(
     beaker: tuple[int, int, int, int] | None = None,
     fish_length: float | None = None,
     reflection: bool = True,
+    flicker: tuple[int, int] | None = None,
 ) -> dict:
     """Write a synthetic MJPG .avi and return its ground truth.
 
     Sizes default to fractions of the frame so tests can run at any resolution.
+    ``flicker=(every, amount)`` darkens every `every`-th frame by `amount` gray levels.
     Returns a dict with the path, fps, frame_count, size, waterline_y, beaker box,
     fish axes, and the list of fish positions (x, y, angle) per frame.
     """
@@ -116,7 +123,9 @@ def make_video(
         for index in range(n_frames):
             fish = fish_path(index / fps)
             positions.append(fish)
-            writer.write(draw_frame(size, beaker, waterline_y, fish, fish_axes, reflection))
+            dimmed = flicker is not None and index % flicker[0] == 0
+            brightness = -flicker[1] if dimmed else 0
+            writer.write(draw_frame(size, beaker, waterline_y, fish, fish_axes, reflection, brightness))
     finally:
         writer.release()
     return {

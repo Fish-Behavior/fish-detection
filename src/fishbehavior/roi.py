@@ -4,9 +4,11 @@ For every matched video (see catalog.py):
 
 1. **Background** = per-pixel median of `scene.n_background_frames` frames sampled
    evenly over the video. The fish keeps moving, so it disappears from the median.
-2. **Activity map** = fraction of those frames in which a pixel differs from the
-   background by more than `scene.diff_threshold`. Only the fish moves enough to
-   pass; faint reflections below the beaker bottom do not.
+2. **Activity map** = fraction of those frames in which a pixel clearly differs from
+   the background (`scene.activity_method`): by default it must change in brightness
+   AND in color, so light flicker, exposure changes and glare on the water (brightness
+   only) and the faint reflection in the glass (little brightness change) do not count.
+   Small separate specks are dropped; the main patch is where the fish swims.
 3. **ROI** = bounding box of the activity map, padded; its top is raised to just
    above the waterline so a surface breach stays inside.
 4. **Waterline** = the row with the strongest horizontal edge in the background
@@ -20,6 +22,7 @@ Outputs (in ``<FISH_OUTPUT_DIR>/scene/``, git-ignored):
     <video_stem>.json             video info, waterline_y, roi, confidence, method
     <video_stem>_background.png   the empty-beaker background (grayscale)
     <video_stem>_activity.png     activity map (white = fish seen there often), for review
+    <video_stem>_frames.jpg       a few real color frames stacked vertically, for review
     <video_stem>_qa.png           QA image: waterline blue, ROI green, activity faint red
     video_check.csv               one row per video with duration / fps / waterline flags
     overrides.yaml                manual corrections and "checked" marks (written by a
@@ -45,7 +48,7 @@ import yaml
 
 from fishbehavior.catalog import STATUS_MATCHED
 from fishbehavior.config import ConfigError, Settings
-from fishbehavior.video import VideoInfo, probe, sample_frames
+from fishbehavior.video import VideoInfo, iter_sampled_frames, probe
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +64,16 @@ FLAG_DURATION = "duration"  # subject total differs from scene.expected_duration
 FLAG_FPS = "fps_mismatch"  # parts of one subject have different frame rates
 FLAG_ERROR = "error"  # the video could not be processed (see the summary / log)
 
+ACTIVITY_METHODS = ("both", "color", "gray")
+# Settings that change a video's result or images: a cached result made with other
+# values is redone automatically (the other scene settings only affect video_check.csv).
+DETECTION_PARAMS = (
+    "n_background_frames", "activity_method", "diff_threshold", "color_threshold",
+    "analysis_max_width", "activity_min_fraction", "activity_min_component_fraction",
+    "roi_padding_fraction", "waterline_search", "waterline_central_fraction",
+    "waterline_margin_fraction", "min_waterline_confidence", "n_review_frames",
+)
+
 Box = tuple[int, int, int, int]  # x0, y0, x1, y1 (x1/y1 exclusive)
 
 
@@ -74,25 +87,57 @@ def compute_background(frames: np.ndarray) -> np.ndarray:
     return np.median(frames, axis=0).round().astype(np.uint8)
 
 
-def activity_map(frames: np.ndarray, background: np.ndarray, diff_threshold: float) -> np.ndarray:
-    """Fraction (0-1) of frames in which each pixel differs from the background by > threshold."""
+def activity_map(frames: np.ndarray, method: str = "both", diff_threshold: float = 18,
+                 color_threshold: float = 8) -> np.ndarray:
+    """Fraction (0-1) of frames in which each pixel clearly differs from the background.
+
+    `frames` is an (n, h, w, 3) BGR uint8 stack. Work is done in CIELAB, which splits
+    a pixel into lightness (L) and color (a*, b*):
+
+    * lightness change: |L - background L| > diff_threshold, after removing each frame's
+      overall brightness change (its median difference), so a light flicker or camera
+      exposure change does not light up the whole frame;
+    * color change: distance in the a*/b* plane > color_threshold. Brightness-only
+      changes (glare, shadows, exposure) barely move a pixel here; a colored fish does.
+
+    method "both" requires both changes, "color" / "gray" only one of them.
+    """
+    if method not in ACTIVITY_METHODS:
+        raise ValueError(f"activity_method must be one of {', '.join(ACTIVITY_METHODS)}, got {method!r}")
     # int16 avoids uint8 wrap-around when subtracting.
-    diff = np.abs(frames.astype(np.int16) - background.astype(np.int16))
-    return (diff > diff_threshold).mean(axis=0).astype(np.float32)
+    lab = np.stack([cv2.cvtColor(frame, cv2.COLOR_BGR2LAB) for frame in frames]).astype(np.int16)
+    lab -= np.median(lab, axis=0).astype(np.int16)  # difference from the (Lab) background
+    light = lab[..., 0] - np.median(lab[..., 0].reshape(len(lab), -1), axis=1)[:, None, None]
+    changed_light = np.abs(light) > diff_threshold
+    changed_color = np.hypot(lab[..., 1], lab[..., 2]) > color_threshold
+    changed = {"both": changed_light & changed_color, "color": changed_color, "gray": changed_light}[method]
+    return changed.mean(axis=0).astype(np.float32)
 
 
-def activity_box(activity: np.ndarray, min_fraction: float) -> Box | None:
-    """Bounding box of pixels active in more than `min_fraction` of frames, or None if none.
+def activity_mask(activity: np.ndarray, min_fraction: float, min_component_fraction: float = 0.0) -> np.ndarray:
+    """Pixels where the fish was: active in > `min_fraction` of frames, main patches only.
 
-    A 3x3 morphological opening first removes isolated pixels (compression noise), so
-    one speck far from the fish cannot stretch the box.
+    A 3x3 morphological opening removes isolated pixels (compression noise). Then every
+    separate patch smaller than `min_component_fraction` of the largest patch is dropped,
+    so a speck far from the fish (a brief light change at the rim) cannot stretch the box.
     """
     mask = (activity > min_fraction).astype(np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if count <= 1:  # label 0 is the background
+        return np.zeros(mask.shape, bool)
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    keep = 1 + np.nonzero(areas >= min_component_fraction * areas.max())[0]
+    return np.isin(labels, keep)
+
+
+def mask_box(mask: np.ndarray) -> Box | None:
+    """Bounding box (x1/y1 exclusive) of the True pixels, or None if there are none."""
     ys, xs = np.nonzero(mask)
     if len(xs) == 0:
         return None
     return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
 
 
 def pad_box(box: Box, width: int, height: int, fraction: float) -> Box:
@@ -153,6 +198,7 @@ class SceneDetection:
     method: str  # "auto" or "override"
     overrides: dict[str, Any]
     base_roi: Box  # padded activity box before the waterline raises its top (review preview)
+    review_frames: list[np.ndarray]  # a few real color frames, for the review page
     auto: dict[str, Any]  # automatic waterline_y / roi, kept even when overridden (review "reset")
     flags: list[str] = field(default_factory=list)
 
@@ -172,10 +218,17 @@ def detect_scene(video_path: Path, params: dict[str, Any], override: dict[str, A
     override = override or {}
     info = probe(video_path)
     _check_override(override, info.width, info.height)
-    frames = sample_frames(video_path, int(params["n_background_frames"]), gray=True)
-    background = compute_background(frames)
-    activity = activity_map(frames, background, float(params["diff_threshold"]))
-    box = activity_box(activity, float(params["activity_min_fraction"]))
+    grays, smalls, review_frames = sample_scene_frames(video_path, info, params)
+    background = compute_background(np.stack(grays))
+    del grays  # the largest array; free it before the activity work
+    small_activity = activity_map(np.stack(smalls), str(params["activity_method"]),
+                                  float(params["diff_threshold"]), float(params["color_threshold"]))
+    # Back to full size so boxes and images are in original video pixels.
+    activity = cv2.resize(small_activity, (info.width, info.height), interpolation=cv2.INTER_LINEAR)
+    mask = activity_mask(activity, float(params["activity_min_fraction"]),
+                         float(params["activity_min_component_fraction"]))
+    activity = np.where(mask, activity, 0).astype(np.float32)  # keep only what the ROI is based on
+    box = mask_box(mask)
 
     flags = []
     if box is None:
@@ -210,9 +263,33 @@ def detect_scene(video_path: Path, params: dict[str, Any], override: dict[str, A
         method="override" if override else "auto",
         overrides=dict(override),
         base_roi=base_roi,
+        review_frames=review_frames,
         auto=auto,
         flags=flags,
     )
+
+
+def sample_scene_frames(video_path: Path, info: VideoInfo,
+                        params: dict[str, Any]) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    """Read the sampled frames once and keep what each part of the analysis needs.
+
+    Returns full-size grayscale frames (background and waterline need full detail),
+    color frames shrunk to `analysis_max_width` (the activity map is coarse, and this
+    keeps memory low for large videos), and `n_review_frames` full-size color frames.
+    """
+    n = int(params["n_background_frames"])
+    scale = min(1.0, float(params["analysis_max_width"]) / info.width)
+    # A short video has fewer frames than requested; pick review frames among those sampled.
+    sampled = min(n, info.frame_count)
+    keep = set(np.linspace(0, sampled - 1, int(params["n_review_frames"])).round().astype(int).tolist())
+    grays, smalls, review = [], [], []
+    for i, frame in enumerate(iter_sampled_frames(video_path, n, gray=False)):
+        grays.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+        smalls.append(frame if scale == 1.0 else
+                      cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA))
+        if i in keep:
+            review.append(frame)
+    return grays, smalls, review
 
 
 def raise_roi_top(box: Box, waterline: int, height: int, params: dict[str, Any]) -> Box:
@@ -334,10 +411,15 @@ def _load_cached(job: SceneJob) -> dict[str, Any] | None:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None  # damaged file: redo it
-    if "auto" not in record:
-        return None  # written before the review data existed: redo it once to add it
+    if record.get("params") != detection_params(job.params):
+        return None  # made with other settings (or by an older version): redo it
     # An edited waterline/roi must take effect without --force.
     return record if record.get("overrides", {}) == geometry_of(job.override) else None
+
+
+def detection_params(params: dict[str, Any]) -> dict[str, Any]:
+    """The settings a result depends on, as stored in its JSON (JSON-compatible values)."""
+    return json.loads(json.dumps({key: params[key] for key in DETECTION_PARAMS}))
 
 
 def _update_checked(record: dict[str, Any], job: SceneJob) -> dict[str, Any]:
@@ -365,11 +447,14 @@ def process_video(job: SceneJob) -> dict[str, Any]:
 
     stem = job.video_path.stem
     background_name, qa_name = f"{stem}_background.png", f"{stem}_qa.png"
-    activity_name = f"{stem}_activity.png"
+    activity_name, frames_name = f"{stem}_activity.png", f"{stem}_frames.jpg"
     cv2.imwrite(str(job.scene_dir / background_name), detection.background)
     # Activity fraction scaled so the most active pixel is white (shown as a tint when reviewing).
     peak = float(detection.activity.max()) or 1.0
     cv2.imwrite(str(job.scene_dir / activity_name), (detection.activity / peak * 255).astype(np.uint8))
+    # Real frames stacked top to bottom; the review page shows one slice at a time.
+    cv2.imwrite(str(job.scene_dir / frames_name), np.vstack(detection.review_frames),
+                [cv2.IMWRITE_JPEG_QUALITY, 88])
     cv2.imwrite(str(job.scene_dir / qa_name), draw_qa(detection))
     record = {
         "subject_id": job.subject_id,
@@ -387,6 +472,9 @@ def process_video(job: SceneJob) -> dict[str, Any]:
         "flags": detection.flags,
         "background_image": background_name,
         "activity_image": activity_name,
+        "frames_image": frames_name,
+        "n_frames_image": len(detection.review_frames),
+        "params": detection_params(job.params),
         "qa_image": qa_name,
     }
     json_path(job.scene_dir, job.video_path).write_text(json.dumps(record, indent=2), encoding="utf-8")

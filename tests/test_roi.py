@@ -19,12 +19,13 @@ from fishbehavior.roi import (
     FLAG_FPS,
     FLAG_LOW_CONFIDENCE,
     SceneJob,
+    activity_mask,
     detect_scene,
     load_overrides,
     process_video,
     video_check,
 )
-from synthetic import FISH, make_video
+from synthetic import FISH, WATER, make_video
 
 PARAMS = load_settings(environ={}).params["scene"]
 
@@ -50,7 +51,7 @@ def scene(request, tmp_path_factory):
 def test_background_has_no_fish(scene):
     truth, detection = scene
     # The fish is the only very dark thing in the scene; the median must have removed it.
-    assert (detection.background < (FISH + 100)).sum() == 0
+    assert (detection.background < (FISH + WATER) / 2).sum() == 0
     assert detection.background.shape == truth["size"][::-1]
 
 
@@ -76,6 +77,48 @@ def test_roi_excludes_the_reflection_below_the_beaker(scene):
     truth, detection = scene
     beaker_bottom = truth["beaker"][3]
     assert detection.roi[3] <= beaker_bottom  # the reflection is drawn only below this row
+
+
+@pytest.mark.parametrize("method", ["both", "gray"])
+def test_light_flicker_does_not_spread_the_roi(tmp_path, method):
+    # Every 10th frame the whole picture is 30 gray levels darker (lights / auto exposure).
+    truth = make_video(tmp_path / "flicker.avi", duration_s=6.0, flicker=(10, 30))
+
+    detection = detect_scene(truth["path"], {**PARAMS, "activity_method": method})
+
+    x0, y0, x1, y1 = detection.roi
+    beaker = truth["beaker"]
+    # Without removing each frame's overall brightness change, the ROI would be the whole frame.
+    assert x0 >= beaker[0] - 0.05 * 320 and x1 <= beaker[2] + 0.05 * 320
+    assert y1 <= beaker[3]
+
+
+def test_colored_reflection_is_ignored_by_the_both_method(tmp_path):
+    truth = make_video(tmp_path / "clip.avi", duration_s=6.0)
+
+    color_only = detect_scene(truth["path"], {**PARAMS, "activity_method": "color"})
+    both = detect_scene(truth["path"], {**PARAMS, "activity_method": "both"})
+
+    beaker_bottom = truth["beaker"][3]
+    assert color_only.activity[beaker_bottom + 5:].max() > 0  # the tinted reflection has color...
+    assert both.activity[beaker_bottom:].max() == 0  # ...but too little brightness change to count
+
+
+def test_small_separate_specks_are_dropped():
+    activity = np.zeros((100, 100), np.float32)
+    activity[50:90, 20:80] = 0.5  # where the fish swims
+    activity[2:6, 2:6] = 0.5  # a brief light change at the rim: 16 px vs 2400 px
+
+    kept = activity_mask(activity, 0.02, min_component_fraction=0.05)
+
+    assert kept[60, 50] and not kept[3, 3]
+    assert activity_mask(activity, 0.02, min_component_fraction=0.0)[3, 3]  # kept when not filtering
+
+
+def test_unknown_activity_method_is_refused(tmp_path):
+    truth = make_video(tmp_path / "clip.avi", duration_s=1.0)
+    with pytest.raises(ValueError, match="activity_method"):
+        detect_scene(truth["path"], {**PARAMS, "activity_method": "rainbow"})
 
 
 def test_no_movement_falls_back_to_the_whole_frame(tmp_path):
@@ -122,6 +165,9 @@ def test_process_video_writes_json_background_and_qa(one_video):
     assert saved["method"] == "auto" and len(saved["roi"]) == 4
     background = cv2.imread(str(scene_dir / "F_0042_background.png"), cv2.IMREAD_UNCHANGED)
     assert background.shape == (240, 320)
+    frames = cv2.imread(str(scene_dir / "F_0042_frames.jpg"))
+    assert frames.shape == (240 * PARAMS["n_review_frames"], 320, 3)  # real color frames, stacked
+    assert saved["n_frames_image"] == PARAMS["n_review_frames"]
     qa = cv2.imread(str(scene_dir / "F_0042_qa.png"))
     assert qa.shape[1] >= 640 and qa.shape[2] == 3  # enlarged, in color
     # The blue waterline and the green ROI are drawn.
@@ -173,6 +219,11 @@ def test_results_are_cached_until_force_or_new_overrides(one_video):
     assert process_video(job_for(truth, scene_dir, force=True))["cached"] is False
     # An edited override takes effect without --force.
     assert process_video(job_for(truth, scene_dir, {"waterline_y": 90}))["cached"] is False
+    # So do changed detection settings; settings that only affect video_check.csv do not.
+    same = SceneJob("0042", truth["path"], scene_dir, {**PARAMS, "expected_duration_s": 60}, {"waterline_y": 90}, False)
+    assert process_video(same)["cached"] is True
+    changed = SceneJob("0042", truth["path"], scene_dir, {**PARAMS, "diff_threshold": 25}, {"waterline_y": 90}, False)
+    assert process_video(changed)["cached"] is False
 
 
 # --- video_check.csv flags -------------------------------------------------------

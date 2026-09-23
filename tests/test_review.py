@@ -68,15 +68,32 @@ def test_review_hints_point_at_suspicious_results():
     assert review_hints({"video": {"height": 240}, "flags": [], "auto": {"waterline_y": 90, "roi": [0, 70, 9, 200]}}) == []
 
 
-def test_collect_items_embeds_images_and_automatic_values(project):
+def test_collect_items_lists_images_and_automatic_values(project):
     items, missing = collect_items(scene_dir(project), trials(project))
 
     assert missing == []
     assert [item["file"] for item in items] == ["F_0042.avi", "F_0043.avi"]
     item = items[0]
-    assert item["background"].startswith("data:image/jpeg;base64,")
-    assert item["activity"].startswith("data:image/png;base64,")
+    assert (item["background"], item["activity"], item["frames"]) == (
+        "F_0042_background.png", "F_0042_activity.png", "F_0042_frames.jpg")
+    assert item["n_frames"] == PARAMS["n_review_frames"]
     assert {"waterline_y", "roi"} <= set(item["auto"]) and len(item["base_roi"]) == 4
+
+
+def page_data(page):
+    return json.loads(page.split('<script id="data" type="application/json">')[1].split("</script>")[0])
+
+
+def test_served_page_links_images_and_file_page_embeds_them(project):
+    items, _ = collect_items(scene_dir(project), trials(project))
+
+    served = page_data(render_page(items, {}, PARAMS, serve=True))["items"][0]
+    embedded = page_data(render_page(items, {}, PARAMS, serve=False, scene_dir=scene_dir(project)))["items"][0]
+
+    assert served["frames"] == "/files/F_0042_frames.jpg"  # fetched from the local server
+    assert embedded["background"].startswith("data:image/jpeg;base64,")  # works as a plain file
+    assert embedded["activity"].startswith("data:image/png;base64,")
+    assert embedded["frames"].startswith("data:image/jpeg;base64,")
 
 
 def test_page_is_self_contained(project):
@@ -85,8 +102,7 @@ def test_page_is_self_contained(project):
 
     assert "__REVIEW_DATA__" not in page
     assert "http://" not in page and "https://" not in page  # no external resources
-    data_block = page.split('<script id="data" type="application/json">')[1].split("</script>")[0]
-    data = json.loads(data_block)
+    data = page_data(page)
     assert data["overrides"] == {"F_0042.avi": {"checked": True}}
     assert data["other_overrides"] == {"M_0001.mp4": {"waterline_y": 5}}  # kept for the download button
 
@@ -122,7 +138,10 @@ def test_save_rejects_bad_values(tmp_path, entries):
 
 def test_server_saves_and_stops(tmp_path):
     try:
-        server = make_server(tmp_path, "<html>page</html>", SIZES, port=0)  # port 0 = any free port
+        (tmp_path / "F_0042_frames.jpg").write_bytes(b"jpeg bytes")
+        (tmp_path / "secret.txt").write_text("not for the page")
+        server = make_server(tmp_path, "<html>page</html>", SIZES, port=0,  # port 0 = any free port
+                             images={"F_0042_frames.jpg"})
     except PermissionError:
         pytest.skip("this environment does not allow opening a local port")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -141,6 +160,11 @@ def test_server_saves_and_stops(tmp_path):
     try:
         with urllib.request.urlopen(base + "/", timeout=5) as response:
             assert response.read() == b"<html>page</html>"
+        with urllib.request.urlopen(base + "/files/F_0042_frames.jpg", timeout=5) as response:
+            assert response.read() == b"jpeg bytes" and response.headers["Content-Type"] == "image/jpeg"
+        for other in ("/files/secret.txt", "/files/..%2Fsecret.txt"):  # only the page's own images
+            with pytest.raises(urllib.error.HTTPError):
+                urllib.request.urlopen(base + other, timeout=5)
         assert post("/save", {"F_0042.avi": {"waterline_y": 100, "checked": True}}) == (200, {"ok": True, "entries": 1})
         status, reply = post("/save", {"F_0042.avi": {"waterline_y": -1}})
         assert status == 400 and "outside" in reply["error"]

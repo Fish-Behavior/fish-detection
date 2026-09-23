@@ -204,8 +204,13 @@ Needs `trials.csv` from `validate`. For every video it samples frames evenly
 
 - the **background**: the per-pixel median of the samples. The fish keeps moving, so it
   disappears from the median and what remains is the empty beaker;
-- the **activity map**: how often each pixel differs clearly from the background. Only
-  the fish passes; the faint reflection below the beaker bottom does not;
+- the **activity map**: how often each pixel differs clearly from the background. By
+  default (`scene.activity_method: both`) a pixel must change in brightness **and** in
+  color. Light flicker, camera exposure changes, and glare on the water change only
+  brightness, and the faint reflection in the glass changes little in brightness, so
+  none of them count; a colored fish does. Each frame's overall brightness change is
+  removed first, and small separate specks are dropped. For fish without color, set
+  `activity_method: gray` in your FISH_CONFIG file;
 - the **ROI** (region where the fish can be): the box around the activity, padded, with
   its top raised just above the waterline so a surface breach stays inside;
 - the **waterline**: the row with the strongest horizontal edge in the background near the
@@ -219,6 +224,7 @@ Videos are processed in `FISH_WORKERS` parallel processes. Results go to
   exclusive), `method` (`auto` or `override`), and flags;
 - `<video>_background.png`: the empty-beaker background;
 - `<video>_activity.png`: where the fish moved (white = often), used by the review page;
+- `<video>_frames.jpg`: a few real color frames from across the video, stacked, for the review page;
 - `<video>_qa.png`: the check image (below);
 - `video_check.csv`: one row per video (`subject_id, file, fps, frames, duration_s,
   width, height, flags`). Flags: `duration` (the subject's parts together differ from
@@ -229,7 +235,8 @@ Videos are processed in `FISH_WORKERS` parallel processes. Results go to
 
 The command prints how many videos were done or taken from the cache, and lists
 the low-confidence waterlines and the duration/fps flags. Existing results are reused
-unless `--force` is given or that video's entry in `overrides.yaml` changed.
+unless `--force` is given, that video's entry in `overrides.yaml` changed, or a scene
+setting that affects the result was changed (then it is redone automatically).
 
 **Checking the QA image.** `<video>_qa.png` shows the background (enlarged for small
 videos) with a text header giving the file, method, flags, waterline row, confidence,
@@ -257,8 +264,8 @@ result should be looked at once. `scene-review` first brings the scene results u
 date, then opens a review page in your browser. The page runs only on this computer
 (127.0.0.1) and uses no internet. It shows one video at a time:
 
-- the empty-beaker background with a **red tint where the fish swam**, which marks the
-  water it can reach;
+- the empty-beaker background, or **real color frames** from across the video (slider),
+  with a **red tint where the fish swam**, which marks the water it can reach;
 - the waterline (blue) and ROI (green), dashed while automatic and solid once set by hand;
 - the cursor position in **original video pixels** plus a magnifier, so you can read
   the exact row of the surface without any zoom arithmetic;
@@ -271,9 +278,13 @@ date, then opens a review page in your browser. The page runs only on this compu
 | Set the ROI | drag a box around the water the fish can reach (not the reflection below the beaker) |
 | Accept the result | `Enter` (or "Looks right"), which also jumps to the next unchecked video |
 | Undo your changes for a video | `Z` (back to the automatic values) |
+| Real frames / background | `V` (press again for the next frame, or use the slider), `B` |
+| Fix a wrong heatmap | opacity and "hide weak" sliders; `E` eraser to paint away red on glare, light or reflections |
+| ROI from the heatmap | `F` fits the ROI to the red that is left (padded, top above the waterline) |
 | Browse / hide the red tint | `←`/`→`, `M` |
 
-Every change is saved immediately to `overrides.yaml`. When you press **Finish** (or
+Erasing only changes the heatmap on the page, to guide "Fit ROI"; what is saved is
+the resulting ROI. Every change is saved immediately to `overrides.yaml`. When you press **Finish** (or
 Ctrl+C in the terminal), the corrected videos are updated and `video_check.csv` shows
 which videos are `checked`. The page can be reopened any time; it continues where you
 left off. On Google Colab, or wherever a local page cannot be opened, use

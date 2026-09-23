@@ -31,9 +31,25 @@ scene:
   # background (the moving fish disappears from the median); the same frames give
   # the activity map.
   n_background_frames: 100
-  # Gray-level difference from the background (0-255) that counts as "something moved".
-  # Faint reflections below the beaker stay under it; the fish goes well over it.
+  # How the activity map (where the fish moved) decides that a pixel changed:
+  #   both  - brighter/darker AND different in color. Ignores light flicker, camera
+  #           exposure changes and glare on the water (these change brightness, not
+  #           color) and the faint colored reflection in the glass. Best for colored fish.
+  #   color - different in color only (hue/saturation, lightness ignored).
+  #   gray  - brighter/darker only. Use this for fish without color.
+  activity_method: both
+  # Brightness difference from the background (0-255) that counts as "changed". Each
+  # frame's overall brightness change (lights, auto exposure) is removed first.
   diff_threshold: 18
+  # Color difference (distance in the a*/b* color plane of CIELAB, 0-~180) that counts
+  # as "changed" for the color / both methods.
+  color_threshold: 8
+  # The activity map is computed on frames shrunk to at most this width (pixels), so
+  # large videos stay fast and small in memory; the map is scaled back to full size.
+  analysis_max_width: 640
+  # Separate patches of activity smaller than this fraction of the largest patch are
+  # dropped (specks from noise or a brief light change, far from where the fish swims).
+  activity_min_component_fraction: 0.05
   # A pixel belongs to the fish's area when it differed from the background in at
   # least this fraction of the sampled frames (drops single noisy frames).
   activity_min_fraction: 0.02
@@ -61,3 +77,6 @@ scene:
   # Parts of one subject count as having "different" frame rates only when they differ
   # by more than this fraction (0.01 = 1%); tiny header differences are normal.
   fps_tolerance: 0.01
+  # Real color frames saved per video for the review page (scene-review), so a person
+  # sees the actual picture, not only the computed background.
+  n_review_frames: 6

@@ -1,8 +1,8 @@
 <!doctype html>
 <!--
   Scene review page, filled in by fishbehavior/review.py (the data replaces the
-  placeholder in the <script id="data"> block). Self-contained: no external files,
-  so it works offline and nothing leaves the computer.
+  placeholder in the <script id="data"> block). No external files or links: images
+  come from the local review server, or are embedded when written with --no-serve.
 -->
 <html lang="en">
 <head>
@@ -23,7 +23,7 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .app { display: grid; grid-template-columns: 290px 1fr; height: 100vh; }
+  .app { display: grid; grid-template-columns: 270px 1fr; height: 100vh; }
   aside { border-right: 1px solid var(--line); background: var(--panel); display: flex;
           flex-direction: column; min-height: 0; }
   aside header { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
@@ -32,45 +32,51 @@
   .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
   .bar > div { height: 100%; background: var(--ok); width: 0; }
   select, button { font: inherit; color: var(--text); background: var(--panel);
-                   border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+                   border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; }
   button { cursor: pointer; }
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.on { background: var(--sel); border-color: var(--accent); }
   .filter { margin-top: 8px; width: 100%; }
   ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
-  li { padding: 6px 14px; cursor: pointer; display: flex; gap: 8px; align-items: center;
-       border-bottom: 1px solid var(--line); font-size: 13px; }
-  li.current { background: var(--sel); }
-  li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list li { padding: 6px 14px; cursor: pointer; display: flex; gap: 8px; align-items: center;
+             border-bottom: 1px solid var(--line); font-size: 13px; }
+  #list li.current { background: var(--sel); }
+  #list .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--line); }
   .dot.checked { background: var(--ok); } .dot.edited { background: var(--edit); }
   .dot.attention { background: var(--warn); }
-  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 18px; gap: 10px; }
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 16px; gap: 8px; overflow: auto; }
   .top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .top h2 { margin: 0; font-size: 18px; }
+  .top h2 { margin: 0; font-size: 17px; }
   .hints { color: var(--warn); font-size: 13px; }
   .status { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
+  .toolbar .group { display: flex; gap: 6px; align-items: center; }
+  .toolbar label { color: var(--muted); }
+  input[type=range] { width: 110px; accent-color: var(--accent); }
   .work { display: flex; gap: 16px; min-height: 0; flex: 1; }
   .stage { flex: 1; min-width: 0; display: flex; align-items: flex-start; justify-content: center; }
   canvas#view { cursor: crosshair; border: 1px solid var(--line); max-width: 100%;
                 image-rendering: pixelated; touch-action: none; }
+  canvas#view.erasing { cursor: cell; }
   .side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 10px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
   .card h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .values { font-variant-numeric: tabular-nums; }
   .values b { font-weight: 600; }
   .src { font-size: 12px; color: var(--muted); }
-  canvas#loupe { width: 100%; image-rendering: pixelated; border: 1px solid var(--line); }
+  canvas#loupe { width: 100%; image-rendering: pixelated; border: 1px solid var(--line); margin-top: 6px; }
   .buttons { display: flex; flex-wrap: wrap; gap: 6px; }
   kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
         border-radius: 4px; padding: 0 4px; background: var(--bg); }
-  .help { font-size: 12.5px; color: var(--muted); margin: 0; padding-left: 16px; }
-  .help li { border: 0; padding: 1px 0; cursor: default; display: list-item; }
-  .legend span { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  .help { font-size: 12.5px; color: var(--muted); margin: 0; padding-left: 16px; list-style: disc; overflow: visible; }
+  .help li { padding: 1px 0; }
+  .legend { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
   .error { color: var(--warn); }
   .done { position: fixed; inset: 0; background: var(--bg); display: none; align-items: center;
           justify-content: center; font-size: 18px; }
-  @media (max-width: 820px) {
+  @media (max-width: 860px) {
     .app { grid-template-columns: 1fr; height: auto; }
     aside { max-height: 40vh; }
     .work { flex-direction: column; }
@@ -100,6 +106,27 @@
       <span class="hints" id="hints"></span>
       <span class="status" id="saveStatus"></span>
     </div>
+    <div class="toolbar">
+      <div class="group">
+        <label>Picture</label>
+        <button id="viewBg" title="B">Background</button>
+        <button id="viewFrame" title="V">Real frame</button>
+        <input type="range" id="frameSlider" min="0" max="0" value="0" aria-label="Which real frame">
+        <span id="frameLabel" class="src"></span>
+      </div>
+      <div class="group">
+        <label for="opacity">Heatmap</label>
+        <input type="range" id="opacity" min="0" max="100" value="55" title="Opacity (M hides it)">
+        <label for="sensitivity">hide weak</label>
+        <input type="range" id="sensitivity" min="0" max="90" value="0" title="Hide motion weaker than this % of the strongest">
+      </div>
+      <div class="group">
+        <button id="eraser" title="E">Eraser</button>
+        <input type="range" id="brush" min="2" max="40" value="8" title="Eraser size (video pixels)">
+        <button id="clearErase" title="Undo all erasing for this video">Unerase</button>
+        <button id="fit" title="F">Fit ROI to heatmap</button>
+      </div>
+    </div>
     <div class="work">
       <div class="stage"><canvas id="view"></canvas></div>
       <div class="side">
@@ -110,15 +137,14 @@
         </div>
         <div class="card values">
           <h3>Current values</h3>
-          <div><span class="legend"><span style="background:#2f6fff"></span></span>waterline y = <b id="wl"></b>
+          <div><span class="legend" style="background:#2f6fff"></span>waterline y = <b id="wl"></b>
             <div class="src" id="wlSrc"></div></div>
-          <div style="margin-top:6px"><span class="legend"><span style="background:#19c35a"></span></span>ROI = <b id="roi"></b>
+          <div style="margin-top:6px"><span class="legend" style="background:#19c35a"></span>ROI = <b id="roi"></b>
             <div class="src" id="roiSrc"></div></div>
         </div>
         <div class="buttons">
           <button class="primary" id="accept" title="Enter">Looks right ✓</button>
           <button id="reset" title="Z">Reset to auto</button>
-          <button id="motion" title="M">Motion on/off</button>
           <button id="prev" title="←">◀ Prev</button>
           <button id="next" title="→">Next ▶</button>
         </div>
@@ -129,12 +155,12 @@
         <div class="card">
           <h3>How to</h3>
           <ul class="help">
-            <li><b>Click</b> on the water surface to set the waterline.</li>
-            <li><b>Drag</b> a box around the water the fish can reach to set the ROI.</li>
-            <li><kbd>↑</kbd><kbd>↓</kbd> nudge the waterline 1 px (<kbd>Shift</kbd> 5 px).</li>
-            <li><kbd>Enter</kbd> = looks right, go to the next one.</li>
-            <li><kbd>←</kbd><kbd>→</kbd> previous / next, <kbd>Z</kbd> reset, <kbd>M</kbd> motion tint.</li>
-            <li>Red tint = where the fish swam. The ROI should cover it, not the reflection below the beaker.</li>
+            <li><b>Click</b> the water surface = waterline. <kbd>↑</kbd><kbd>↓</kbd> nudge 1 px (<kbd>Shift</kbd> 5).</li>
+            <li><b>Drag</b> a box around the water the fish can reach = ROI.</li>
+            <li><b>Red</b> = where the fish moved. Red on glare, light or the reflection under the
+              beaker is false: <kbd>E</kbd> eraser, paint it away, then <kbd>F</kbd> fits the ROI to what is left.</li>
+            <li><kbd>V</kbd> real color frames (slider picks the time), <kbd>B</kbd> background, <kbd>M</kbd> heatmap on/off.</li>
+            <li><kbd>Enter</kbd> looks right → next · <kbd>←</kbd><kbd>→</kbd> browse · <kbd>Z</kbd> reset.</li>
           </ul>
         </div>
       </div>
@@ -150,6 +176,7 @@ const DATA = JSON.parse(document.getElementById("data").textContent);
 const ITEMS = DATA.items;
 // One storage slot per set of videos, so two different review pages do not mix.
 const STORAGE_KEY = "fish-scene-review:" + ITEMS.length + ":" + (ITEMS.length ? ITEMS[0].file : "");
+const $ = id => document.getElementById(id);
 
 // entries[file] = {waterline_y?, roi?, checked?}: the override for that video (none = automatic).
 let entries = JSON.parse(JSON.stringify(DATA.overrides));
@@ -158,10 +185,12 @@ if (!DATA.serve) {
   try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) entries = JSON.parse(saved); } catch (e) {}
 }
 
-let index = 0, showMotion = true, drag = null, cursor = null;
-const view = document.getElementById("view"), ctx = view.getContext("2d");
-const loupe = document.getElementById("loupe"), lctx = loupe.getContext("2d");
-const images = {};  // file -> {bg: Image, tint: canvas}
+// View state. Erasing only changes the heatmap on this page (it guides "Fit ROI"); the ROI is what gets saved.
+let index = 0, drag = null, cursor = null, erasing = false;
+let view = { picture: "background", frame: 0, showHeat: true };
+const canvas = $("view"), ctx = canvas.getContext("2d");
+const loupe = $("loupe"), lctx = loupe.getContext("2d");
+const cache = {};  // file -> {bg, frames, act: Uint8ClampedArray, erased: Uint8Array, tint: canvas}
 
 // ---- values -------------------------------------------------------------
 function raiseTop(box, wl, height) {
@@ -183,77 +212,112 @@ function status(item) {
 }
 function isDone(item) { const e = entries[item.file]; return !!(e && e.checked); }
 
-// ---- images -------------------------------------------------------------
-function loadImages(item) {
-  if (images[item.file]) return Promise.resolve(images[item.file]);
-  const load = src => new Promise(ok => { if (!src) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; });
-  return Promise.all([load(item.background), load(item.activity)]).then(([bg, act]) => {
-    let tint = null;
-    if (act) {
-      // Turn the gray activity map into a red layer whose opacity follows the activity.
-      tint = document.createElement("canvas"); tint.width = act.width; tint.height = act.height;
-      const t = tint.getContext("2d"); t.drawImage(act, 0, 0);
-      const px = t.getImageData(0, 0, act.width, act.height), d = px.data;
-      for (let i = 0; i < d.length; i += 4) { const v = d[i]; d[i] = 255; d[i + 1] = 30; d[i + 2] = 30; d[i + 3] = v * 0.55; }
-      t.putImageData(px, 0, 0);
+// ---- images and heatmap -------------------------------------------------------
+function loadImage(src) {
+  return new Promise(ok => { if (!src) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; });
+}
+function load(item) {
+  if (cache[item.file]) return Promise.resolve(cache[item.file]);
+  return Promise.all([loadImage(item.background), loadImage(item.activity), loadImage(item.frames)]).then(([bg, actIm, frames]) => {
+    let act = null;
+    if (actIm) {
+      // Read the gray activity map once; the red tint is rebuilt from it when sliders or the eraser change.
+      const c = document.createElement("canvas"); c.width = item.width; c.height = item.height;
+      const g = c.getContext("2d"); g.drawImage(actIm, 0, 0, item.width, item.height);
+      const px = g.getImageData(0, 0, item.width, item.height).data;
+      act = new Uint8ClampedArray(item.width * item.height);
+      for (let i = 0; i < act.length; i++) act[i] = px[i * 4];
     }
-    return (images[item.file] = { bg, tint });
+    const tint = document.createElement("canvas"); tint.width = item.width; tint.height = item.height;
+    cache[item.file] = { bg, frames, act, erased: new Uint8Array(item.width * item.height), tint };
+    rebuildTint(item);
+    return cache[item.file];
   });
+}
+function sensitivityCut() { return +$("sensitivity").value / 100 * 255; }
+function heatVisible(c, i, cut) { return c.act[i] > 0 && c.act[i] >= cut && !c.erased[i]; }
+function rebuildTint(item) {
+  const c = cache[item.file]; if (!c || !c.act) return;
+  const t = c.tint.getContext("2d"), img = t.createImageData(item.width, item.height), d = img.data;
+  const cut = sensitivityCut(), alpha = +$("opacity").value / 100;
+  for (let i = 0; i < c.act.length; i++) {
+    if (!heatVisible(c, i, cut)) continue;
+    d[i * 4] = 255; d[i * 4 + 1] = 30; d[i * 4 + 2] = 30; d[i * 4 + 3] = Math.max(40, c.act[i]) * alpha;
+  }
+  t.putImageData(img, 0, 0);
 }
 
 // ---- drawing ------------------------------------------------------------
 function scale(item) {
-  const stage = view.parentElement;
-  const maxW = Math.max(200, stage.clientWidth - 4), maxH = Math.max(200, window.innerHeight - 150);
+  const stage = canvas.parentElement;
+  const maxW = Math.max(200, stage.clientWidth - 4), maxH = Math.max(200, window.innerHeight - 190);
   return Math.max(1, Math.min(maxW / item.width, maxH / item.height, 5));
+}
+function drawPicture(g, c, item, sx, sy, sw, sh, dw, dh) {
+  // The background, or one real color frame cut from the vertical strip of frames.
+  if (view.picture === "frame" && c.frames) {
+    g.drawImage(c.frames, sx, sy + view.frame * item.height, sw, sh, 0, 0, dw, dh);
+  } else if (c.bg) {
+    g.drawImage(c.bg, sx, sy, sw, sh, 0, 0, dw, dh);
+  }
 }
 function draw() {
   const item = ITEMS[index]; if (!item) return;
-  const im = images[item.file]; if (!im) return;
+  const c = cache[item.file]; if (!c) return;
   const k = scale(item);
-  view.width = Math.round(item.width * k); view.height = Math.round(item.height * k);
+  canvas.width = Math.round(item.width * k); canvas.height = Math.round(item.height * k);
   ctx.imageSmoothingEnabled = false;
-  if (im.bg) ctx.drawImage(im.bg, 0, 0, view.width, view.height);
-  if (showMotion && im.tint) ctx.drawImage(im.tint, 0, 0, view.width, view.height);
+  drawPicture(ctx, c, item, 0, 0, item.width, item.height, canvas.width, canvas.height);
+  if (view.showHeat && c.act) ctx.drawImage(c.tint, 0, 0, canvas.width, canvas.height);
   const v = effective(item);
   // ROI: solid when set by hand, dashed when automatic.
   ctx.lineWidth = 2; ctx.strokeStyle = "#19c35a"; ctx.setLineDash(v.roiManual ? [] : [8, 5]);
   ctx.strokeRect(v.roi[0] * k + 1, v.roi[1] * k + 1, (v.roi[2] - v.roi[0]) * k - 2, (v.roi[3] - v.roi[1]) * k - 2);
   // Waterline across the whole frame, drawn through the middle of its pixel row.
   ctx.setLineDash(v.wlManual ? [] : [8, 5]); ctx.strokeStyle = "#2f6fff";
-  const y = (v.wl + 0.5) * k; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(view.width, y); ctx.stroke();
+  const y = (v.wl + 0.5) * k; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
   ctx.setLineDash([]);
-  if (drag && drag.moved) {
+  if (drag && drag.moved && !erasing) {
     const [x0, y0, x1, y1] = dragBox();
     ctx.strokeStyle = "#ffd400"; ctx.strokeRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+  } else if (cursor && erasing) {
+    const r = +$("brush").value / 2;  // eraser outline
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.arc((cursor.x + 0.5) * k, (cursor.y + 0.5) * k, r * k, 0, 2 * Math.PI); ctx.stroke();
   } else if (cursor) {
     // Preview where a click would put the waterline.
     ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
-    const cy = (cursor.y + 0.5) * k; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(view.width, cy); ctx.stroke();
+    const cy = (cursor.y + 0.5) * k; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy); ctx.stroke();
     ctx.setLineDash([]);
   }
-  drawLoupe(item, im, v);
+  drawLoupe(item, c, v);
 }
-function drawLoupe(item, im, v) {
+function drawLoupe(item, c, v) {
   // 5x view of 32x32 video pixels around the cursor (or the waterline centre).
-  const c = cursor || { x: Math.round((v.roi[0] + v.roi[2]) / 2), y: v.wl };
-  const n = 32, z = loupe.width / n, sx = c.x - n / 2, sy = c.y - n / 2;
+  const p = cursor || { x: Math.round((v.roi[0] + v.roi[2]) / 2), y: v.wl };
+  const n = 32, z = loupe.width / n, sx = p.x - n / 2, sy = p.y - n / 2;
   lctx.imageSmoothingEnabled = false; lctx.fillStyle = "#000"; lctx.fillRect(0, 0, loupe.width, loupe.height);
-  if (im.bg) lctx.drawImage(im.bg, sx, sy, n, n, 0, 0, loupe.width, loupe.height);
+  // Only the part inside the frame is copied, so a strip frame never shows its neighbour.
+  const x0 = Math.max(0, sx), y0 = Math.max(0, sy), x1 = Math.min(item.width, sx + n), y1 = Math.min(item.height, sy + n);
+  if (x1 > x0 && y1 > y0) {
+    lctx.save(); lctx.translate((x0 - sx) * z, (y0 - sy) * z);
+    drawPicture(lctx, c, item, x0, y0, x1 - x0, y1 - y0, (x1 - x0) * z, (y1 - y0) * z);
+    lctx.restore();
+  }
   lctx.strokeStyle = "#2f6fff"; lctx.lineWidth = 1;
   lctx.beginPath(); lctx.moveTo(0, (v.wl - sy + 0.5) * z); lctx.lineTo(loupe.width, (v.wl - sy + 0.5) * z); lctx.stroke();
-  if (cursor) { lctx.strokeStyle = "#fff"; lctx.strokeRect((c.x - sx) * z, (c.y - sy) * z, z, z); }
+  if (cursor) { lctx.strokeStyle = "#fff"; lctx.strokeRect((p.x - sx) * z, (p.y - sy) * z, z, z); }
 }
 
 // ---- side panel / list -----------------------------------------------------
 function visible() {
-  const f = document.getElementById("filter").value;
+  const f = $("filter").value;
   return ITEMS.map((item, i) => ({ item, i })).filter(({ item }) =>
     f === "all" ? true : f === "unchecked" ? !isDone(item)
     : f === "edited" ? status(item) === "edited" : item.hints.length && !isDone(item));
 }
 function renderList() {
-  const list = document.getElementById("list"); list.innerHTML = "";
+  const list = $("list"); list.innerHTML = "";
   for (const { item, i } of visible()) {
     const li = document.createElement("li"); if (i === index) li.className = "current";
     li.innerHTML = `<span class="dot ${status(item)}"></span><span class="name"></span>`;
@@ -263,39 +327,49 @@ function renderList() {
     list.appendChild(li);
   }
   const done = ITEMS.filter(isDone).length;
-  document.getElementById("progress").textContent =
-    `${done} of ${ITEMS.length} checked · ${ITEMS.filter(i => i.hints.length).length} with hints`;
-  document.getElementById("bar").style.width = (ITEMS.length ? 100 * done / ITEMS.length : 0) + "%";
+  $("progress").textContent = `${done} of ${ITEMS.length} checked · ${ITEMS.filter(i => i.hints.length).length} with hints`;
+  $("bar").style.width = (ITEMS.length ? 100 * done / ITEMS.length : 0) + "%";
 }
 function renderInfo() {
   const item = ITEMS[index], v = effective(item);
-  document.getElementById("title").textContent = `${item.file}  ·  subject ${item.subject_id}  ·  ${item.width}×${item.height}`;
-  document.getElementById("hints").textContent = item.hints.length ? "⚠ " + item.hints.join(" · ") : "";
-  document.getElementById("wl").textContent = v.wl;
-  document.getElementById("wlSrc").textContent = v.wlManual ? `set by hand (auto was ${item.auto.waterline_y})`
-    : `automatic, edge strength ${item.confidence}`;
-  document.getElementById("roi").textContent = `[${v.roi.join(", ")}]`;
-  document.getElementById("roiSrc").textContent = v.roiManual ? "drawn by hand"
-    : v.wlManual ? "automatic (top only raised to stay above your waterline; drag to redraw)" : "automatic";
-  document.getElementById("accept").textContent = isDone(item) ? "Checked ✓ — next" : "Looks right ✓";
+  $("title").textContent = `${item.file}  ·  subject ${item.subject_id}  ·  ${item.width}×${item.height}`;
+  $("hints").textContent = item.hints.length ? "⚠ " + item.hints.join(" · ") : "";
+  $("wl").textContent = v.wl;
+  $("wlSrc").textContent = v.wlManual ? `set by hand (auto was ${item.auto.waterline_y})` : `automatic, edge strength ${item.confidence}`;
+  $("roi").textContent = `[${v.roi.join(", ")}]`;
+  $("roiSrc").textContent = v.roiManual ? "set by hand"
+    : v.wlManual ? "automatic (top only raised to stay above your waterline; drag or Fit to redraw)" : "automatic";
+  $("accept").textContent = isDone(item) ? "Checked ✓ — next" : "Looks right ✓";
+  renderViewControls();
+}
+function renderViewControls() {
+  const item = ITEMS[index];
+  $("viewBg").classList.toggle("on", view.picture === "background");
+  $("viewFrame").classList.toggle("on", view.picture === "frame");
+  $("frameSlider").max = Math.max(0, (item.n_frames || 1) - 1);
+  $("frameSlider").value = view.frame;
+  $("frameLabel").textContent = view.picture === "frame" ? `${view.frame + 1} / ${item.n_frames}` : "";
+  $("eraser").classList.toggle("on", erasing);
+  canvas.classList.toggle("erasing", erasing);
 }
 function show(i) {
   if (!ITEMS.length) return;
   index = (i + ITEMS.length) % ITEMS.length; cursor = null; drag = null;
+  view.frame = Math.min(view.frame, Math.max(0, (ITEMS[index].n_frames || 1) - 1));
   renderList(); renderInfo();
-  loadImages(ITEMS[index]).then(draw);
+  load(ITEMS[index]).then(() => { rebuildTint(ITEMS[index]); draw(); });
   const cur = document.querySelector("#list li.current"); if (cur) cur.scrollIntoView({ block: "nearest" });
 }
 
 // ---- editing ---------------------------------------------------------------
 function edit(change) {
   const item = ITEMS[index];
-  const e = Object.assign({}, entries[item.file] || {}, change, { checked: true });  // a person set it
-  entries[item.file] = e; changed();
+  entries[item.file] = Object.assign({}, entries[item.file] || {}, change, { checked: true });  // a person set it
+  changed();
 }
 function changed() { renderList(); renderInfo(); draw(); persist(); }
 function toPixel(ev) {
-  const item = ITEMS[index], r = view.getBoundingClientRect();
+  const item = ITEMS[index], r = canvas.getBoundingClientRect();
   const x = Math.floor((ev.clientX - r.left) / r.width * item.width);
   const y = Math.floor((ev.clientY - r.top) / r.height * item.height);
   return { x: Math.min(item.width - 1, Math.max(0, x)), y: Math.min(item.height - 1, Math.max(0, y)) };
@@ -305,20 +379,58 @@ function dragBox() {
   const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y) + 1;
   return [x0, y0, x1, y1];
 }
-view.addEventListener("pointerdown", ev => { view.setPointerCapture(ev.pointerId); drag = { a: toPixel(ev), b: toPixel(ev), sx: ev.clientX, sy: ev.clientY, moved: false }; });
-view.addEventListener("pointermove", ev => {
+function eraseAt(p) {
+  const item = ITEMS[index], c = cache[item.file]; if (!c) return;
+  const r = +$("brush").value / 2;
+  for (let y = Math.max(0, Math.floor(p.y - r)); y <= Math.min(item.height - 1, Math.ceil(p.y + r)); y++)
+    for (let x = Math.max(0, Math.floor(p.x - r)); x <= Math.min(item.width - 1, Math.ceil(p.x + r)); x++)
+      if ((x - p.x) ** 2 + (y - p.y) ** 2 <= r * r) c.erased[y * item.width + x] = 1;
+  rebuildTint(item);
+}
+function fitRoi() {
+  // Box around the heatmap that is still shown (not erased, not hidden as weak), padded like the
+  // pipeline does, with its top raised above the waterline. Lone pixels are ignored.
+  const item = ITEMS[index], c = cache[item.file]; if (!c || !c.act) return;
+  const w = item.width, h = item.height, cut = sensitivityCut();
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x; if (!heatVisible(c, i, cut)) continue;
+    const neighbours = heatVisible(c, i - 1, cut) + heatVisible(c, i + 1, cut) + heatVisible(c, i - w, cut) + heatVisible(c, i + w, cut);
+    if (neighbours < 2) continue;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+  }
+  if (x1 < 0) { $("saveStatus").textContent = "No heatmap left to fit — lower “hide weak” or unerase"; return; }
+  const dx = Math.round(DATA.padding_fraction * w), dy = Math.round(DATA.padding_fraction * h);
+  const box = [Math.max(0, x0 - dx), Math.max(0, y0 - dy), Math.min(w, x1 + 1 + dx), Math.min(h, y1 + 1 + dy)];
+  edit({ roi: raiseTop(box, effective(item).wl, h) });
+}
+
+canvas.addEventListener("pointerdown", ev => {
+  canvas.setPointerCapture(ev.pointerId);
+  const p = toPixel(ev);
+  drag = { a: p, b: p, sx: ev.clientX, sy: ev.clientY, moved: false };
+  if (erasing) { eraseAt(p); draw(); }
+});
+canvas.addEventListener("pointermove", ev => {
   cursor = toPixel(ev);
-  document.getElementById("cursor").textContent = `x = ${cursor.x}, y = ${cursor.y}`;
-  if (drag) { drag.b = cursor; drag.moved = drag.moved || Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) > 5; }
+  $("cursor").textContent = `x = ${cursor.x}, y = ${cursor.y}`;
+  if (drag) {
+    drag.b = cursor; drag.moved = drag.moved || Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) > 5;
+    if (erasing) eraseAt(cursor);
+  }
   draw();
 });
-view.addEventListener("pointerup", ev => {
+canvas.addEventListener("pointerup", ev => {
   if (!drag) return;
-  if (drag.moved) { const box = dragBox(); if (box[2] - box[0] > 2 && box[3] - box[1] > 2) { drag = null; edit({ roi: box }); return; } }
-  else { const p = toPixel(ev); drag = null; edit({ waterline_y: p.y }); return; }
-  drag = null; draw();
+  if (erasing) { drag = null; draw(); return; }
+  if (drag.moved) {
+    const box = dragBox(); drag = null;
+    if (box[2] - box[0] > 2 && box[3] - box[1] > 2) edit({ roi: box }); else draw();
+  } else {
+    drag = null; edit({ waterline_y: toPixel(ev).y });
+  }
 });
-view.addEventListener("pointerleave", () => { if (!drag) { cursor = null; draw(); } });
+canvas.addEventListener("pointerleave", () => { if (!drag) { cursor = null; draw(); } });
 
 function nextUnchecked() {
   for (let s = 1; s <= ITEMS.length; s++) { const j = (index + s) % ITEMS.length; if (!isDone(ITEMS[j])) return show(j); }
@@ -330,34 +442,55 @@ function accept() {
   changed(); nextUnchecked();
 }
 function reset() { delete entries[ITEMS[index].file]; changed(); }
-function nudge(dy) { const item = ITEMS[index], v = effective(item);
-  edit({ waterline_y: Math.min(item.height - 1, Math.max(0, v.wl + dy)) }); }
+function nudge(dy) {
+  const item = ITEMS[index], v = effective(item);
+  edit({ waterline_y: Math.min(item.height - 1, Math.max(0, v.wl + dy)) });
+}
+function setPicture(picture) { view.picture = picture; renderViewControls(); draw(); }
+function toggleHeat() { view.showHeat = !view.showHeat; draw(); }
+function toggleEraser() { erasing = !erasing; renderViewControls(); draw(); }
+function cycleFrame() {
+  // V: first switch to the real frames, then step through them.
+  const n = ITEMS[index].n_frames || 1;
+  if (view.picture !== "frame") view.picture = "frame"; else view.frame = (view.frame + 1) % n;
+  renderViewControls(); draw();
+}
 
-document.getElementById("accept").onclick = accept;
-document.getElementById("reset").onclick = reset;
-document.getElementById("motion").onclick = () => { showMotion = !showMotion; draw(); };
-document.getElementById("prev").onclick = () => show(index - 1);
-document.getElementById("next").onclick = () => show(index + 1);
-document.getElementById("filter").onchange = renderList;
+$("accept").onclick = accept;
+$("reset").onclick = reset;
+$("prev").onclick = () => show(index - 1);
+$("next").onclick = () => show(index + 1);
+$("filter").onchange = renderList;
+$("viewBg").onclick = () => setPicture("background");
+$("viewFrame").onclick = () => setPicture("frame");
+$("frameSlider").oninput = ev => { view.frame = +ev.target.value; setPicture("frame"); };
+$("opacity").oninput = () => { rebuildTint(ITEMS[index]); draw(); };
+$("sensitivity").oninput = () => { rebuildTint(ITEMS[index]); draw(); };
+$("eraser").onclick = toggleEraser;
+$("clearErase").onclick = () => { const c = cache[ITEMS[index].file]; if (c) { c.erased.fill(0); rebuildTint(ITEMS[index]); draw(); } };
+$("fit").onclick = fitRoi;
 document.addEventListener("keydown", ev => {
-  if (ev.target.tagName === "SELECT") return;
-  const keys = { Enter: accept, ArrowRight: () => show(index + 1), ArrowLeft: () => show(index - 1),
+  if (ev.target.tagName === "SELECT" || ev.target.tagName === "INPUT") return;
+  const keys = {
+    Enter: accept, ArrowRight: () => show(index + 1), ArrowLeft: () => show(index - 1),
     ArrowUp: () => nudge(ev.shiftKey ? -5 : -1), ArrowDown: () => nudge(ev.shiftKey ? 5 : 1),
-    z: reset, Z: reset, m: () => { showMotion = !showMotion; draw(); }, M: () => { showMotion = !showMotion; draw(); } };
-  if (keys[ev.key]) { ev.preventDefault(); keys[ev.key](); }
+    z: reset, m: toggleHeat, e: toggleEraser, f: fitRoi, v: cycleFrame, b: () => setPicture("background"),
+  };
+  const action = keys[ev.key] || keys[ev.key.toLowerCase()];
+  if (action && !ev.metaKey && !ev.ctrlKey) { ev.preventDefault(); action(); }
 });
 window.addEventListener("resize", draw);
 
 // ---- saving ----------------------------------------------------------------
 let saveTimer = null;
-const saveStatus = document.getElementById("saveStatus");
+const saveStatus = $("saveStatus");
 function persist() {
   if (!DATA.serve) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch (e) {}
     saveStatus.textContent = "Kept in this browser — use “Download overrides.yaml” to save";
     return;
   }
-  saveStatus.textContent = "Saving…";
+  saveStatus.className = "status"; saveStatus.textContent = "Saving…";
   clearTimeout(saveTimer); saveTimer = setTimeout(save, 300);  // one save per burst of edits
 }
 function save() {
@@ -379,21 +512,21 @@ function toYaml() {
   }
   return lines.join("\n") + "\n";
 }
-document.getElementById("download").onclick = () => {
+$("download").onclick = () => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([toYaml()], { type: "text/yaml" }));
   a.download = "overrides.yaml"; a.click(); URL.revokeObjectURL(a.href);
 };
-document.getElementById("finish").onclick = () => {
-  if (!DATA.serve) { document.getElementById("download").click(); return; }
+$("finish").onclick = () => {
+  if (!DATA.serve) { $("download").click(); return; }
   clearTimeout(saveTimer);
-  save().then(() => fetch("/done", { method: "POST" })).finally(() => { document.getElementById("doneScreen").style.display = "flex"; });
+  save().then(() => fetch("/done", { method: "POST" })).finally(() => { $("doneScreen").style.display = "flex"; });
 };
 
-if (!ITEMS.length) document.getElementById("title").textContent = "No scene results yet — run `python -m fishbehavior scene` first.";
+if (!ITEMS.length) $("title").textContent = "No scene results yet — run `python -m fishbehavior scene` first.";
 else {
   // Start on the "needs a look" list if anything needs a look, else on the not-checked list.
-  if (!visible().length) document.getElementById("filter").value = "unchecked";
+  if (!visible().length) $("filter").value = "unchecked";
   show(0);
 }
 </script>
