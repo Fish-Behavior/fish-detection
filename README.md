@@ -56,7 +56,7 @@ implemented.
 fish-detection/
 ├── .env.example              # template for your local .env (data paths); copy it, never commit .env
 ├── .gitignore                # keeps data, outputs, and .env out of Git
-├── .github/workflows/ci.yml  # pull-request checks: privacy/lint, tests on 3 OSes, pages, installed wheel
+├── .github/workflows/ci.yml  # pull-request checks: privacy/lint, tests on Ubuntu, pages, installed wheel
 ├── pyproject.toml            # package definition and dependencies
 ├── requirements.txt          # one-line install: the package + developer tools
 ├── docs/

@@ -42,13 +42,14 @@ jobs:
         run: pipx run ruff==0.16.8 check --select F,E9 src tests
 
   backend:
-    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
+    name: Tests (Python ${{ matrix.python }})
+    # Ubuntu only: macOS/Windows runners are much slower to start and run, so they stay off PRs.
+    # To check them, add macos-latest / windows-latest to runs-on via a matrix again.
+    runs-on: ubuntu-latest
     timeout-minutes: 30  # a hung server test should not hold a runner for hours
     strategy:
-      fail-fast: false  # one failing platform should not hide the others
+      fail-fast: false  # one failing version should not hide the other
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.10", "3.13"]  # oldest supported, newest with wheels for every dependency (hmmlearn)
     steps:
       - uses: actions/checkout@v5
