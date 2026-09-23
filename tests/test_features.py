@@ -144,7 +144,8 @@ def test_surface_flag_and_tilt_fraction_on_crafted_rows():
     fps = 4.0  # 4 rows = one 1-second bin
     # Surface limit = waterline 50 + 0.25 BL * 20 px = 55.
     track = make_track(np.full(4, 100.0), np.full(4, 80.0), fps,
-                       top_y=[40.0, 55.0, 56.0, 120.0], angle_deg=[-80.0, 10.0, 50.0, -30.0])
+                       top_y=[40.0, 55.0, 56.0, 120.0], angle_deg=[-80.0, 10.0, 50.0, -30.0],
+                       head_x=100 + 0.4 * BL_PX, head_y=80.0)  # eye near one end: seen side-on
     frames, bins, _ = features(track)
     assert list(frames["at_surface"]) == [True, True, False, False]
     assert list(frames["tilt_deg"]) == [80.0, 10.0, 50.0, 30.0]
@@ -152,6 +153,26 @@ def test_surface_flag_and_tilt_fraction_on_crafted_rows():
     assert bins.loc[0, "tilt_fraction"] == pytest.approx(0.5)  # 80 and 50 are above 45
     assert bins.loc[0, "tilt_median_deg"] == pytest.approx(40.0)
     assert frames["depth_bl"].to_numpy() == pytest.approx((80 - 50) / BL_PX)
+
+
+def test_surface_breach_needs_the_head_at_the_surface_and_the_nose_up():
+    # Surface limit = 55 (see above). Rows: breach; nose up but head deep; head up there but
+    # flat; nose up but no head found (no pitch).
+    track = make_track(np.full(4, 100.0), np.full(4, 80.0), 4.0, head_y=[52.0, 70.0, 54.0, np.nan],
+                       pitch_deg=[40.0, 40.0, 5.0, np.nan])
+    frames, bins, _ = features(track)
+    assert list(frames["nose_up_at_surface"]) == [True, False, False, False]
+    assert bins.loc[0, "nose_up_surface_fraction"] == pytest.approx(0.25)
+
+
+def test_tilt_of_a_fish_facing_the_camera_does_not_count():
+    # All rows steep. Eye 0.4 BL from the centre (side-on) in the first two; 0.1 BL (facing the
+    # camera, eyes mid-blob) in the third; no eye found in the last.
+    track = make_track(np.full(4, 100.0), np.full(4, 80.0), 4.0, angle_deg=[80.0, 60.0, 80.0, 60.0],
+                       head_x=100.0, head_y=[80 - 0.4 * BL_PX, 80 + 0.4 * BL_PX, 80 - 0.1 * BL_PX, np.nan])
+    frames, bins, _ = features(track, side_on_min_head_offset_bl=0.3)
+    assert list(frames["side_on"]) == [True, True, False, False]
+    assert bins.loc[0, "tilt_fraction"] == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize("n, fps, bin_s", [(95, 30.0, 1.0), (95, 30.0, 0.5), (120, 60.0, 1.0), (61, 60.0, 0.25)])

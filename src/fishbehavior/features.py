@@ -45,13 +45,13 @@ ENDPOINTS_FILE = "endpoints.csv"
 FRAME_COLUMNS = [
     "subject_id", "part", "frame", "time_s", "tracked", "vx", "vy", "speed_bl_s", "accel_bl_s2", "jerk_bl_s3",
     "heading_deg", "turn_deg", "angular_velocity_deg_s", "meander_deg_per_bl", "depth_bl", "at_surface",
-    "tilt_deg", "aspect", "area_ratio",
+    "pitch_deg", "nose_up_at_surface", "tilt_deg", "side_on", "aspect", "area_ratio",
 ]
 BIN_COLUMNS = [
     "subject_id", "bin", "t_start_s", "n_frames", "tracked_fraction", "speed_mean_bl_s", "speed_median_bl_s",
     "speed_max_bl_s", "speed_cv", "accel_abs_mean_bl_s2", "jerk_abs_mean_bl_s3", "turn_rate_var_deg2_s2",
-    "angular_velocity_abs_mean_deg_s", "meander_deg_per_bl", "distance_bl", "surface_fraction", "depth_bl_min",
-    "tilt_median_deg", "tilt_fraction", "aspect_median", "area_ratio_median",
+    "angular_velocity_abs_mean_deg_s", "meander_deg_per_bl", "distance_bl", "surface_fraction",
+    "nose_up_surface_fraction", "depth_bl_min", "tilt_median_deg", "tilt_fraction", "aspect_median", "area_ratio_median",
 ]
 ENDPOINT_COLUMNS = [
     "subject_id", "body_length_px", "duration_s", "tracked_s", "distance_bl", "mean_velocity_bl_s",
@@ -61,7 +61,7 @@ ENDPOINT_COLUMNS = [
 # Settings that change the outputs; cached results made with other values are redone.
 FEATURE_PARAMS = (
     "smooth_s", "smooth_polyorder", "min_speed_for_heading_bl_s", "surface_margin_bl", "bin_s",
-    "tilt_threshold_deg", "high_mobility_bl_s", "immobile_bl_s",
+    "tilt_threshold_deg", "high_mobility_bl_s", "immobile_bl_s", "nose_up_threshold_deg", "side_on_min_head_offset_bl",
 )
 
 
@@ -168,6 +168,12 @@ def frame_features(track: pd.DataFrame, bl_px: float, waterline_y: float, params
     # Posture and position relative to the waterline (y grows downward: depth > 0 = below).
     top_limit = waterline_y + float(params["surface_margin_bl"]) * bl_px
     median_area = track.loc[track["detected"].astype(bool), "area"].median()
+    # Surface breach: the head (eye) itself is at the waterline and the head-tail line points
+    # nose-up. Only the top of the body touching the surface is not enough: in shallow dishes
+    # the fish is that close to the surface most of the time.
+    pitch = track["pitch_deg"].to_numpy(float)
+    head_at_surface = track["head_y"].to_numpy(float) <= top_limit  # no head (NaN) -> False
+    nose_up = head_at_surface & (pitch >= float(params["nose_up_threshold_deg"]))
     frames = pd.DataFrame({
         "subject_id": track["subject_id"],
         "part": track["part"],
@@ -179,7 +185,13 @@ def frame_features(track: pd.DataFrame, bl_px: float, waterline_y: float, params
         "meander_deg_per_bl": meander,
         "depth_bl": (y - waterline_y) / bl_px,
         "at_surface": track["top_y"].to_numpy(float) <= top_limit,  # NaN (untracked) -> False
+        "pitch_deg": pitch,
+        "nose_up_at_surface": nose_up,
         "tilt_deg": track["angle_deg"].abs(),  # -90..90 from horizontal folded to 0..90
+        # Seen side-on: the eye is near one end of the body, far from its centre. A fish facing
+        # the camera has its eyes mid-blob and a tall outline whose fitted angle is not a tilt.
+        "side_on": np.hypot(track["head_x"] - track["x"], track["head_y"] - track["y"]).to_numpy(float)
+        >= float(params["side_on_min_head_offset_bl"]) * bl_px,  # no head (NaN) -> False
         "aspect": track["major_axis"] / track["minor_axis"],
         "area_ratio": track["area"] / median_area,
     })
@@ -205,7 +217,7 @@ def bin_features(frames: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
     duration = float(time_s.max() + frame_gap_s(time_s)) if len(time_s) > 1 else float(len(time_s)) * bin_s
     n_bins = int(np.ceil(duration / bin_s - 1e-9))
     work = frames.assign(bin=np.floor(time_s / bin_s + 1e-9).astype(int), distance_bl=step_distance_bl(frames),
-                         tilted=frames["tilt_deg"] > tilt_threshold)
+                         tilted=(frames["tilt_deg"] > tilt_threshold) & frames["side_on"].astype(bool))
     work["accel_abs"] = work["accel_bl_s2"].abs()
     work["jerk_abs"] = work["jerk_bl_s3"].abs()
     work["angular_abs"] = work["angular_velocity_deg_s"].abs()
@@ -226,6 +238,7 @@ def bin_features(frames: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
             lambda g: meander_of(g["turn_deg"], g["distance_bl"])),
         "distance_bl": grouped["distance_bl"].sum(),
         "surface_fraction": grouped["at_surface"].mean(),
+        "nose_up_surface_fraction": grouped["nose_up_at_surface"].mean(),
         "depth_bl_min": grouped["depth_bl"].min(),
         "tilt_median_deg": grouped["tilt_deg"].median(),
         "tilt_fraction": grouped["tilted"].mean(),
@@ -433,7 +446,7 @@ QA_FILE = "qa.csv"
 # are dropped and when the smoothing is doubled, while noise does not.
 QA_FEATURES = (
     "speed_mean_bl_s", "distance_bl", "accel_abs_mean_bl_s2", "jerk_abs_mean_bl_s3", "turn_rate_var_deg2_s2",
-    "angular_velocity_abs_mean_deg_s", "meander_deg_per_bl", "surface_fraction", "depth_bl_min",
+    "angular_velocity_abs_mean_deg_s", "meander_deg_per_bl", "surface_fraction", "nose_up_surface_fraction", "depth_bl_min",
     "tilt_median_deg", "aspect_median", "area_ratio_median",
 )
 QA_COLUMNS = [

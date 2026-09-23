@@ -146,9 +146,16 @@ features:
   surface_margin_bl: 0.25
   # Length of one feature bin in seconds (bins start at t = 0).
   bin_s: 1.0
+  # nose_up_at_surface (surface breach): the head (eye) is within surface_margin_bl of the
+  # waterline and the head-tail line points at least this many degrees nose-up (pitch_deg).
+  nose_up_threshold_deg: 25
   # tilt_fraction: share of frames whose body axis is tilted more than this from
-  # horizontal (listing / loss of righting shows as a steep body).
+  # horizontal (listing / loss of righting shows as a steep body) ...
   tilt_threshold_deg: 45
+  # ... counting only frames seen side-on: the eye (head) is at least this many BL from the
+  # body centre. A fish facing the camera has its eyes mid-blob and a tall outline whose
+  # fitted angle looks steep without any tilt (side-on swimmers: ~0.37 BL).
+  side_on_min_head_offset_bl: 0.3
   # Endpoints: seconds faster than this count as "highly mobile" ...
   high_mobility_bl_s: 2.0
   # ... and seconds slower than this as "immobile".

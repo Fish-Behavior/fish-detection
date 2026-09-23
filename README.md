@@ -439,7 +439,10 @@ Results go to `<FISH_OUTPUT_DIR>/features/`:
   | `meander_deg_per_bl` | \|`turn_deg`\| / BL moved since the previous row |
   | `depth_bl` | (y − waterline) / BL: 0 = at the waterline, positive = below it |
   | `at_surface` | top of the fish outline within `features.surface_margin_bl` BL of the waterline (or above it) |
+  | `pitch_deg` | head–tail line from the track, −90 to 90: positive = nose up; empty when the front end is unclear |
+  | `nose_up_at_surface` | the head (eye) is within `features.surface_margin_bl` BL of the waterline and `pitch_deg` ≥ `features.nose_up_threshold_deg` (25) |
   | `tilt_deg` | body axis angle from horizontal, 0–90 |
+  | `side_on` | the eye is at least `features.side_on_min_head_offset_bl` (0.3) BL from the body centre, so the fish is seen from the side. A fish facing the camera has its eyes mid-blob and a tall outline whose angle is not a tilt |
   | `aspect` | `major_axis` / `minor_axis` (low = fish seen end-on or bent) |
   | `area_ratio` | outline area / the subject's median area |
 
@@ -448,7 +451,8 @@ Results go to `<FISH_OUTPUT_DIR>/features/`:
   `bin, t_start_s, n_frames, tracked_fraction`, speed `mean / median / max / cv`,
   mean \|accel\|, mean \|jerk\|, `turn_rate_var_deg2_s2` (variance of the angular velocity: turning variability per second, the same at any frame rate), mean \|angular velocity\|,
   `meander_deg_per_bl` (total \|turn\| / total distance), `distance_bl`,
-  `surface_fraction`, `depth_bl_min`, `tilt_median_deg`, `tilt_fraction` (share of rows
+  `surface_fraction`, `nose_up_surface_fraction` (share of rows with `nose_up_at_surface`),
+  `depth_bl_min`, `tilt_median_deg`, `tilt_fraction` (share of rows that are `side_on` and
   tilted more than `features.tilt_threshold_deg`), `aspect_median`, `area_ratio_median`;
 - `endpoints.csv`: one row per subject over the whole exposure video: `body_length_px,
   duration_s, tracked_s, distance_bl, mean_velocity_bl_s, highly_mobile_s` (faster than
