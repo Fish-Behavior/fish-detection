@@ -61,6 +61,7 @@ fish-detection/
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
 │   ├── default_config.yaml   # default, data-independent parameters
+│   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
 │   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
 │   ├── review_page.html      # the review page template (self-contained, no external files)
@@ -75,7 +76,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Features | `features.py` | speed, turning, smoothness, height, and posture per frame and per time bin |
 | Behavior labeling | `labeling.py` | assigns one of the five ethogram states to each time bin and merges them into segments |
 | Slide digitizer | `reference.py` | turns the reference ethogram figures into approximate timelines for tuning |
 | Priors and calibration | `priors.py`, `calibrate.py` | tunes thresholds against the reference and sanity checks |
@@ -407,6 +407,80 @@ Columns of `<subject>.csv.gz` (positions and sizes in **original video pixels**,
 | `interpolated` | filled in over a short gap (`detected` is False) |
 
 Frames that are neither detected nor interpolated have empty measurements.
+
+**5. Movement features**
+
+```bash
+python -m fishbehavior features                     # every matched subject with a track
+python -m fishbehavior features --subjects 42 F_0043  # only these
+python -m fishbehavior features --force             # redo subjects that already have results
+```
+
+Needs the tracks from `track` and the scene results (waterline, ROI). Everything is in
+**body lengths (BL)** and **seconds**: BL = the subject's median fitted `major_axis` over
+detected frames, and the time between rows comes from the track's `time_s`, so the same
+settings work at any frame rate, resolution or `tracking.frame_stride`. x and y are
+smoothed with a Savitzky-Golay filter over `features.smooth_s` seconds (default 0.2)
+before speeds are computed; untracked frames stay empty. All `features` settings are
+starting values, to be calibrated in a later step.
+
+Results go to `<FISH_OUTPUT_DIR>/features/`:
+
+- `<subject>_frames.csv.gz`: one row per track row, at the full frame rate (brief
+  events stay visible): `subject_id, part, frame, time_s, tracked` and
+
+  | Column | Meaning |
+  |---|---|
+  | `vx`, `vy`, `speed_bl_s` | velocity and speed, BL/s (y grows downward) |
+  | `accel_bl_s2`, `jerk_bl_s3` | change of speed per second, and of that per second |
+  | `heading_deg` | movement direction, −180 to 180 |
+  | `turn_deg` | heading change since the previous row, −180 to 180; empty unless both rows move faster than `features.min_speed_for_heading_bl_s` |
+  | `angular_velocity_deg_s` | `turn_deg` per second |
+  | `meander_deg_per_bl` | \|`turn_deg`\| / BL moved since the previous row |
+  | `depth_bl` | (y − waterline) / BL: 0 = at the waterline, positive = below it |
+  | `at_surface` | top of the fish outline within `features.surface_margin_bl` BL of the waterline (or above it) |
+  | `tilt_deg` | body axis angle from horizontal, 0–90 |
+  | `aspect` | `major_axis` / `minor_axis` (low = fish seen end-on or bent) |
+  | `area_ratio` | outline area / the subject's median area |
+
+- `<subject>_bins.csv.gz`: one row per `features.bin_s` bin (default 1 s) from t = 0,
+  `ceil(duration / bin_s)` rows (a bin without rows has `n_frames` 0):
+  `bin, t_start_s, n_frames, tracked_fraction`, speed `mean / median / max / cv`,
+  mean \|accel\|, mean \|jerk\|, `turn_rate_var_deg2_s2` (variance of the angular velocity: turning variability per second, the same at any frame rate), mean \|angular velocity\|,
+  `meander_deg_per_bl` (total \|turn\| / total distance), `distance_bl`,
+  `surface_fraction`, `depth_bl_min`, `tilt_median_deg`, `tilt_fraction` (share of rows
+  tilted more than `features.tilt_threshold_deg`), `aspect_median`, `area_ratio_median`;
+- `endpoints.csv`: one row per subject over the whole exposure video: `body_length_px,
+  duration_s, tracked_s, distance_bl, mean_velocity_bl_s, highly_mobile_s` (faster than
+  `features.high_mobility_bl_s`), `immobile_s` (slower than `features.immobile_bl_s`),
+  `top_half_pct` (share of tracked time in the top half: from the waterline to halfway
+  down to the ROI bottom), `latency_top_half_s` (first time there; empty = never),
+  `meander_deg_per_bl, mean_angular_velocity_deg_s`;
+- `<subject>_features.json`: the endpoint row and the settings used.
+
+A subject is skipped when its results exist, unless `--force` is given, a `features`
+setting changed, or its track is newer than the results.
+
+**Which features can be trusted?** There are no hand labels, so `features-qa` checks
+whether each bin feature measures the fish or tracking noise:
+
+```bash
+python -m fishbehavior features-qa                     # every matched subject with a track
+python -m fishbehavior features-qa --subjects 42 F_0043
+```
+
+For each subject it recomputes the bins from the track twice more (it writes no
+features): with every second frame (half the frame rate) and with double
+`features.smooth_s`. A real movement keeps its value; jitter of the tracked body centre
+does not. A feature counts as `stable` when its per-bin values at half the frame rate
+correlate with the full-rate ones by at least `features.qa_min_r` (0.8) and its mean
+moves by at most `features.qa_max_change` (25%) in both checks. It prints, per feature,
+how many subjects pass and the median numbers, and writes `features/qa.csv` (the
+subjects of this run): `subject_id, feature, r_half_rate, change_half_rate,
+change_smooth_2x, stable, jitter_bl` (RMS distance between the raw and smoothed body
+centre, BL) and `body_length_cv` (how much the fitted length varies over the video).
+An empty `r_half_rate` means the feature did not vary (e.g. never at the surface), so
+it cannot fail.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its

@@ -18,6 +18,7 @@ dependencies = [
     "numpy>=1.24",         # per-pixel background median, activity maps
     "opencv-python-headless>=4.8",  # video reading/writing and drawing (headless: no GUI libs, works on Colab/servers)
     "tqdm>=4.66",          # progress bars for long per-frame tracking runs
+    "scipy>=1.10",         # Savitzky-Golay smoothing of the track before computing speeds (features)
 ]
 
 [project.optional-dependencies]

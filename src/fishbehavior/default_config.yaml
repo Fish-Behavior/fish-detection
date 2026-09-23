@@ -128,3 +128,35 @@ tracking:
   # least this fraction of the body length from the centre along the body axis. Closer
   # (e.g. fish facing the camera) the pitch is left empty.
   head_min_offset_fraction: 0.15
+
+features:
+  # All values below are STARTING values; PR 8 (calibrate) tunes them against the
+  # reference figures. Speeds are in body lengths (BL, the fish's median fitted length)
+  # per second, so they do not depend on zoom or resolution.
+  #
+  # Savitzky-Golay smoothing of x / y before speeds are computed, in seconds (turned into
+  # an odd number of frames from the video's real frame spacing).
+  smooth_s: 0.2
+  # Polynomial order of that filter: 2 keeps short bursts sharp while removing pixel jitter.
+  smooth_polyorder: 2
+  # Below this speed the movement direction is mostly position noise, so no turn angle
+  # (turn_deg, angular velocity, meander) is computed for that frame.
+  min_speed_for_heading_bl_s: 0.5
+  # at_surface: the top of the fish outline is at most this many BL below the waterline.
+  surface_margin_bl: 0.25
+  # Length of one feature bin in seconds (bins start at t = 0).
+  bin_s: 1.0
+  # tilt_fraction: share of frames whose body axis is tilted more than this from
+  # horizontal (listing / loss of righting shows as a steep body).
+  tilt_threshold_deg: 45
+  # Endpoints: seconds faster than this count as "highly mobile" ...
+  high_mobility_bl_s: 2.0
+  # ... and seconds slower than this as "immobile".
+  immobile_bl_s: 0.1
+  # features-qa (does not change the features): a bin feature counts as stable when its
+  # per-bin values at half the frame rate still correlate with the full-rate ones at
+  # least this well (Pearson r) ...
+  qa_min_r: 0.8
+  # ... and its mean moves by at most this fraction (0.25 = 25%) both at half the frame
+  # rate and with double the smoothing (smooth_s x 2).
+  qa_max_change: 0.25

@@ -8,6 +8,8 @@ Each pipeline step registers one sub-command here in its own PR
     scene          per video: empty-beaker background, waterline and fish ROI (+ QA images)
     scene-review   browser page to check / correct waterlines and ROIs (writes overrides.yaml)
     track          per subject: fish position, size and tilt in every frame (parts joined)
+    features       per subject: movement features per frame and per time bin, plus endpoints
+    features-qa    per subject: which bin features are stable (frame rate / smoothing checks)
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from typing import Sequence
 from fishbehavior import __version__
 from fishbehavior.catalog import CatalogError, build_catalog, load_trials, select_subjects
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
+from fishbehavior.features import run_features, run_features_qa
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
 from fishbehavior.tracking import run_tracking
@@ -73,6 +76,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_subject_options(track)
     track.set_defaults(handler=run_track)
+
+    features = commands.add_parser(
+        "features", help="speed, turning, depth and posture per frame and per time bin; per-subject endpoints"
+    )
+    add_subject_options(features)
+    features.set_defaults(handler=run_features_command)
+
+    features_qa = commands.add_parser(
+        "features-qa", help="check which bin features stay the same at half the frame rate and double smoothing"
+    )
+    features_qa.add_argument("--subjects", nargs="+", metavar="ID", help="only these subjects (default: all)")
+    features_qa.set_defaults(handler=run_features_qa_command)
 
     return parser
 
@@ -228,6 +243,47 @@ def run_track(settings: Settings, args: argparse.Namespace) -> int:
             print(f"  {s['subject_id']}: detected {s['detected_pct']:.1f}%, interpolated {s['interpolated_pct']:.1f}%, "
                   f"untracked {s['untracked_s']:.1f} s, body length {s['median_body_length_px']} px")
     print(f"{'Written to':<11}: {result.tracks_dir}  (<subject>.csv.gz, _track_qa.png, summary.csv)")
+    return 1 if failed else 0
+
+
+def run_features_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Compute features for the matched subjects; returns 1 if any subject failed (e.g. no track)."""
+    trials = load_trials(settings)
+    result = run_features(settings, trials, select_subjects(trials, args.subjects), force=args.force)
+
+    records = result.records
+    failed = [r for r in records if "error" in r]
+    cached = sum(1 for r in records if r.get("cached"))
+    print(f"{'Subjects':<11}: {len(records) - len(failed)} done ({cached} cached), {len(failed)} failed")
+    if result.skipped:
+        print(f"{'Skipped':<11}: {len(result.skipped)} subject(s) without a matched video: {', '.join(result.skipped)}")
+    for record in failed:
+        print(f"{'  failed':<11}: {record['subject_id']}: {record['error']}")
+    print(f"{'Written to':<11}: {result.features_dir}  (<subject>_frames.csv.gz, _bins.csv.gz, endpoints.csv)")
+    return 1 if failed else 0
+
+
+def run_features_qa_command(settings: Settings, args: argparse.Namespace) -> int:
+    """Run the stability checks and print, per feature, how many subjects pass and the median numbers."""
+    trials = load_trials(settings)
+    result = run_features_qa(settings, select_subjects(trials, args.subjects))
+    failed = [r for r in result.records if "error" in r]
+    for record in failed:
+        print(f"  failed: {record['subject_id']}: {record['error']}")
+    table = result.table
+    if table.empty:
+        print("Nothing checked.")
+        return 1 if failed else 0
+
+    n = table["subject_id"].nunique()
+    print(f"{'feature':<32} {'stable':>9}  {'r half-rate':>11}  {'change half-rate':>16}  {'change smooth x2':>16}")
+    for feature, rows in table.groupby("feature", sort=False):
+        print(f"{feature:<32} {int(rows['stable'].sum()):>4}/{n:<4}  {rows['r_half_rate'].median():>11.2f}  "
+              f"{rows['change_half_rate'].median():>+16.0%}  {rows['change_smooth_2x'].median():>+16.0%}")
+    per_subject = table.groupby("subject_id").first()
+    print(f"Position jitter (median over subjects): {per_subject['jitter_bl'].median():.3f} BL; "
+          f"body length variation: {per_subject['body_length_cv'].median():.0%}")
+    print(f"Written to : {result.path}  (medians over {n} subject(s))")
     return 1 if failed else 0
 
 
