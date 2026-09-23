@@ -7,6 +7,7 @@ Each pipeline step registers one sub-command here in its own PR
     validate       clean the trial workbook and match every trial to its video(s)
     scene          per video: empty-beaker background, waterline and fish ROI (+ QA images)
     scene-review   browser page to check / correct waterlines and ROIs (writes overrides.yaml)
+    track          per subject: fish position, size and tilt in every frame (parts joined)
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from fishbehavior.catalog import CatalogError, build_catalog, load_trials, selec
 from fishbehavior.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from fishbehavior.review import IMAGE_KEYS, REVIEW_FILE, collect_items, make_server, render_page, serve_review
 from fishbehavior.roi import FLAG_DURATION, FLAG_FPS, FLAG_LOW_CONFIDENCE, load_overrides, run_scene
+from fishbehavior.tracking import run_tracking
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -65,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
     review.set_defaults(handler=run_scene_review)
+
+    track = commands.add_parser(
+        "track", help="find the fish in every frame (position, size, tilt); parts of a subject joined"
+    )
+    add_subject_options(track)
+    track.set_defaults(handler=run_track)
 
     return parser
 
@@ -195,6 +203,32 @@ def run_scene_review(settings: Settings, args: argparse.Namespace) -> int:
     print(f"Applied    : {checked} of {len(after.records)} videos checked, {overridden} with corrections")
     print(f"Written to : {scene_dir}  (overrides.yaml, <video>.json, video_check.csv)")
     return 0
+
+
+def run_track(settings: Settings, args: argparse.Namespace) -> int:
+    """Track the matched subjects and print one line per subject plus totals.
+
+    Returns 1 if any subject could not be tracked, else 0. A missing scene result is
+    computed on the way (same as running `scene` first).
+    """
+    trials = load_trials(settings)
+    result = run_tracking(settings, trials, select_subjects(trials, args.subjects), force=args.force)
+
+    records = result.records
+    failed = [r for r in records if "error" in r]
+    cached = sum(1 for r in records if r.get("cached"))
+    print(f"{'Subjects':<11}: {len(records) - len(failed)} done ({cached} cached), {len(failed)} failed")
+    if result.skipped:
+        print(f"{'Skipped':<11}: {len(result.skipped)} subject(s) without a matched video: {', '.join(result.skipped)}")
+    for record in failed:
+        print(f"{'  failed':<11}: {record['subject_id']}: {record['error']}")
+    for record in records:
+        if "error" not in record:
+            s = record["summary"]
+            print(f"  {s['subject_id']}: detected {s['detected_pct']:.1f}%, interpolated {s['interpolated_pct']:.1f}%, "
+                  f"untracked {s['untracked_s']:.1f} s, body length {s['median_body_length_px']} px")
+    print(f"{'Written to':<11}: {result.tracks_dir}  (<subject>.csv.gz, _track_qa.png, summary.csv)")
+    return 1 if failed else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

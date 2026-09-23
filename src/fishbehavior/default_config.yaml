@@ -27,10 +27,14 @@ catalog:
   video_name_pattern: '(?<![A-Za-z0-9])(?:[A-Za-z]+_)?(?P<subject>\d+)(?:\s*\(P(?P<part_num>\d+)\)|[_-]?(?P<part>[A-Z]))?(?:\s*\((?P<copy>\d+)\))?$'
 
 scene:
-  # Frames sampled evenly over each video. Their per-pixel median is the empty-beaker
-  # background (the moving fish disappears from the median); the same frames give
-  # the activity map.
+  # Frames sampled evenly over each video. They give the empty-beaker background
+  # (below) and the activity map.
   n_background_frames: 100
+  # Background = this per-pixel brightness percentile of the sampled frames. The fish
+  # is darker than the water, so a high percentile keeps the empty water even where a
+  # large fish swims in many of the frames (a median, 50, keeps a "ghost" fish there).
+  # Use 50 for a fish that is lighter than the background.
+  background_percentile: 90
   # How the activity map (where the fish moved) decides that a pixel changed:
   #   both  - brighter/darker AND different in color. Ignores light flicker, camera
   #           exposure changes and glare on the water (these change brightness, not
@@ -80,3 +84,47 @@ scene:
   # Real color frames saved per video for the review page (scene-review), so a person
   # sees the actual picture, not only the computed background.
   n_review_frames: 6
+
+tracking:
+  # Analyse every n-th frame (1 = every frame). Times stay exact: frame_index / fps.
+  frame_stride: 1
+  # Shrink frames by this factor before analysis (0.5 = half size) for speed. Every
+  # coordinate in the track file is converted back to original video pixels.
+  scale: 1.0
+  # Gaussian blur kernel as a fraction of the smaller frame side (rounded up to an odd
+  # size, at least 3). Smooths compression noise before comparing with the background.
+  blur_kernel_fraction: 0.01
+  # Brightness difference from the background (0-255) that counts as "fish".
+  diff_threshold: 18
+  # Which differences count: darker = only pixels darker than the background (the fish
+  # is darker than the water; lighter glare and highlights are ignored); both = darker
+  # or lighter (for a fish that is not darker than its background).
+  polarity: darker
+  # Subtract each frame's median difference inside the ROI first, so a light flicker or
+  # camera exposure change does not turn the whole ROI into foreground.
+  remove_brightness_change: true
+  # Opening (removes specks) + closing (fills holes in the body) kernel, as a fraction of
+  # the smaller frame side (odd, at least 3).
+  morph_kernel_fraction: 0.01
+  # Blobs smaller than this fraction of the frame area are ignored (noise, bubbles).
+  min_area_fraction: 0.0003
+  # The blob that overlaps last frame's fish is kept, even when a mirror image of the fish
+  # in the glass is bigger for a moment (fish turned toward the camera, or its see-through
+  # body split into pieces). Only a blob more than this many times larger takes over, so
+  # the track cannot stay stuck on a small mirror image.
+  switch_area_ratio: 1.5
+  # When no blob overlaps last frame's fish (after a gap, or a very fast move): a blob
+  # within this many body lengths of the previous position is preferred over a larger
+  # one farther away (keeps a ripple or shadow from stealing the track).
+  max_jump_bl: 2.0
+  # Body length for the jump test = median fitted length of the last N detections.
+  body_length_window: 100
+  # Missing runs up to this long (seconds) are linearly interpolated; longer ones stay empty.
+  max_gap_s: 0.5
+  # Head = the darkest spot of the fish (the eye). It must be at least this many gray
+  # levels darker than the fish's typical pixel, otherwise no head is recorded (no clear eye).
+  head_min_contrast: 15
+  # The head tells which end of the body is the front (for pitch_deg) only when it lies at
+  # least this fraction of the body length from the centre along the body axis. Closer
+  # (e.g. fish facing the camera) the pitch is left empty.
+  head_min_offset_fraction: 0.15

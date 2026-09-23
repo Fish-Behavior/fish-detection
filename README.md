@@ -61,9 +61,11 @@ fish-detection/
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
 │   ├── default_config.yaml   # default, data-independent parameters
+│   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
 │   ├── review.py             # scene-review: local browser page to check/correct waterlines and ROIs
 │   ├── review_page.html      # the review page template (self-contained, no external files)
 │   ├── roi.py                # per video: empty-beaker background, waterline, fish region (ROI), QA image
+│   ├── tracking.py           # per subject: fish position, outline size and tilt in every frame (parts joined)
 │   └── video.py              # video timing (fps, frames, duration) and frame reading
 └── tests/                    # automated tests (synthetic data only, never real trials)
     └── synthetic.py          # draws synthetic beaker/fish videos for the tests
@@ -73,7 +75,6 @@ Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Fish tracking | `tracking.py` | locates the fish in every frame (position, size, tilt) |
 | Features | `features.py` | speed, turning, smoothness, height, and posture per frame and per time bin |
 | Behavior labeling | `labeling.py` | assigns one of the five ethogram states to each time bin and merges them into segments |
 | Slide digitizer | `reference.py` | turns the reference ethogram figures into approximate timelines for tuning |
@@ -202,8 +203,12 @@ python -m fishbehavior scene --force             # redo subjects that already ha
 Needs `trials.csv` from `validate`. For every video it samples frames evenly
 (`scene.n_background_frames`, default 100) and computes:
 
-- the **background**: the per-pixel median of the samples. The fish keeps moving, so it
-  disappears from the median and what remains is the empty beaker;
+- the **background**: for each pixel, a high brightness percentile of the samples
+  (`scene.background_percentile`, default 90). The fish is darker than the water, so
+  each pixel's brighter samples are the ones without the fish, and what remains is the
+  empty beaker. This works even where a large fish in shallow water sits in many of the
+  samples; a median (50) would keep a faint "ghost" fish there. For a fish lighter than
+  its background, set it to 50;
 - the **activity map**: how often each pixel differs clearly from the background. By
   default (`scene.activity_method: both`) a pixel must change in brightness **and** in
   color. Light flicker, camera exposure changes, and glare on the water change only
@@ -311,6 +316,97 @@ M_0012b.mp4:
 Then run `scene` again. Videos whose override changed are redone automatically, and
 their JSON records `method: override`. A `roi` override is used as-is. A
 `waterline_y` override alone still raises the automatic ROI top to just above it.
+
+**4. Fish tracking**
+
+```bash
+python -m fishbehavior track                     # every subject with video_status = matched
+python -m fishbehavior track --subjects 42 F_0043  # only these
+python -m fishbehavior track --force             # redo subjects that already have results
+```
+
+Needs `trials.csv` from `validate`. A video without a scene result gets one first
+(the same as running `scene`), so check the scene QA images or run `scene-review`
+before tracking many subjects. For every frame (`tracking.frame_stride`, default 1 =
+every frame) the fish is found by:
+
+1. grayscale, shrunk by `tracking.scale` (default 1.0; 0.5 = half size, faster), and
+   cut to the scene ROI (nothing outside it can be the fish, e.g. the reflection below
+   the beaker);
+2. a Gaussian blur, then the difference from the (equally blurred) empty-beaker
+   background, after removing the frame's overall brightness change (flicker, auto
+   exposure);
+3. pixels **darker** than the background by more than `tracking.diff_threshold`
+   (default 18), cleaned by a morphological open/close, grouped into blobs. Lighter
+   pixels (glare, highlights) are ignored; set `tracking.polarity: both` to count them
+   too;
+4. the fish = the blob that **overlaps last frame's fish**. From one frame to the next
+   the fish always overlaps itself, while its mirror images in the glass (under the
+   surface, on the beaker bottom), ripples and shadows lie next to it. So the track
+   stays on a fish that briefly looks small, for example when it turns toward the
+   camera or its see-through body splits into pieces, even if a mirror image is bigger
+   at that moment. A blob more than `tracking.switch_area_ratio` (default 1.5) times
+   bigger does take over, so the track cannot stay stuck on a mirror image. When nothing
+   overlaps (after a gap or a very fast move), the fish is the largest blob within
+   `tracking.max_jump_bl` body lengths (default 2) of its last position, or else simply
+   the largest blob. Blobs smaller than `tracking.min_area_fraction` of the frame are
+   ignored;
+5. the **head** = the centre of the darkest part of the fish, which is the eye (much
+   darker than the see-through body). It tells which end of the body is the front, so
+   the tilt becomes a **pitch**: nose up (+) or down (−), whichever way the fish faces.
+   Useful for Listing and Surface Breach. No head is recorded when no part of the fish
+   is at least `tracking.head_min_contrast` gray levels darker than the rest. The pitch
+   is left empty when the head is too close to the body centre to tell front from back
+   (`tracking.head_min_offset_fraction`), e.g. when the fish faces the camera.
+
+Kernel sizes and the minimum blob area are fractions of the frame size, so the same
+settings work at any resolution; all times are `frame / fps` from the file.
+
+Missing stretches up to `tracking.max_gap_s` (default 0.5 s) between two detections
+are filled by linear interpolation (`interpolated = True`). Longer ones stay empty and
+count as untracked seconds. Parts of a split recording are joined into one timeline:
+part b starts at part a's duration.
+
+Subjects run in `FISH_WORKERS` parallel processes, with a progress bar. Results go to
+`<FISH_OUTPUT_DIR>/tracks/`:
+
+- `<subject>.csv.gz`: one row per analysed frame (columns below);
+- `<subject>_track_qa.png`: the track drawn over the background, colored by time
+  (dark purple = start, yellow = end), with the ROI in green and the waterline in blue.
+  Breaks in the line are untracked stretches. A split recording is drawn for part 1 only,
+  on part 1's background;
+- `<subject>_track.json`: the summary, which file each `part` number is and its start
+  time on the joined timeline, and the settings used;
+- `summary.csv`: one row per tracked subject: `subject_id, frames, detected_pct,
+  interpolated_pct, untracked_s, median_body_length_px, mean_n_blobs, head_pct,
+  pitch_pct` (the last two: share of detected frames with a head, and with a pitch).
+
+A subject is skipped when its track exists, unless `--force` is given, a `tracking`
+setting changed, or its scene ROI changed (for example after `scene-review`). Then it
+is redone automatically.
+
+Columns of `<subject>.csv.gz` (positions and sizes in **original video pixels**, whatever
+`tracking.scale` is; y grows downward):
+
+| Column | Meaning |
+|---|---|
+| `subject_id` | subject, zero-padded text (`0042`) |
+| `part` | which file of the subject: 1 = first in `video_paths` (part a), 2 = part b, ... |
+| `part_frame` | frame number inside that file (for cutting clips from the right file) |
+| `frame` | frame number on the joined timeline (continuous across parts) |
+| `time_s` | seconds on the joined timeline (part b starts at part a's duration) |
+| `detected` | the fish was found in this frame |
+| `x`, `y` | centroid of the detected fish outline (mid-body when the whole fish is seen; it moves toward the head when only the dark front is detected) |
+| `top_y`, `bottom_y` | highest and lowest row of the fish outline (for surface breaches) |
+| `area` | outline area, px² |
+| `major_axis`, `minor_axis` | length and height of an ellipse fitted to the outline (major ≈ body length) |
+| `angle_deg` | tilt of the long axis, −90 to 90: 0 = horizontal, positive = right end higher on screen (does not say which end is the head) |
+| `head_x`, `head_y` | the head: centre of the darkest part of the fish (the eye); empty when there is no clear eye |
+| `pitch_deg` | nose direction, −90 to 90: positive = nose up, whichever way the fish faces; empty when the front end is unclear |
+| `n_blobs` | how many large-enough blobs were in the ROI (more than 1 = something else moved too) |
+| `interpolated` | filled in over a short gap (`detected` is False) |
+
+Frames that are neither detected nor interpolated have empty measurements.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its

@@ -17,6 +17,7 @@ dependencies = [
     "openpyxl>=3.1",       # lets pandas read the .xlsx trial workbook
     "numpy>=1.24",         # per-pixel background median, activity maps
     "opencv-python-headless>=4.8",  # video reading/writing and drawing (headless: no GUI libs, works on Colab/servers)
+    "tqdm>=4.66",          # progress bars for long per-frame tracking runs
 ]
 
 [project.optional-dependencies]

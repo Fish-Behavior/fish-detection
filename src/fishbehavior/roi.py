@@ -2,8 +2,11 @@
 
 For every matched video (see catalog.py):
 
-1. **Background** = per-pixel median of `scene.n_background_frames` frames sampled
-   evenly over the video. The fish keeps moving, so it disappears from the median.
+1. **Background** = per-pixel brightness percentile (`scene.background_percentile`,
+   default 90) of `scene.n_background_frames` frames sampled evenly over the video.
+   The fish is darker than the water, so a high percentile keeps the water's
+   brightness even at pixels the fish covers in many frames (a large fish in shallow
+   water can cover a pixel in more than half of them, which a median would keep).
 2. **Activity map** = fraction of those frames in which a pixel clearly differs from
    the background (`scene.activity_method`): by default it must change in brightness
    AND in color, so light flicker, exposure changes and glare on the water (brightness
@@ -36,7 +39,6 @@ from __future__ import annotations
 
 import json
 import logging
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -48,6 +50,7 @@ import yaml
 
 from fishbehavior.catalog import STATUS_MATCHED
 from fishbehavior.config import ConfigError, Settings
+from fishbehavior.parallel import run_parallel
 from fishbehavior.video import VideoInfo, iter_sampled_frames, probe
 
 log = logging.getLogger(__name__)
@@ -68,7 +71,7 @@ ACTIVITY_METHODS = ("both", "color", "gray")
 # Settings that change a video's result or images: a cached result made with other
 # values is redone automatically (the other scene settings only affect video_check.csv).
 DETECTION_PARAMS = (
-    "n_background_frames", "activity_method", "diff_threshold", "color_threshold",
+    "n_background_frames", "background_percentile", "activity_method", "diff_threshold", "color_threshold",
     "analysis_max_width", "activity_min_fraction", "activity_min_component_fraction",
     "roi_padding_fraction", "waterline_search", "waterline_central_fraction",
     "waterline_margin_fraction", "min_waterline_confidence", "n_review_frames",
@@ -82,9 +85,13 @@ Box = tuple[int, int, int, int]  # x0, y0, x1, y1 (x1/y1 exclusive)
 # ---------------------------------------------------------------------------
 
 
-def compute_background(frames: np.ndarray) -> np.ndarray:
-    """Per-pixel median of a (n, h, w) uint8 stack -> (h, w) uint8 empty-scene image."""
-    return np.median(frames, axis=0).round().astype(np.uint8)
+def compute_background(frames: np.ndarray, percentile: float = 50.0) -> np.ndarray:
+    """Per-pixel `percentile` of a (n, h, w) uint8 stack -> (h, w) uint8 empty-scene image.
+
+    50 is the median. A higher value picks each pixel's brighter frames, i.e. the ones
+    without the (darker) fish, so the fish is removed even where it stays a lot.
+    """
+    return np.percentile(frames, percentile, axis=0).round().astype(np.uint8)
 
 
 def activity_map(frames: np.ndarray, method: str = "both", diff_threshold: float = 18,
@@ -219,7 +226,7 @@ def detect_scene(video_path: Path, params: dict[str, Any], override: dict[str, A
     info = probe(video_path)
     _check_override(override, info.width, info.height)
     grays, smalls, review_frames = sample_scene_frames(video_path, info, params)
-    background = compute_background(np.stack(grays))
+    background = compute_background(np.stack(grays), float(params["background_percentile"]))
     del grays  # the largest array; free it before the activity work
     small_activity = activity_map(np.stack(smalls), str(params["activity_method"]),
                                   float(params["diff_threshold"]), float(params["color_threshold"]))
@@ -483,28 +490,9 @@ def process_video(job: SceneJob) -> dict[str, Any]:
     return {**record, "cached": False}
 
 
-def _init_worker() -> None:
-    """One OpenCV thread per worker process: the parallelism comes from the processes."""
-    cv2.setNumThreads(1)
-
-
 def run_jobs(jobs: list[SceneJob], workers: int) -> list[dict[str, Any]]:
-    """Run jobs in `workers` processes (in this process when 1), preserving job order."""
-    if workers <= 1 or len(jobs) <= 1:
-        return [process_video(job) for job in jobs]
-    try:
-        pool = ProcessPoolExecutor(max_workers=min(workers, len(jobs)), initializer=_init_worker)
-    except (OSError, NotImplementedError) as error:
-        # Some locked-down environments forbid the semaphores a process pool needs.
-        log.warning("cannot start %d worker processes (%s); processing videos one by one", workers, error)
-        return [process_video(job) for job in jobs]
-    results: dict[int, dict[str, Any]] = {}
-    with pool:
-        futures = {pool.submit(process_video, job): i for i, job in enumerate(jobs)}
-        for done, future in enumerate(as_completed(futures), start=1):
-            results[futures[future]] = future.result()
-            log.debug("scene: %d/%d videos finished", done, len(jobs))
-    return [results[i] for i in range(len(jobs))]
+    """Process the videos in `workers` processes (see parallel.py), preserving job order."""
+    return run_parallel(process_video, jobs, workers, desc="scene")
 
 
 # ---------------------------------------------------------------------------
