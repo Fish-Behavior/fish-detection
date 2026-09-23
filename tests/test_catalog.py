@@ -16,14 +16,16 @@ from fishbehavior.catalog import (
     CatalogError,
     build_catalog,
     clean_trials,
+    load_trials,
     match_videos,
     merge_split_recordings,
     normalize_header,
     read_workbook,
     scan_videos,
+    select_subjects,
 )
 from fishbehavior.cli import main
-from fishbehavior.config import load_settings
+from fishbehavior.config import ConfigError, load_settings
 
 # Header row exactly as it appears in the real workbook (text only, no data).
 HEADERS = [
@@ -325,3 +327,35 @@ def test_cli_validate_reports_missing_workbook(project, capsys):
     (project / ".env").write_text("FISH_DB_PATH=nope.xlsx\n")
     assert main(["validate"]) == 2
     assert "FISH_DB_PATH points to" in capsys.readouterr().out
+
+
+# --- reading the catalog back (used by later steps) ------------------------------------
+
+
+def test_load_trials_keeps_subject_ids_as_text(project):
+    build_catalog(load_settings())
+
+    trials = load_trials(load_settings())
+
+    assert trials["subject_id"].str.len().eq(4).all()  # leading zeros kept, e.g. "0042"
+    assert (trials["video_paths"].map(type) == str).all()  # no NaN for subjects without video
+
+
+def test_load_trials_without_catalog_says_to_run_validate(tmp_path):
+    with pytest.raises(ConfigError, match="validate"):
+        load_trials(load_settings(environ={"FISH_OUTPUT_DIR": str(tmp_path)}))
+
+
+@pytest.mark.parametrize("wanted", [["42"], ["0042"], ["F_0042"], ["M_0042a"], ["42,43"]])
+def test_select_subjects_accepts_any_id_spelling(wanted):
+    trials = pd.DataFrame({"subject_id": ["0042", "0043", "0100"]})
+    expected = {"0042", "0043"} if "43" in wanted[0] else {"0042"}
+
+    assert set(select_subjects(trials, wanted)["subject_id"]) == expected
+
+
+def test_select_subjects_all_and_unknown():
+    trials = pd.DataFrame({"subject_id": ["0042", "0043"]})
+    assert len(select_subjects(trials, None)) == 2
+    with pytest.raises(ConfigError, match="0099"):
+        select_subjects(trials, ["99"])

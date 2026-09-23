@@ -15,6 +15,8 @@ Outputs (written to ``<FISH_OUTPUT_DIR>/catalog/``, which Git ignores):
     trials.csv             one row per subject, cleaned values + matched video paths
     videos.csv             one row per video file found, with what was parsed from its name
     validation_report.md   human-readable list of everything that needs attention
+
+Later steps read trials.csv back with `load_trials` and filter it with `select_subjects`.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from fishbehavior.config import Settings
+from fishbehavior.config import ConfigError, Settings
 
 log = logging.getLogger(__name__)
 
@@ -561,3 +563,55 @@ def render_report(result: CatalogResult) -> str:
         lines += [f"- {entry}" for entry in entries] or ["- none"]
         lines.append("")
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# 7. Reading the catalog back (used by every later step)
+# ---------------------------------------------------------------------------
+
+
+def trials_path(settings: Settings) -> Path:
+    """Where `validate` writes trials.csv."""
+    return settings.paths.output_dir / "catalog" / "trials.csv"
+
+
+def load_trials(settings: Settings) -> pd.DataFrame:
+    """Read trials.csv written by `validate`, with `subject_id` kept as text ('0042').
+
+    Raises ConfigError when the catalog has not been built yet, because every later
+    step depends on it.
+    """
+    path = trials_path(settings)
+    if not path.is_file():
+        raise ConfigError(f"{path} not found: run `python -m fishbehavior validate` first")
+    # dtype=str for the ID keeps its leading zeros; empty video_paths would otherwise be NaN.
+    trials = pd.read_csv(path, dtype={"subject_id": str, "video_paths": str})
+    trials["video_paths"] = trials["video_paths"].fillna("")
+    return trials
+
+
+def parse_subject_number(text: str) -> int:
+    """'42', '0042', 'F_0042' and 'M_0042a' all mean subject 42 (the first run of digits)."""
+    match = re.search(r"\d+", str(text))
+    if match is None:
+        raise ConfigError(f"--subjects: {text!r} does not contain a subject number")
+    return int(match.group())
+
+
+def select_subjects(trials: pd.DataFrame, wanted: Iterable[str] | None) -> pd.DataFrame:
+    """Keep only the requested subjects (for --subjects); None or empty keeps all.
+
+    Items may also be comma-separated ('42,43'). Unknown subjects raise ConfigError so
+    a typo is not silently ignored.
+    """
+    if not wanted:
+        return trials
+    items = [part.strip() for item in wanted for part in str(item).split(",") if part.strip()]
+    numbers = {parse_subject_number(item) for item in items}
+    known = set(trials["subject_id"].astype(int))
+    unknown = sorted(numbers - known)
+    if unknown:
+        raise ConfigError(
+            "subject(s) not in trials.csv: " + ", ".join(f"{n:04d}" for n in unknown)
+        )
+    return trials[trials["subject_id"].astype(int).isin(numbers)]

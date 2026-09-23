@@ -25,3 +25,39 @@ catalog:
   #   `copy`     the number in a trailing " (2)" -- F_309 (2): a second COMPLETE
   #              take of the trial, not a part of it, so it is never auto-matched.
   video_name_pattern: '(?<![A-Za-z0-9])(?:[A-Za-z]+_)?(?P<subject>\d+)(?:\s*\(P(?P<part_num>\d+)\)|[_-]?(?P<part>[A-Z]))?(?:\s*\((?P<copy>\d+)\))?$'
+
+scene:
+  # Frames sampled evenly over each video. Their per-pixel median is the empty-beaker
+  # background (the moving fish disappears from the median); the same frames give
+  # the activity map.
+  n_background_frames: 100
+  # Gray-level difference from the background (0-255) that counts as "something moved".
+  # Faint reflections below the beaker stay under it; the fish goes well over it.
+  diff_threshold: 18
+  # A pixel belongs to the fish's area when it differed from the background in at
+  # least this fraction of the sampled frames (drops single noisy frames).
+  activity_min_fraction: 0.02
+  # Padding added around the activity box on each side, as a fraction of the frame
+  # width (left/right) and height (top/bottom).
+  roi_padding_fraction: 0.03
+  # Rows searched for the waterline, as fractions of the activity-box height measured
+  # from the box top: [-0.25, 0.5] = from a quarter box-height ABOVE the box top down
+  # to the box middle. Starting above the box finds the surface even if the fish never
+  # reached it; stopping at the middle keeps the beaker bottom out of the search.
+  waterline_search: [-0.25, 0.5]
+  # Middle part of the activity box width (fraction) whose columns are used for the
+  # waterline profile, so the beaker's curved side walls are ignored.
+  waterline_central_fraction: 0.5
+  # The ROI top is raised to (waterline - this fraction of the frame height), so a fish
+  # breaching the surface is still inside the ROI.
+  waterline_margin_fraction: 0.05
+  # Waterline confidence = peak / median of the row-gradient profile in the search band.
+  # Below this value the waterline is flagged for a manual look (see overrides.yaml).
+  min_waterline_confidence: 3.0
+  # Expected length of one trial recording (all parts of a subject summed), in seconds,
+  # and the allowed relative difference before the subject is flagged (0.05 = 5%).
+  expected_duration_s: 1200
+  duration_tolerance: 0.05
+  # Parts of one subject count as having "different" frame rates only when they differ
+  # by more than this fraction (0.01 = 1%); tiny header differences are normal.
+  fps_tolerance: 0.01

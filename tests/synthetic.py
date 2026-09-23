@@ -1,0 +1,131 @@
+"""Synthetic test videos: a drawn beaker scene with a moving dark "fish" (no real data).
+
+Reusable by every step's tests. The scene, from top to bottom:
+
+* light background (the lab wall);
+* a darker rectangle = the beaker, with a horizontal brightness step at `waterline_y`
+  (glass above is lighter than the water below), so the waterline is a clear edge;
+* a dark ellipse = the fish, placed each frame by ``fish_path(t) -> (x, y, angle_deg)``;
+* optionally a faint mirrored copy of the fish BELOW the beaker bottom = the reflection
+  (much weaker than the fish, like the real one).
+
+Videos are written as MJPG .avi, which OpenCV can read and write on every OS.
+"""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+from typing import Callable
+
+import cv2
+import numpy as np
+
+FishPath = Callable[[float], tuple[float, float, float]]
+
+# Gray levels of the drawn scene (0-255).
+WALL = 205
+GLASS = 175  # beaker above the water
+WATER = 140  # beaker below the waterline: the 35-level step is the waterline edge
+FISH = 40
+REFLECTION_DROP = 10  # the reflection darkens the wall by only this much (under scene.diff_threshold)
+
+
+def default_beaker(size: tuple[int, int], waterline_y: int) -> tuple[int, int, int, int]:
+    """Beaker rectangle (x0, y0, x1, y1) as fractions of the frame, with the rim well above the water."""
+    width, height = size
+    return round(0.15 * width), round(0.08 * height), round(0.85 * width), round(0.75 * height)
+
+
+def lissajous_path(beaker: tuple[int, int, int, int], waterline_y: int, fish_len: float,
+                   duration_s: float, margin: float = 1.0) -> FishPath:
+    """A fish path that sweeps the whole water volume, so no pixel is covered in most frames.
+
+    x and y oscillate at different, unrelated speeds (a Lissajous curve); `margin`
+    (in fish lengths) keeps the fish body inside the water.
+    """
+    x0, _, x1, y1 = beaker
+    left, right = x0 + margin * fish_len, x1 - margin * fish_len
+    top, bottom = waterline_y + 0.6 * fish_len, y1 - 0.6 * fish_len
+
+    def path(t: float) -> tuple[float, float, float]:
+        u = t / duration_s * 2 * math.pi
+        x = (left + right) / 2 + (right - left) / 2 * math.sin(3 * u)
+        y = (top + bottom) / 2 + (bottom - top) / 2 * math.sin(5 * u + 0.7)
+        angle = 20 * math.sin(7 * u)  # gentle tilt
+        return x, y, angle
+
+    return path
+
+
+def draw_frame(size: tuple[int, int], beaker: tuple[int, int, int, int], waterline_y: int,
+               fish: tuple[float, float, float], fish_axes: tuple[float, float],
+               reflection: bool) -> np.ndarray:
+    """One BGR frame of the synthetic scene."""
+    width, height = size
+    frame = np.full((height, width), WALL, np.uint8)
+    x0, y0, x1, y1 = beaker
+    frame[y0:y1, x0:x1] = GLASS
+    frame[waterline_y:y1, x0:x1] = WATER
+
+    x, y, angle = fish
+    axes = (max(1, round(fish_axes[0])), max(1, round(fish_axes[1])))
+    cv2.ellipse(frame, (round(x), round(y)), axes, angle, 0, 360, FISH, -1, cv2.LINE_AA)
+    if reflection:
+        # Mirror the fish about the beaker bottom and draw it faintly on the wall below.
+        mirror_y = 2 * y1 - y
+        mask = np.zeros_like(frame)
+        cv2.ellipse(mask, (round(x), round(mirror_y)), axes, -angle, 0, 360, 255, -1)
+        below = np.zeros_like(mask)
+        below[y1:, :] = 1  # only below the beaker
+        frame = np.where((mask > 0) & (below > 0), frame - REFLECTION_DROP, frame).astype(np.uint8)
+    return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+
+def make_video(
+    path: str | Path,
+    fps: float = 30.0,
+    size: tuple[int, int] = (320, 240),
+    duration_s: float = 10.0,
+    waterline_y: int | None = None,
+    fish_path: FishPath | None = None,
+    beaker: tuple[int, int, int, int] | None = None,
+    fish_length: float | None = None,
+    reflection: bool = True,
+) -> dict:
+    """Write a synthetic MJPG .avi and return its ground truth.
+
+    Sizes default to fractions of the frame so tests can run at any resolution.
+    Returns a dict with the path, fps, frame_count, size, waterline_y, beaker box,
+    fish axes, and the list of fish positions (x, y, angle) per frame.
+    """
+    path = Path(path)
+    width, height = size
+    waterline_y = round(0.35 * height) if waterline_y is None else waterline_y
+    beaker = default_beaker(size, waterline_y) if beaker is None else beaker
+    fish_length = 0.12 * width if fish_length is None else fish_length
+    fish_axes = (fish_length / 2, fish_length / 7)  # slender body: half-length, half-height
+    fish_path = fish_path or lissajous_path(beaker, waterline_y, fish_length, duration_s)
+
+    n_frames = round(duration_s * fps)
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), fps, (width, height))
+    if not writer.isOpened():
+        raise RuntimeError(f"OpenCV cannot write MJPG video to {path}")
+    positions = []
+    try:
+        for index in range(n_frames):
+            fish = fish_path(index / fps)
+            positions.append(fish)
+            writer.write(draw_frame(size, beaker, waterline_y, fish, fish_axes, reflection))
+    finally:
+        writer.release()
+    return {
+        "path": path,
+        "fps": fps,
+        "frame_count": n_frames,
+        "size": size,
+        "waterline_y": waterline_y,
+        "beaker": beaker,
+        "fish_axes": fish_axes,
+        "positions": positions,
+    }

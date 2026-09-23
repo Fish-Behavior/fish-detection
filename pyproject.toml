@@ -15,6 +15,8 @@ dependencies = [
     "PyYAML>=6.0",         # reads the tunable settings file (default_config.yaml)
     "pandas>=2.0",         # tables: cleaned trial catalog, reports
     "openpyxl>=3.1",       # lets pandas read the .xlsx trial workbook
+    "numpy>=1.24",         # per-pixel background median, activity maps
+    "opencv-python-headless>=4.8",  # video reading/writing and drawing (headless: no GUI libs, works on Colab/servers)
 ]
 
 [project.optional-dependencies]

@@ -41,8 +41,8 @@ See the complete scientific and technical scope in
 
 The behavior-labeling pipeline (`fishbehavior` package) is being built one step at a
 time, one pull request per step. The project setup (settings loading, command-line
-entry point, tests) and the workbook catalog (cleaning + video matching) are in
-place; the analysis steps listed under
+entry point, tests), the workbook catalog (cleaning + video matching), and scene
+setup (background, waterline, fish region per video) are in place; the analysis steps listed under
 [Project Structure](#project-structure) as *planned* are added in later PRs. The
 classifier, backend, and frontend are not yet implemented.
 
@@ -60,15 +60,17 @@ fish-detection/
 │   ├── catalog.py            # cleans the trial workbook and matches each trial to its video(s)
 │   ├── cli.py                # command-line entry point; one sub-command per pipeline step
 │   ├── config.py             # reads paths from .env / environment and parameters from YAML
-│   └── default_config.yaml   # default, data-independent parameters
+│   ├── default_config.yaml   # default, data-independent parameters
+│   ├── roi.py                # per video: empty-beaker background, waterline, fish region (ROI), QA image
+│   └── video.py              # video timing (fps, frames, duration) and frame reading
 └── tests/                    # automated tests (synthetic data only, never real trials)
+    └── synthetic.py          # draws synthetic beaker/fish videos for the tests
 ```
 
 Pipeline steps planned for later PRs, in order:
 
 | Step | Module | What it does |
 |---|---|---|
-| Scene setup | `video.py`, `roi.py` | reads video timing; finds the empty background, water area, and waterline |
 | Fish tracking | `tracking.py` | locates the fish in every frame (position, size, tilt) |
 | Features | `features.py` | speed, turning, smoothness, height, and posture per frame and per time bin |
 | Behavior labeling | `labeling.py` | assigns one of the five ethogram states to each time bin and merges them into segments |
@@ -175,16 +177,86 @@ matches every subject to its video file(s) in `FISH_VIDEO_DIR`, and writes to
 `<FISH_OUTPUT_DIR>/catalog/`:
 
 - `trials.csv`: one row per subject with the cleaned values, `ntt_tracked`,
-  `video_status` (`matched`, `missing`, `sex_mismatch`, `part_mismatch`,
+  `video_status` (`matched`, `missing`, `part_mismatch`,
   `duplicate_videos`, or `not_checked`), and `video_paths`;
 - `videos.csv`: every video file found and what was read from its name;
 - `validation_report.md`: everything that needs attention, plus reference lists.
 
-Video names must contain the sex and subject number, such as `F_0042.mp4`. A
+Video names must contain the subject number, such as `F_0042.mp4`; a letter prefix
+is allowed and ignored (sex comes from the workbook). A
 recording split into several files uses a part letter (`M_0012a.mp4`,
 `M_0012_b.mp4`, or `M_0012-b.mp4`); a subject number that appears on several
 workbook rows is treated as one fish recorded in parts and joined into one subject.
 Without `FISH_VIDEO_DIR`, only the workbook is checked.
+
+**2. Scene setup: background, waterline, and fish region**
+
+```bash
+python -m fishbehavior scene                     # every subject with video_status = matched
+python -m fishbehavior scene --subjects 42 F_0043  # only these ("42", "0042", "F_0042" all work)
+python -m fishbehavior scene --force             # redo subjects that already have results
+```
+
+Needs `trials.csv` from `validate`. For every video it samples frames evenly
+(`scene.n_background_frames`, default 100) and computes:
+
+- the **background**: the per-pixel median of the samples. The fish keeps moving, so it
+  disappears from the median and what remains is the empty beaker;
+- the **activity map**: how often each pixel differs clearly from the background. Only
+  the fish passes; the faint reflection below the beaker bottom does not;
+- the **ROI** (region where the fish can be): the box around the activity, padded, with
+  its top raised just above the waterline so a surface breach stays inside;
+- the **waterline**: the row with the strongest horizontal edge in the background near the
+  top of the activity box, with a confidence score (edge strength / typical row).
+
+Videos are processed in `FISH_WORKERS` parallel processes. Results go to
+`<FISH_OUTPUT_DIR>/scene/`:
+
+- `<video>.json`: video info (fps, frames, duration, size), `waterline_y`,
+  `waterline_confidence`, `roi` as `[x0, y0, x1, y1]` in original pixels (x1/y1
+  exclusive), `method` (`auto` or `override`), and flags;
+- `<video>_background.png`: the empty-beaker background;
+- `<video>_qa.png`: the check image (below);
+- `video_check.csv`: one row per video (`subject_id, file, fps, frames, duration_s,
+  width, height, flags`). Flags: `duration` (the subject's parts together differ from
+  `scene.expected_duration_s` by more than `scene.duration_tolerance`), `fps_mismatch`
+  (parts of one subject have different frame rates), `low_waterline_confidence`,
+  `no_activity` (nothing moved; the ROI falls back to the whole frame), `error`.
+
+The command prints how many videos were done or taken from the cache, and lists
+the low-confidence waterlines and the duration/fps flags. Existing results are reused
+unless `--force` is given or that video's entry in `overrides.yaml` changed.
+
+**Checking the QA image.** `<video>_qa.png` shows the background (enlarged for small
+videos) with a text header giving the file, method, flags, waterline row, confidence,
+and ROI. On the image:
+
+- **blue line** = detected waterline; it should lie on the water surface;
+- **green box** = ROI; it should enclose all the water the fish can reach, from just
+  above the surface to the beaker bottom, and should **not** include the reflection
+  below the beaker;
+- **faint red** = where the fish was seen moving. Red outside the water usually means
+  a reflection or lighting change; no red at all means the fish hardly moved.
+
+If the background still shows a fish-shaped ghost, the fish stayed in one place for
+more than half of the video. Look at the QA images of every flagged video first.
+
+**Correcting a result (`overrides.yaml`).** Create `<FISH_OUTPUT_DIR>/scene/overrides.yaml`
+(it stays in the git-ignored output folder) with an entry per video *file name*.
+Values are pixels of the original video (the QA header shows the current values; divide
+positions measured on an enlarged QA image by the zoom factor):
+
+```yaml
+F_0042.mp4:
+  waterline_y: 118            # row of the water surface
+  roi: [30, 95, 290, 215]     # x0, y0, x1, y1 (x1/y1 exclusive)
+M_0012a.mp4:
+  waterline_y: 121            # only the waterline; the ROI top is re-derived from it
+```
+
+Then run `scene` again. Videos whose override changed are redone automatically, and
+their JSON records `method: override`. A `roi` override is used as-is. A
+`waterline_y` override alone still raises the automatic ROI top to just above it.
 
 The
 full pipeline will clean and validate the trial database, match each trial to its
