@@ -9,10 +9,20 @@ description = "Automated zebrafish behavior-state labeling pipeline (tracking ->
 readme = "README.md"
 # 3.10+ keeps the package usable on lab machines and on Google Colab.
 requires-python = ">=3.10"
-# Runtime dependencies. Each pipeline step adds only what it needs, in its own PR.
+# Runtime dependencies; each comment names the step that needs it.
 dependencies = [
     "python-dotenv>=1.0",  # reads the local .env file with data paths
     "PyYAML>=6.0",         # reads the tunable settings file (default_config.yaml)
+    "pandas>=2.0",         # tables: cleaned trial catalog, reports
+    "openpyxl>=3.1",       # lets pandas read the .xlsx trial workbook
+    "numpy>=1.24",         # per-pixel background median, activity maps
+    "opencv-python-headless>=4.8",  # video reading/writing and drawing (headless: no GUI libs, works on Colab/servers)
+    "tqdm>=4.66",          # progress bars for long per-frame tracking runs
+    "scipy>=1.10",         # Savitzky-Golay smoothing of the track before computing speeds (features)
+    "scikit-learn>=1.3",   # Gaussian mixture that splits swimming into controlled vs erratic (label)
+    "hmmlearn>=0.3",       # optional hidden Markov swim split, labeling.swim_split: hmm (label)
+    "pymupdf>=1.24.3",     # extracts the ethogram images from the reference PDF (reference)
+    "matplotlib>=3.7",     # ethograms and bar charts (plot)
 ]
 
 [project.optional-dependencies]
@@ -27,8 +37,8 @@ fishbehavior = "fishbehavior.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Ship the default settings file inside the package so it works after `pip install`.
-fishbehavior = ["default_config.yaml"]
+# Ship the default settings file and the review page template inside the package so they work after `pip install`.
+fishbehavior = ["default_config.yaml", "review_page.html", "live_page.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

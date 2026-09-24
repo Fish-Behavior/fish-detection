@@ -8,6 +8,8 @@
 # Default local folders for raw data and everything the pipeline generates
 data/
 outputs/
+agents/
+graphify-out/
 # Raw inputs by type, in case they are placed somewhere else in the repo
 *.mp4
 *.avi
@@ -30,9 +32,11 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+.ruff_cache/
 .ipynb_checkpoints/
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+CLAUDE.md

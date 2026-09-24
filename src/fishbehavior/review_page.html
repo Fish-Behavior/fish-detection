@@ -1,0 +1,656 @@
+<!doctype html>
+<!--
+  Scene review page, filled in by fishbehavior/review.py (the data replaces the
+  placeholder in the <script id="data"> block). No external files or links: images
+  come from the local review server, or are embedded when written with --no-serve.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scene review</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #deded8;
+    --accent: #2f6fdf; --ok: #1f8a4c; --edit: #b26b00; --warn: #c2362b; --sel: #e8effc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #20201f; --text: #ecece8; --muted: #9a9a93; --line: #34342f;
+      --accent: #7aa7ff; --ok: #4cc27f; --edit: #f0a640; --warn: #ff7a6e; --sel: #26324a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .app { display: grid; grid-template-columns: 270px 1fr; height: 100vh; }
+  aside { border-right: 1px solid var(--line); background: var(--panel); display: flex;
+          flex-direction: column; min-height: 0; }
+  aside header { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 16px; margin: 0 0 6px; }
+  .progress { color: var(--muted); font-size: 13px; }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--ok); width: 0; }
+  select, button { font: inherit; color: var(--text); background: var(--panel);
+                   border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.on { background: var(--sel); border-color: var(--accent); }
+  .filter { margin-top: 8px; width: 100%; }
+  ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+  #list li { padding: 6px 14px; cursor: pointer; display: flex; gap: 8px; align-items: center;
+             border-bottom: 1px solid var(--line); font-size: 13px; }
+  #list li.current { background: var(--sel); }
+  #list .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--line); }
+  .dot.checked { background: var(--ok); } .dot.edited { background: var(--edit); }
+  .dot.attention { background: var(--warn); }
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 16px; gap: 8px; overflow: auto; }
+  .top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .top h2 { margin: 0; font-size: 17px; }
+  .hints { color: var(--warn); font-size: 13px; }
+  .status { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
+  .toolbar .group { display: flex; gap: 6px; align-items: center; }
+  .toolbar label { color: var(--muted); }
+  input[type=range] { width: 110px; accent-color: var(--accent); }
+  .work { display: flex; gap: 16px; min-height: 0; flex: 1; }
+  .stage { flex: 1; min-width: 0; display: flex; align-items: flex-start; justify-content: center; }
+  canvas#view { cursor: crosshair; border: 1px solid var(--line); max-width: 100%;
+                image-rendering: pixelated; touch-action: none; }
+  canvas#view.brushing { cursor: cell; }
+  .num { width: 56px; font: inherit; font-variant-numeric: tabular-nums; color: var(--text);
+         background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; }
+  .roi-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 6px; align-items: center;
+              font-size: 12.5px; margin-top: 4px; }
+  .roi-grid label { color: var(--muted); }
+  .side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .card h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .values { font-variant-numeric: tabular-nums; }
+  .values b { font-weight: 600; }
+  .src { font-size: 12px; color: var(--muted); }
+  canvas#loupe { width: 100%; image-rendering: pixelated; border: 1px solid var(--line); margin-top: 6px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 4px; background: var(--bg); }
+  .help { font-size: 12.5px; color: var(--muted); margin: 0; padding-left: 16px; list-style: disc; overflow: visible; }
+  .help li { padding: 1px 0; }
+  .legend { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  .error { color: var(--warn); }
+  .done { position: fixed; inset: 0; background: var(--bg); display: none; align-items: center;
+          justify-content: center; font-size: 18px; }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    aside { max-height: 40vh; }
+    .work { flex-direction: column; }
+    .side { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <header>
+      <h1>Scene review</h1>
+      <div class="progress" id="progress"></div>
+      <div class="bar"><div id="bar"></div></div>
+      <select class="filter" id="filter" aria-label="Which videos to list">
+        <option value="attention">Needs a look (hints, not checked)</option>
+        <option value="unchecked">Not checked yet</option>
+        <option value="all">All videos</option>
+        <option value="edited">Corrected by hand</option>
+      </select>
+    </header>
+    <ul id="list"></ul>
+  </aside>
+  <main>
+    <div class="top">
+      <h2 id="title"></h2>
+      <span class="hints" id="hints"></span>
+      <span class="status" id="saveStatus"></span>
+    </div>
+    <div class="toolbar">
+      <div class="group">
+        <label>Picture</label>
+        <button id="viewBg" title="B">Background</button>
+        <button id="viewFrame" title="V">Real frame</button>
+        <input type="range" id="frameSlider" min="0" max="0" value="0" aria-label="Which real frame">
+        <span id="frameLabel" class="src"></span>
+      </div>
+      <div class="group">
+        <label for="opacity">Heatmap</label>
+        <input type="range" id="opacity" min="0" max="100" value="55" title="Opacity (M hides it)">
+        <label for="sensitivity">hide weak</label>
+        <input type="range" id="sensitivity" min="0" max="90" value="0" title="Hide motion weaker than this % of the strongest">
+      </div>
+      <div class="group">
+        <button id="painter" title="P">Paint</button>
+        <button id="eraser" title="E">Eraser</button>
+        <input type="range" id="brush" min="2" max="40" value="8" title="Brush size (video pixels)">
+        <button id="clearErase" title="Undo all painting and erasing for this video">Clear edits</button>
+        <button id="fit" title="F">Fit ROI to heatmap</button>
+      </div>
+      <div class="group">
+        <button id="crop" title="C">Crop</button>
+      </div>
+    </div>
+    <div class="work">
+      <div class="stage"><canvas id="view"></canvas></div>
+      <div class="side">
+        <div class="card">
+          <h3>Cursor (video pixels)</h3>
+          <div class="values" id="cursor">move over the image</div>
+          <canvas id="loupe" width="160" height="160"></canvas>
+        </div>
+        <div class="card values">
+          <h3>Current values</h3>
+          <div><span class="legend" style="background:#2f6fff"></span>waterline y =
+            <input class="num" id="wl" type="number" min="0" step="1" aria-label="Waterline row">
+            <div class="src" id="wlSrc"></div></div>
+          <div style="margin-top:8px"><span class="legend" style="background:#19c35a"></span>ROI (crop)
+            <div class="roi-grid">
+              <label for="roi0">x0</label><input class="num" id="roi0" type="number" min="0" step="1">
+              <label for="roi2">x1</label><input class="num" id="roi2" type="number" min="1" step="1">
+              <label for="roi1">y0</label><input class="num" id="roi1" type="number" min="0" step="1">
+              <label for="roi3">y1</label><input class="num" id="roi3" type="number" min="1" step="1">
+            </div>
+            <div class="src" id="roiSrc"></div></div>
+        </div>
+        <div class="buttons">
+          <button class="primary" id="accept" title="Enter">Looks right ✓</button>
+          <button id="reset" title="Z">Reset to auto</button>
+          <button id="prev" title="←">◀ Prev</button>
+          <button id="next" title="→">Next ▶</button>
+        </div>
+        <div class="buttons">
+          <button id="download">Download overrides.yaml</button>
+          <button id="finish">Finish</button>
+        </div>
+        <div class="card">
+          <h3>How to</h3>
+          <ul class="help">
+            <li><b>Click</b> the water surface = waterline. <kbd>↑</kbd><kbd>↓</kbd> nudge 1 px (<kbd>Shift</kbd> 5).</li>
+            <li><b>Drag</b> a box around the water the fish can reach = ROI (the crop).
+              <kbd>C</kbd> crop mode: drag the box edges/corners to resize, inside to move;
+              outside the crop is darkened. Or type exact numbers under Current values.</li>
+            <li><b>Red</b> = where the fish moved. Red on glare, light or the reflection under the
+              beaker is false: <kbd>E</kbd> eraser, paint it away. Water the fish can reach but that
+              has no red: <kbd>P</kbd> paint it in (orange). Then <kbd>F</kbd> fits the ROI to the heatmap.</li>
+            <li><kbd>V</kbd> real color frames (slider picks the time), <kbd>B</kbd> background, <kbd>M</kbd> heatmap on/off.</li>
+            <li><kbd>Enter</kbd> looks right → next · <kbd>←</kbd><kbd>→</kbd> browse · <kbd>Z</kbd> reset.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="done" id="doneScreen">Saved. You can close this tab — the terminal applies the changes.</div>
+
+<script id="data" type="application/json">__REVIEW_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const ITEMS = DATA.items;
+// One storage slot per set of videos, so two different review pages do not mix.
+const STORAGE_KEY = "fish-scene-review:" + ITEMS.length + ":" + (ITEMS.length ? ITEMS[0].file : "");
+const $ = id => document.getElementById(id);
+
+// entries[file] = {waterline_y?, roi?, checked?}: the override for that video (none = automatic).
+let entries = JSON.parse(JSON.stringify(DATA.overrides));
+if (!DATA.serve) {
+  // Page opened as a file: keep unsaved work in this browser between visits.
+  try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) entries = JSON.parse(saved); } catch (e) {}
+}
+
+// View state. Painting / erasing only change the heatmap on this page (they guide "Fit ROI");
+// the ROI is what gets saved. brush: null (click/drag = waterline/ROI), "paint" or "erase".
+let index = 0, drag = null, cursor = null, brush = null, cropping = false;
+let view = { picture: "background", frame: 0, showHeat: true };
+const canvas = $("view"), ctx = canvas.getContext("2d");
+const loupe = $("loupe"), lctx = loupe.getContext("2d");
+const cache = {};  // file -> {bg, frames, act, erased, painted (one value per pixel), tint: canvas}
+
+// ---- values -------------------------------------------------------------
+function raiseTop(box, wl, height) {
+  const margin = Math.round(DATA.margin_fraction * height);
+  return [box[0], Math.max(0, Math.min(box[1], wl - margin)), box[2], box[3]];
+}
+function effective(item) {
+  const e = entries[item.file] || {};
+  const wl = e.waterline_y ?? item.auto.waterline_y;
+  // Waterline-only override: the automatic ROI top follows it, exactly like the pipeline does.
+  const roi = e.roi ?? (e.waterline_y != null ? raiseTop(item.base_roi, wl, item.height) : item.auto.roi);
+  return { wl, roi, wlManual: e.waterline_y != null, roiManual: e.roi != null };
+}
+function status(item) {
+  const e = entries[item.file] || {};
+  if (e.waterline_y != null || e.roi != null) return "edited";
+  if (e.checked) return "checked";
+  return item.hints.length ? "attention" : "auto";
+}
+function isDone(item) { const e = entries[item.file]; return !!(e && e.checked); }
+
+// ---- images and heatmap -------------------------------------------------------
+function loadImage(src) {
+  return new Promise(ok => { if (!src) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; });
+}
+function load(item) {
+  if (cache[item.file]) return Promise.resolve(cache[item.file]);
+  return Promise.all([loadImage(item.background), loadImage(item.activity), loadImage(item.frames)]).then(([bg, actIm, frames]) => {
+    let act = null;
+    if (actIm) {
+      // Read the gray activity map once; the red tint is rebuilt from it when sliders or the eraser change.
+      const c = document.createElement("canvas"); c.width = item.width; c.height = item.height;
+      const g = c.getContext("2d"); g.drawImage(actIm, 0, 0, item.width, item.height);
+      const px = g.getImageData(0, 0, item.width, item.height).data;
+      act = new Uint8ClampedArray(item.width * item.height);
+      for (let i = 0; i < act.length; i++) act[i] = px[i * 4];
+    }
+    const tint = document.createElement("canvas"); tint.width = item.width; tint.height = item.height;
+    const n = item.width * item.height;
+    cache[item.file] = { bg, frames, act, erased: new Uint8Array(n), painted: new Uint8Array(n), tint };
+    rebuildTint(item);
+    return cache[item.file];
+  });
+}
+function sensitivityCut() { return +$("sensitivity").value / 100 * 255; }
+function heatVisible(c, i, cut) {
+  // Painted by hand always counts; detected motion counts unless erased or hidden as weak.
+  return !!c.painted[i] || (!!c.act && c.act[i] > 0 && c.act[i] >= cut && !c.erased[i]);
+}
+function rebuildTint(item) {
+  const c = cache[item.file]; if (!c) return;
+  const t = c.tint.getContext("2d"), img = t.createImageData(item.width, item.height), d = img.data;
+  const cut = sensitivityCut(), alpha = +$("opacity").value / 100;
+  for (let i = 0; i < c.painted.length; i++) {
+    if (c.painted[i]) {  // hand-painted: orange, so it is easy to tell from detected motion
+      d[i * 4] = 255; d[i * 4 + 1] = 150; d[i * 4 + 2] = 0; d[i * 4 + 3] = 170 * alpha;
+    } else if (heatVisible(c, i, cut)) {
+      d[i * 4] = 255; d[i * 4 + 1] = 30; d[i * 4 + 2] = 30; d[i * 4 + 3] = Math.max(40, c.act[i]) * alpha;
+    }
+  }
+  t.putImageData(img, 0, 0);
+}
+
+// ---- drawing ------------------------------------------------------------
+function scale(item) {
+  const stage = canvas.parentElement;
+  const maxW = Math.max(200, stage.clientWidth - 4), maxH = Math.max(200, window.innerHeight - 190);
+  return Math.max(1, Math.min(maxW / item.width, maxH / item.height, 5));
+}
+function drawPicture(g, c, item, sx, sy, sw, sh, dw, dh) {
+  // The background, or one real color frame cut from the vertical strip of frames.
+  if (view.picture === "frame" && c.frames) {
+    g.drawImage(c.frames, sx, sy + view.frame * item.height, sw, sh, 0, 0, dw, dh);
+  } else if (c.bg) {
+    g.drawImage(c.bg, sx, sy, sw, sh, 0, 0, dw, dh);
+  }
+}
+function draw() {
+  const item = ITEMS[index]; if (!item) return;
+  const c = cache[item.file]; if (!c) return;
+  const k = scale(item);
+  canvas.width = Math.round(item.width * k); canvas.height = Math.round(item.height * k);
+  ctx.imageSmoothingEnabled = false;
+  drawPicture(ctx, c, item, 0, 0, item.width, item.height, canvas.width, canvas.height);
+  if (view.showHeat) ctx.drawImage(c.tint, 0, 0, canvas.width, canvas.height);
+  const v = effective(item);
+  const roi = (drag && drag.roi) || v.roi;  // while cropping, the box follows the mouse
+  if (cropping) drawCropShade(roi, k);
+  // ROI: solid when set by hand, dashed when automatic.
+  ctx.lineWidth = 2; ctx.strokeStyle = "#19c35a"; ctx.setLineDash(v.roiManual || cropping ? [] : [8, 5]);
+  ctx.strokeRect(roi[0] * k + 1, roi[1] * k + 1, (roi[2] - roi[0]) * k - 2, (roi[3] - roi[1]) * k - 2);
+  if (cropping) drawHandles(roi, k);
+  // Waterline across the whole frame, drawn through the middle of its pixel row.
+  ctx.setLineDash(v.wlManual ? [] : [8, 5]); ctx.strokeStyle = "#2f6fff";
+  const y = (v.wl + 0.5) * k; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  ctx.setLineDash([]);
+  if (drag && drag.moved && !brush && !cropping) {
+    const [x0, y0, x1, y1] = dragBox();
+    ctx.strokeStyle = "#ffd400"; ctx.strokeRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+  } else if (cursor && brush) {
+    const r = +$("brush").value / 2;  // brush outline: orange = paint, white = erase
+    ctx.strokeStyle = brush === "paint" ? "#ff9600" : "#fff"; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.arc((cursor.x + 0.5) * k, (cursor.y + 0.5) * k, r * k, 0, 2 * Math.PI); ctx.stroke();
+  } else if (cursor && !cropping) {
+    // Preview where a click would put the waterline.
+    ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+    const cy = (cursor.y + 0.5) * k; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  drawLoupe(item, c, v);
+}
+function drawCropShade(roi, k) {
+  // Darken everything outside the crop, so what will be cut away is obvious.
+  const [x0, y0, x1, y1] = roi.map(n => n * k), W = canvas.width, H = canvas.height;
+  ctx.fillStyle = "rgba(0,0,0,.5)";
+  ctx.fillRect(0, 0, W, y0); ctx.fillRect(0, y1, W, H - y1);
+  ctx.fillRect(0, y0, x0, y1 - y0); ctx.fillRect(x1, y0, W - x1, y1 - y0);
+}
+function drawHandles(roi, k) {
+  const [x0, y0, x1, y1] = roi.map(n => n * k), xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+  ctx.fillStyle = "#19c35a"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+  for (const [x, y] of [[x0, y0], [xm, y0], [x1, y0], [x0, ym], [x1, ym], [x0, y1], [xm, y1], [x1, y1]]) {
+    ctx.fillRect(x - 4, y - 4, 8, 8); ctx.strokeRect(x - 4, y - 4, 8, 8);
+  }
+}
+function drawLoupe(item, c, v) {
+  // 5x view of 32x32 video pixels around the cursor (or the waterline centre).
+  const p = cursor || { x: Math.round((v.roi[0] + v.roi[2]) / 2), y: v.wl };
+  const n = 32, z = loupe.width / n, sx = p.x - n / 2, sy = p.y - n / 2;
+  lctx.imageSmoothingEnabled = false; lctx.fillStyle = "#000"; lctx.fillRect(0, 0, loupe.width, loupe.height);
+  // Only the part inside the frame is copied, so a strip frame never shows its neighbour.
+  const x0 = Math.max(0, sx), y0 = Math.max(0, sy), x1 = Math.min(item.width, sx + n), y1 = Math.min(item.height, sy + n);
+  if (x1 > x0 && y1 > y0) {
+    lctx.save(); lctx.translate((x0 - sx) * z, (y0 - sy) * z);
+    drawPicture(lctx, c, item, x0, y0, x1 - x0, y1 - y0, (x1 - x0) * z, (y1 - y0) * z);
+    lctx.restore();
+  }
+  lctx.strokeStyle = "#2f6fff"; lctx.lineWidth = 1;
+  lctx.beginPath(); lctx.moveTo(0, (v.wl - sy + 0.5) * z); lctx.lineTo(loupe.width, (v.wl - sy + 0.5) * z); lctx.stroke();
+  if (cursor) { lctx.strokeStyle = "#fff"; lctx.strokeRect((p.x - sx) * z, (p.y - sy) * z, z, z); }
+}
+
+// ---- side panel / list -----------------------------------------------------
+function visible() {
+  const f = $("filter").value;
+  return ITEMS.map((item, i) => ({ item, i })).filter(({ item }) =>
+    f === "all" ? true : f === "unchecked" ? !isDone(item)
+    : f === "edited" ? status(item) === "edited" : item.hints.length && !isDone(item));
+}
+function renderList() {
+  const list = $("list"); list.innerHTML = "";
+  for (const { item, i } of visible()) {
+    const li = document.createElement("li"); if (i === index) li.className = "current";
+    li.innerHTML = `<span class="dot ${status(item)}"></span><span class="name"></span>`;
+    li.querySelector(".name").textContent = item.file + (item.hints.length ? `  (${item.hints.length})` : "");
+    li.title = item.hints.join("; ") || "no hints";
+    li.onclick = () => show(i);
+    list.appendChild(li);
+  }
+  const done = ITEMS.filter(isDone).length;
+  $("progress").textContent = `${done} of ${ITEMS.length} checked · ${ITEMS.filter(i => i.hints.length).length} with hints`;
+  $("bar").style.width = (ITEMS.length ? 100 * done / ITEMS.length : 0) + "%";
+}
+function renderInfo() {
+  const item = ITEMS[index], v = effective(item);
+  $("title").textContent = `${item.file}  ·  subject ${item.subject_id}  ·  ${item.width}×${item.height}`;
+  $("hints").textContent = item.hints.length ? "⚠ " + item.hints.join(" · ") : "";
+  setNumber("wl", v.wl, item.height - 1);
+  $("wlSrc").textContent = v.wlManual ? `set by hand (auto was ${item.auto.waterline_y})` : `automatic, edge strength ${item.confidence}`;
+  v.roi.forEach((n, i) => setNumber("roi" + i, n, i % 2 ? item.height : item.width));
+  $("roiSrc").textContent = v.roiManual ? "set by hand"
+    : v.wlManual ? "automatic (top only raised to stay above your waterline; drag or Fit to redraw)" : "automatic";
+  $("accept").textContent = isDone(item) ? "Checked ✓ — next" : "Looks right ✓";
+  renderViewControls();
+}
+function setNumber(id, value, max) {
+  const input = $(id); input.max = max;
+  if (document.activeElement !== input) input.value = value;  // never overwrite what is being typed
+}
+function renderViewControls() {
+  const item = ITEMS[index];
+  $("viewBg").classList.toggle("on", view.picture === "background");
+  $("viewFrame").classList.toggle("on", view.picture === "frame");
+  $("frameSlider").max = Math.max(0, (item.n_frames || 1) - 1);
+  $("frameSlider").value = view.frame;
+  $("frameLabel").textContent = view.picture === "frame" ? `${view.frame + 1} / ${item.n_frames}` : "";
+  $("eraser").classList.toggle("on", brush === "erase");
+  $("painter").classList.toggle("on", brush === "paint");
+  canvas.classList.toggle("brushing", !!brush);
+  $("crop").classList.toggle("on", cropping);
+}
+function show(i) {
+  if (!ITEMS.length) return;
+  index = (i + ITEMS.length) % ITEMS.length; cursor = null; drag = null;
+  view.frame = Math.min(view.frame, Math.max(0, (ITEMS[index].n_frames || 1) - 1));
+  renderList(); renderInfo();
+  load(ITEMS[index]).then(() => { rebuildTint(ITEMS[index]); draw(); });
+  const cur = document.querySelector("#list li.current"); if (cur) cur.scrollIntoView({ block: "nearest" });
+}
+
+// ---- editing ---------------------------------------------------------------
+function edit(change) {
+  const item = ITEMS[index];
+  entries[item.file] = Object.assign({}, entries[item.file] || {}, change, { checked: true });  // a person set it
+  changed();
+}
+function changed() { renderList(); renderInfo(); draw(); persist(); }
+function toPixel(ev, clamp = true) {
+  // Video pixel under the mouse; unclamped for crop drags, so an edge can reach the frame border.
+  const item = ITEMS[index], r = canvas.getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) / r.width * item.width);
+  const y = Math.floor((ev.clientY - r.top) / r.height * item.height);
+  if (!clamp) return { x, y };
+  return { x: Math.min(item.width - 1, Math.max(0, x)), y: Math.min(item.height - 1, Math.max(0, y)) };
+}
+function dragBox() {
+  const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x) + 1;
+  const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y) + 1;
+  return [x0, y0, x1, y1];
+}
+function brushAt(p) {
+  // Paint marks pixels as fish area; erase hides detected motion. Each undoes the other.
+  const item = ITEMS[index], c = cache[item.file]; if (!c || !brush) return;
+  const r = +$("brush").value / 2, paint = brush === "paint";
+  for (let y = Math.max(0, Math.floor(p.y - r)); y <= Math.min(item.height - 1, Math.ceil(p.y + r)); y++)
+    for (let x = Math.max(0, Math.floor(p.x - r)); x <= Math.min(item.width - 1, Math.ceil(p.x + r)); x++)
+      if ((x - p.x) ** 2 + (y - p.y) ** 2 <= r * r) {
+        const i = y * item.width + x;
+        c.painted[i] = paint ? 1 : 0; c.erased[i] = paint ? 0 : 1;
+      }
+  rebuildTint(item);
+}
+function fitRoi() {
+  // Box around the heatmap that is still shown (not erased, not hidden as weak), padded like the
+  // pipeline does, with its top raised above the waterline. Lone pixels are ignored.
+  const item = ITEMS[index], c = cache[item.file]; if (!c) return;
+  const w = item.width, h = item.height, cut = sensitivityCut();
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x; if (!heatVisible(c, i, cut)) continue;
+    const neighbours = heatVisible(c, i - 1, cut) + heatVisible(c, i + 1, cut) + heatVisible(c, i - w, cut) + heatVisible(c, i + w, cut);
+    if (neighbours < 2) continue;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+  }
+  if (x1 < 0) { $("saveStatus").textContent = "No heatmap to fit — lower “hide weak”, clear edits or paint the fish area"; return; }
+  const dx = Math.round(DATA.padding_fraction * w), dy = Math.round(DATA.padding_fraction * h);
+  const box = [Math.max(0, x0 - dx), Math.max(0, y0 - dy), Math.min(w, x1 + 1 + dx), Math.min(h, y1 + 1 + dy)];
+  edit({ roi: raiseTop(box, effective(item).wl, h) });
+}
+
+// ---- crop mode: resize / move the ROI with handles ----------------------------
+function cropHit(ev) {
+  // Which part of the ROI is under the mouse: edges to resize, "move" inside, null outside.
+  const item = ITEMS[index], r = canvas.getBoundingClientRect(), roi = effective(item).roi;
+  const k = r.width / item.width, px = ev.clientX - r.left, py = ev.clientY - r.top, tol = 8;
+  const [x0, y0, x1, y1] = roi.map(n => n * k);
+  const inY = py > y0 - tol && py < y1 + tol, inX = px > x0 - tol && px < x1 + tol;
+  const edges = { l: inY && Math.abs(px - x0) < tol, r: inY && Math.abs(px - x1) < tol,
+                  t: inX && Math.abs(py - y0) < tol, b: inX && Math.abs(py - y1) < tol };
+  if (edges.l || edges.r || edges.t || edges.b) return edges;
+  return px > x0 && px < x1 && py > y0 && py < y1 ? "move" : null;
+}
+function cursorFor(hit) {
+  if (!hit) return "crosshair";
+  if (hit === "move") return "move";
+  if ((hit.l && hit.t) || (hit.r && hit.b)) return "nwse-resize";
+  if ((hit.r && hit.t) || (hit.l && hit.b)) return "nesw-resize";
+  return hit.l || hit.r ? "ew-resize" : "ns-resize";
+}
+function cropDragRoi() {
+  // The ROI while dragging, in whole video pixels, kept inside the frame and at least 3 px wide/high.
+  const item = ITEMS[index], w = item.width, h = item.height, s = drag.start;
+  const dx = drag.raw.x - drag.a.x, dy = drag.raw.y - drag.a.y;
+  let box;
+  if (drag.hit === "move") {
+    const mx = Math.min(w - s[2], Math.max(-s[0], dx)), my = Math.min(h - s[3], Math.max(-s[1], dy));
+    box = [s[0] + mx, s[1] + my, s[2] + mx, s[3] + my];
+  } else if (drag.hit) {
+    box = [s[0] + (drag.hit.l ? dx : 0), s[1] + (drag.hit.t ? dy : 0), s[2] + (drag.hit.r ? dx : 0), s[3] + (drag.hit.b ? dy : 0)];
+  } else {
+    box = dragBox();  // started outside the box: draw a new one
+  }
+  let [x0, y0, x1, y1] = box;
+  [x0, x1] = [Math.min(x0, x1), Math.max(x0, x1)]; [y0, y1] = [Math.min(y0, y1), Math.max(y0, y1)];
+  x0 = Math.max(0, Math.min(w - 3, x0)); y0 = Math.max(0, Math.min(h - 3, y0));
+  return [x0, y0, Math.min(w, Math.max(x0 + 3, x1)), Math.min(h, Math.max(y0 + 3, y1))];
+}
+function setCrop() { cropping = !cropping; if (cropping) brush = null; renderViewControls(); draw(); }
+
+canvas.addEventListener("pointerdown", ev => {
+  canvas.setPointerCapture(ev.pointerId);
+  const p = toPixel(ev);
+  drag = { a: p, b: p, sx: ev.clientX, sy: ev.clientY, moved: false };
+  if (cropping) { drag.hit = cropHit(ev); drag.start = effective(ITEMS[index]).roi.slice(); }
+  if (brush) { brushAt(p); draw(); }
+});
+canvas.addEventListener("pointermove", ev => {
+  cursor = toPixel(ev);
+  $("cursor").textContent = `x = ${cursor.x}, y = ${cursor.y}`;
+  if (drag) {
+    drag.b = cursor; drag.moved = drag.moved || Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) > 5;
+    if (brush) brushAt(cursor);
+    if (cropping && drag.moved) { drag.raw = toPixel(ev, false); drag.roi = cropDragRoi(); }
+  } else if (cropping) {
+    canvas.style.cursor = cursorFor(cropHit(ev));
+  }
+  draw();
+});
+canvas.addEventListener("pointerup", ev => {
+  if (!drag) return;
+  if (brush) { drag = null; draw(); return; }
+  if (cropping) { const roi = drag.roi; drag = null; if (roi) edit({ roi }); else draw(); return; }
+  if (drag.moved) {
+    const box = dragBox(); drag = null;
+    if (box[2] - box[0] > 2 && box[3] - box[1] > 2) edit({ roi: box }); else draw();
+  } else {
+    drag = null; edit({ waterline_y: toPixel(ev).y });
+  }
+});
+canvas.addEventListener("pointerleave", () => { if (!drag) { cursor = null; draw(); } });
+
+function nextUnchecked() {
+  for (let s = 1; s <= ITEMS.length; s++) { const j = (index + s) % ITEMS.length; if (!isDone(ITEMS[j])) return show(j); }
+  show(index + 1);
+}
+function accept() {
+  const item = ITEMS[index];
+  entries[item.file] = Object.assign({}, entries[item.file] || {}, { checked: true });
+  changed(); nextUnchecked();
+}
+function reset() { delete entries[ITEMS[index].file]; changed(); }
+function nudge(dy) {
+  const item = ITEMS[index], v = effective(item);
+  edit({ waterline_y: Math.min(item.height - 1, Math.max(0, v.wl + dy)) });
+}
+function setPicture(picture) { view.picture = picture; renderViewControls(); draw(); }
+function toggleHeat() { view.showHeat = !view.showHeat; draw(); }
+function setBrush(kind) {
+  brush = brush === kind ? null : kind; if (brush) cropping = false;
+  canvas.style.cursor = ""; renderViewControls(); draw();
+}
+function cycleFrame() {
+  // V: first switch to the real frames, then step through them.
+  const n = ITEMS[index].n_frames || 1;
+  if (view.picture !== "frame") view.picture = "frame"; else view.frame = (view.frame + 1) % n;
+  renderViewControls(); draw();
+}
+
+$("accept").onclick = accept;
+$("reset").onclick = reset;
+$("prev").onclick = () => show(index - 1);
+$("next").onclick = () => show(index + 1);
+$("filter").onchange = renderList;
+$("viewBg").onclick = () => setPicture("background");
+$("viewFrame").onclick = () => setPicture("frame");
+$("frameSlider").oninput = ev => { view.frame = +ev.target.value; setPicture("frame"); };
+$("opacity").oninput = () => { rebuildTint(ITEMS[index]); draw(); };
+$("sensitivity").oninput = () => { rebuildTint(ITEMS[index]); draw(); };
+$("eraser").onclick = () => setBrush("erase");
+$("painter").onclick = () => setBrush("paint");
+$("clearErase").onclick = () => {
+  const c = cache[ITEMS[index].file];
+  if (c) { c.erased.fill(0); c.painted.fill(0); rebuildTint(ITEMS[index]); draw(); }
+};
+$("fit").onclick = fitRoi;
+$("crop").onclick = setCrop;
+// Typed values: applied when the box loses focus or Enter is pressed; bad values are refused.
+function readNumbers() {
+  const item = ITEMS[index];
+  const wl = Math.round(+$("wl").value), roi = [0, 1, 2, 3].map(i => Math.round(+$("roi" + i).value));
+  if (!(wl >= 0 && wl < item.height)) return { error: `waterline must be 0–${item.height - 1}` };
+  if (!(roi[0] >= 0 && roi[0] < roi[2] && roi[2] <= item.width && roi[1] >= 0 && roi[1] < roi[3] && roi[3] <= item.height))
+    return { error: `ROI must satisfy 0 ≤ x0 < x1 ≤ ${item.width} and 0 ≤ y0 < y1 ≤ ${item.height}` };
+  return { wl, roi };
+}
+$("wl").onchange = () => { const r = readNumbers(); if (r.error) { flash(r.error); renderInfo(); } else edit({ waterline_y: r.wl }); };
+[0, 1, 2, 3].forEach(i => $("roi" + i).onchange = () => {
+  const r = readNumbers(); if (r.error) { flash(r.error); renderInfo(); } else edit({ roi: r.roi });
+});
+function flash(text) { saveStatus.className = "status error"; saveStatus.textContent = text; }
+document.addEventListener("keydown", ev => {
+  if (ev.target.tagName === "SELECT" || ev.target.tagName === "INPUT") return;
+  const keys = {
+    Enter: accept, ArrowRight: () => show(index + 1), ArrowLeft: () => show(index - 1),
+    ArrowUp: () => nudge(ev.shiftKey ? -5 : -1), ArrowDown: () => nudge(ev.shiftKey ? 5 : 1),
+    z: reset, c: setCrop, m: toggleHeat, e: () => setBrush("erase"), p: () => setBrush("paint"), f: fitRoi, v: cycleFrame, b: () => setPicture("background"),
+  };
+  const action = keys[ev.key] || keys[ev.key.toLowerCase()];
+  if (action && !ev.metaKey && !ev.ctrlKey) { ev.preventDefault(); action(); }
+});
+window.addEventListener("resize", draw);
+
+// ---- saving ----------------------------------------------------------------
+let saveTimer = null;
+const saveStatus = $("saveStatus");
+function persist() {
+  if (!DATA.serve) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch (e) {}
+    saveStatus.textContent = "Kept in this browser — use “Download overrides.yaml” to save";
+    return;
+  }
+  saveStatus.className = "status"; saveStatus.textContent = "Saving…";
+  clearTimeout(saveTimer); saveTimer = setTimeout(save, 300);  // one save per burst of edits
+}
+function save() {
+  return fetch("/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entries) })
+    .then(r => r.json()).then(r => {
+      saveStatus.className = "status" + (r.ok ? "" : " error");
+      saveStatus.textContent = r.ok ? "Saved to overrides.yaml" : "Not saved: " + r.error;
+    }).catch(() => { saveStatus.className = "status error"; saveStatus.textContent = "Not saved: the review server stopped"; });
+}
+function toYaml() {
+  // Same layout as review.py writes; names quoted so any file name is valid YAML.
+  const all = Object.assign({}, DATA.other_overrides, entries);
+  const lines = ["# Manual scene corrections, per video file name. Written by the scene review page."];
+  for (const name of Object.keys(all).sort()) {
+    const e = all[name]; lines.push(JSON.stringify(name) + ":");
+    if (e.waterline_y != null) lines.push(`  waterline_y: ${e.waterline_y}`);
+    if (e.roi != null) lines.push(`  roi: [${e.roi.join(", ")}]`);
+    if (e.checked != null) lines.push(`  checked: ${e.checked}`);
+  }
+  return lines.join("\n") + "\n";
+}
+$("download").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([toYaml()], { type: "text/yaml" }));
+  a.download = "overrides.yaml"; a.click(); URL.revokeObjectURL(a.href);
+};
+$("finish").onclick = () => {
+  if (!DATA.serve) { $("download").click(); return; }
+  clearTimeout(saveTimer);
+  save().then(() => fetch("/done", { method: "POST" })).finally(() => { $("doneScreen").style.display = "flex"; });
+};
+
+if (!ITEMS.length) $("title").textContent = "No scene results yet — run `python -m fishbehavior scene` first.";
+else {
+  // Start on the "needs a look" list if anything needs a look, else on the not-checked list.
+  if (!visible().length) $("filter").value = "unchecked";
+  show(0);
+}
+</script>
+</body>
+</html>

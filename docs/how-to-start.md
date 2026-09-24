@@ -44,8 +44,15 @@ git status
 git diff
 ```
 
-Run the project checks described in the repository documentation before
-committing.
+Run the same checks CI runs (section 6) before committing:
+
+```bash
+pytest                                             # all tests, synthetic data only
+pipx run ruff check --select F,E9 src tests        # unused imports/variables, undefined names
+git ls-files | grep -Ei '\.(mp4|avi|mov|mkv|xlsx|xls|csv|pdf|parquet|npz)$|(^|/)\.env(\.|$)|^(data|outputs)/' | grep -v '\.env\.example$'  # must print nothing
+```
+
+In a notebook, clear all outputs (*Edit > Clear all outputs*) before saving.
 
 ## 4. Commit the changes
 
@@ -84,6 +91,23 @@ Create a PR from your feature branch into `master` after pushing. Include:
 Request review from the relevant team members. Address review comments with
 additional commits on the same branch, then push again so the PR updates.
 
+Every push to the PR starts the checks in
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) (the **Checks** tab of the PR, or
+the **Actions** tab). They run in parallel on GitHub's machines:
+
+- **Privacy and lint**: no data, outputs, or `.env` in the repository; notebooks saved
+  without outputs; `ruff` finds no unused or undefined names.
+- **Tests (backend)**: `pytest` on Linux, macOS, and Windows, with Python 3.10 and 3.13.
+- **Pages (frontend)**: the JavaScript of the live and scene-review pages parses, and the
+  pages load nothing from the internet.
+- **Installed package (production)**: the package is built and installed like a user
+  would install it, then `all`, `live`, and `scene-review` run end to end.
+- **CI passed**: green only when all of the above are.
+
+They test the PR merged with the current `master` using read-only access, so nothing
+reaches `master` before the merge. Click a failed job to see its log, fix the problem on
+your branch, and push again. A newer push cancels the older run.
+
 ## 7. Keep the branch up to date
 
 Before merging, update your branch with the latest `master` and resolve any
@@ -96,7 +120,10 @@ git merge origin/master
 git push
 ```
 
-Merge only after required checks pass and the PR has been approved. After the
+Merge only after required checks pass and the PR has been approved. A repository admin
+makes the checks required once, in *Settings > Branches > Add branch protection rule*
+for `master`: turn on *Require status checks to pass before merging* and select
+**CI passed**. After the
 PR is merged, remove the local branch if it is no longer needed:
 
 ```bash

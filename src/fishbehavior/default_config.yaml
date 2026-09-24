@@ -10,3 +10,326 @@
 run:
   # How much the pipeline prints: DEBUG, INFO, WARNING or ERROR
   log_level: INFO
+
+catalog:
+  # Worksheet holding the trial table: its name, or 0 for the first sheet.
+  sheet: 0
+  # File types treated as videos when scanning FISH_VIDEO_DIR (case does not matter).
+  video_extensions: [".mp4", ".avi", ".mov", ".mkv"]
+  # Pattern searched in each video file name (without extension). It must capture
+  # `subject` (number). Any letter prefix is skipped and carries no meaning -- the
+  # leading "F" is an archive prefix, not a sex code, and sex comes from the
+  # workbook. Three optional groups follow the number:
+  #   `part`     a letter -- F_0176A, F_0012_b, F_0012-b
+  #   `part_num` the number in "(P1)"/"(P2)" -- F_0021(P1); same meaning as `part`
+  #   `copy`     the number in a trailing " (2)" -- F_309 (2): a second COMPLETE
+  #              take of the trial, not a part of it, so it is never auto-matched.
+  video_name_pattern: '(?<![A-Za-z0-9])(?:[A-Za-z]+_)?(?P<subject>\d+)(?:\s*\(P(?P<part_num>\d+)\)|[_-]?(?P<part>[A-Z]))?(?:\s*\((?P<copy>\d+)\))?$'
+
+scene:
+  # Frames sampled evenly over each video. They give the empty-beaker background
+  # (below) and the activity map.
+  n_background_frames: 100
+  # Background = this per-pixel brightness percentile of the sampled frames. The fish
+  # is darker than the water, so a high percentile keeps the empty water even where a
+  # large fish swims in many of the frames (a median, 50, keeps a "ghost" fish there).
+  # Use 50 for a fish that is lighter than the background.
+  background_percentile: 90
+  # How the activity map (where the fish moved) decides that a pixel changed:
+  #   both  - brighter/darker AND different in color. Ignores light flicker, camera
+  #           exposure changes and glare on the water (these change brightness, not
+  #           color) and the faint colored reflection in the glass. Best for colored fish.
+  #   color - different in color only (hue/saturation, lightness ignored).
+  #   gray  - brighter/darker only. Use this for fish without color.
+  activity_method: both
+  # Brightness difference from the background (0-255) that counts as "changed". Each
+  # frame's overall brightness change (lights, auto exposure) is removed first.
+  diff_threshold: 18
+  # Color difference (distance in the a*/b* color plane of CIELAB, 0-~180) that counts
+  # as "changed" for the color / both methods.
+  color_threshold: 8
+  # The activity map is computed on frames shrunk to at most this width (pixels), so
+  # large videos stay fast and small in memory; the map is scaled back to full size.
+  analysis_max_width: 640
+  # Separate patches of activity smaller than this fraction of the largest patch are
+  # dropped (specks from noise or a brief light change, far from where the fish swims).
+  activity_min_component_fraction: 0.05
+  # A pixel belongs to the fish's area when it differed from the background in at
+  # least this fraction of the sampled frames (drops single noisy frames).
+  activity_min_fraction: 0.02
+  # Padding added around the activity box on each side, as a fraction of the frame
+  # width (left/right) and height (top/bottom).
+  roi_padding_fraction: 0.03
+  # Rows searched for the waterline, as fractions of the activity-box height measured
+  # from the box top: [-0.25, 0.5] = from a quarter box-height ABOVE the box top down
+  # to the box middle. Starting above the box finds the surface even if the fish never
+  # reached it; stopping at the middle keeps the beaker bottom out of the search.
+  waterline_search: [-0.25, 0.5]
+  # Middle part of the activity box width (fraction) whose columns are used for the
+  # waterline profile, so the beaker's curved side walls are ignored.
+  waterline_central_fraction: 0.5
+  # The ROI top is raised to (waterline - this fraction of the frame height), so a fish
+  # breaching the surface is still inside the ROI.
+  waterline_margin_fraction: 0.05
+  # Waterline confidence = peak / median of the row-gradient profile in the search band.
+  # Below this value the waterline is flagged for a manual look (see overrides.yaml).
+  min_waterline_confidence: 3.0
+  # Expected length of one trial recording (all parts of a subject summed), in seconds,
+  # and the allowed relative difference before the subject is flagged (0.05 = 5%).
+  expected_duration_s: 1200
+  duration_tolerance: 0.05
+  # Parts of one subject count as having "different" frame rates only when they differ
+  # by more than this fraction (0.01 = 1%); tiny header differences are normal.
+  fps_tolerance: 0.01
+  # Real color frames saved per video for the review page (scene-review), so a person
+  # sees the actual picture, not only the computed background.
+  n_review_frames: 6
+
+tracking:
+  # Analyse every n-th frame (1 = every frame). Times stay exact: frame_index / fps.
+  frame_stride: 1
+  # Shrink frames by this factor before analysis (0.5 = half size) for speed. Every
+  # coordinate in the track file is converted back to original video pixels.
+  scale: 1.0
+  # Gaussian blur kernel as a fraction of the smaller frame side (rounded up to an odd
+  # size, at least 3). Smooths compression noise before comparing with the background.
+  blur_kernel_fraction: 0.01
+  # Brightness difference from the background (0-255) that counts as "fish".
+  diff_threshold: 18
+  # Which differences count: darker = only pixels darker than the background (the fish
+  # is darker than the water; lighter glare and highlights are ignored); both = darker
+  # or lighter (for a fish that is not darker than its background).
+  polarity: darker
+  # Subtract each frame's median difference inside the ROI first, so a light flicker or
+  # camera exposure change does not turn the whole ROI into foreground.
+  remove_brightness_change: true
+  # Opening (removes specks) + closing (fills holes in the body) kernel, as a fraction of
+  # the smaller frame side (odd, at least 3).
+  morph_kernel_fraction: 0.01
+  # Blobs smaller than this fraction of the frame area are ignored (noise, bubbles).
+  min_area_fraction: 0.0003
+  # The blob that overlaps last frame's fish is kept, even when a mirror image of the fish
+  # in the glass is bigger for a moment (fish turned toward the camera, or its see-through
+  # body split into pieces). Only a blob more than this many times larger takes over, so
+  # the track cannot stay stuck on a small mirror image.
+  switch_area_ratio: 1.5
+  # When no blob overlaps last frame's fish (after a gap, or a very fast move): a blob
+  # within this many body lengths of the previous position is preferred over a larger
+  # one farther away (keeps a ripple or shadow from stealing the track).
+  max_jump_bl: 2.0
+  # Body length for the jump test = median fitted length of the last N detections.
+  body_length_window: 100
+  # Missing runs up to this long (seconds) are linearly interpolated; longer ones stay empty.
+  max_gap_s: 0.5
+  # Head = the darkest spot of the fish (the eye). It must be at least this many gray
+  # levels darker than the fish's typical pixel, otherwise no head is recorded (no clear eye).
+  head_min_contrast: 15
+  # The head tells which end of the body is the front (for pitch_deg) only when it lies at
+  # least this fraction of the body length from the centre along the body axis. Closer
+  # (e.g. fish facing the camera) the pitch is left empty.
+  head_min_offset_fraction: 0.15
+
+features:
+  # All values below are STARTING values; PR 8 (calibrate) tunes them against the
+  # reference figures. Speeds are in body lengths (BL, the fish's median fitted length)
+  # per second, so they do not depend on zoom or resolution.
+  #
+  # Savitzky-Golay smoothing of x / y before speeds are computed, in seconds (turned into
+  # an odd number of frames from the video's real frame spacing).
+  smooth_s: 0.2
+  # Polynomial order of that filter: 2 keeps short bursts sharp while removing pixel jitter.
+  smooth_polyorder: 2
+  # Below this speed the movement direction is mostly position noise, so no turn angle
+  # (turn_deg, angular velocity, meander) is computed for that frame.
+  min_speed_for_heading_bl_s: 0.5
+  # at_surface: the top of the fish outline is at most this many BL below the waterline.
+  surface_margin_bl: 0.25
+  # Length of one feature bin in seconds (bins start at t = 0).
+  bin_s: 1.0
+  # nose_up_at_surface (surface breach): the head (eye) is within surface_margin_bl of the
+  # waterline and the head-tail line points at least this many degrees nose-up (pitch_deg),
+  # in a frame seen side-on (side_on_min_head_offset_bl below).
+  nose_up_threshold_deg: 25
+  # tilt_fraction: share of frames whose body axis is tilted more than this from
+  # horizontal (listing / loss of righting shows as a steep body) ...
+  tilt_threshold_deg: 45
+  # ... counting only frames seen side-on: the eye (head) is at least this many BL from the
+  # body centre. A fish facing the camera has its eyes mid-blob and a tall or round outline
+  # whose fitted angle looks steep or nose-up without any tilt (side-on swimmers: ~0.37 BL).
+  # Used by tilt_fraction and nose_up_at_surface.
+  side_on_min_head_offset_bl: 0.3
+  # Endpoints: seconds faster than this count as "highly mobile" ...
+  high_mobility_bl_s: 2.0
+  # ... and seconds slower than this as "immobile".
+  immobile_bl_s: 0.1
+  # features-qa (does not change the features): a bin feature counts as stable when its
+  # per-bin values at half the frame rate still correlate with the full-rate ones at
+  # least this well (Pearson r) ...
+  qa_min_r: 0.8
+  # ... and its mean moves by at most this fraction (0.25 = 25%) both at half the frame
+  # rate and with double the smoothing (smooth_s x 2).
+  qa_max_change: 0.25
+
+labeling:
+  # STARTING values; the calibration step tunes them and writes the fitted values to
+  # <FISH_OUTPUT_DIR>/calibration/calibrated.yaml, which `label` merges over this section.
+  # Rules are applied in this order; the first that matches a bin wins.
+  #
+  # 0. untracked (QA label, not a behavior): the fish was seen in less than this share of
+  #    the bin's frames, so its behavior cannot be judged.
+  min_tracked_fraction: 0.5
+  # 1. surface_breach: head at the waterline and nose up (features.nose_up_at_surface) in at
+  #    least this share of the bin's frames.
+  surface_breach_fraction: 0.3
+  # 2. lorr (listing / loss of righting): at least this share of frames tilted more than
+  #    features.tilt_threshold_deg ...
+  lorr_tilt_fraction: 0.5
+  # ... while the median speed stays below this (BL/s): a steep but swimming fish is not LORR ...
+  lorr_max_speed_bl_s: 0.5
+  # ... for at least this many seconds in a row.
+  lorr_min_s: 3
+  # 3. freeze_drift: median speed below this (BL/s; same as features.immobile_bl_s) ...
+  freeze_speed_bl_s: 0.1
+  # ... for at least this many seconds in a row (shorter pauses are part of swimming).
+  freeze_min_s: 2
+  # 4. every other bin is swimming. Slower than this mean speed (BL/s; same as
+  #    features.min_speed_for_heading_bl_s, below which no turning is measured) it is
+  #    controlled_swim (slow cruising / hovering) ...
+  swim_min_speed_bl_s: 0.5
+  #    ... faster bins are split into controlled_swim / erratic by a model fitted on all
+  #    subjects together: gmm = 2-component Gaussian mixture, each bin on its own;
+  #    hmm = 2-state Gaussian hidden Markov model, which favours staying in a state
+  #    (smoother timelines).
+  swim_split: gmm
+  # Cleanup: a bout shorter than this (seconds, per label) is merged into its longer
+  # neighbour. untracked is 0 so gaps in tracking are never hidden.
+  min_bout_s:
+    controlled_swim: 1
+    erratic: 1
+    freeze_drift: 1
+    lorr: 1
+    surface_breach: 1
+    untracked: 0
+
+reference:
+  # Digitizing the reference ethogram figures (FISH_REFERENCE_PDF) into approximate
+  # per-subject timelines, used only to tune the labeling. Page numbers count from 1.
+  # Pages that each hold one ethogram image (stacked panels, one row per subject).
+  ethogram_pages: [16, 17]
+  # Every panel's x axis runs from 0 to this many seconds.
+  axis_seconds: 1200
+  # Legend colors of the figures (RGB 0-255), one per state; no_data is the white
+  # background shown where a subject has no data.
+  palette:
+    controlled_swim: [190, 190, 190]  # gray
+    erratic: [255, 0, 0]              # red
+    freeze_drift: [0, 0, 255]         # blue
+    lorr: [255, 192, 203]             # pink
+    surface_breach: [0, 255, 0]       # green
+    no_data: [255, 255, 255]          # white
+  # Pixels are matched to the nearest palette color by CIELAB distance, with lightness
+  # differences multiplied by this weight: JPEG keeps brightness sharp but smears color
+  # over ~2 px, which on rows only ~4 px tall turns a gray row under a pink one pinkish
+  # (gray and pink differ mostly in color, a little in brightness). 1 = plain CIELAB.
+  lightness_weight: 3
+  # A pixel farther than this (weighted) distance from its nearest palette color is
+  # "unknown" (the purple JPEG mix where red and blue meet, text); per color. Gray to pink
+  # is ~31, so pink needs a closer match.
+  max_color_distance:
+    controlled_swim: 80
+    erratic: 80
+    freeze_drift: 80
+    lorr: 30
+    surface_breach: 80
+    no_data: 80
+  # Pink is almost exactly a red + white mix, so the blurred 1-3 px edge of a red bout next
+  # to white or gray looks pinkish, but never close to pink. A run of pixels matched to a
+  # color listed here therefore only counts if at least one of its pixels is within this
+  # distance (a solid pink stretch has many pixels far closer); otherwise its pixels take
+  # their next-nearest color (gray or red, the colors that blurred into pink).
+  seed_color_distance:
+    lorr: 15
+  # Plot area: a column is part of the plot when it has at least this fraction of the
+  # state-colored pixels of the most colored column (subject labels and legend have far fewer).
+  plot_min_column_fraction: 0.3
+  # A pixel row is part of a panel when at least this share of the plot columns have a
+  # state color (mostly-white rows of subjects without data count via the gap below).
+  panel_min_row_fraction: 0.3
+  # Gaps of weakly colored rows up to this fraction of the image height are joined into
+  # the panel around them; the white space between panels (the titles) is far larger.
+  panel_max_gap_fraction: 0.02
+  # Colored runs shorter than this fraction of the image height (legend boxes) are not panels.
+  panel_min_height_fraction: 0.03
+  # Page with the bar charts (seconds per state per group). Not read automatically: it
+  # is saved as page<N>.png so the values can be read by eye into slide18_values.yaml.
+  barchart_page: 18
+
+priors:
+  # Sanity checks of the video labels against the workbook (NTT, a different session: hints
+  # only) and the reference figures. A subject whose video measure is this many standard
+  # deviations off the rank trend of the matching workbook measure is flagged for a look.
+  flag_z: 2
+
+calibration:
+  # Random search over the labeling thresholds, scored against the digitized reference
+  # timelines. Fitted values go to <FISH_OUTPUT_DIR>/calibration/calibrated.yaml, never here.
+  # Candidates tried (the first is always the current settings) ...
+  n_trials: 200
+  # ... drawn with this seed, which also shuffles the subjects into folds (same run = same result).
+  seed: 0
+  # Score = macro-F1 per second + this weight x group agreement (1 - total-variation distance
+  # between our and the reference time budget per group, 0-1).
+  group_weight: 0.5
+  # Held-out check: the subjects are split into this many folds (by subject).
+  folds: 5
+  # Fewer subjects than this (bins + reference timeline) and the report warns that the
+  # calibrated values are not trustworthy.
+  min_subjects: 30
+  # labeling keys to tune: a list = try these values; {low, high} = uniform in that range.
+  # min_bout_s is one value used for every state (untracked keeps its own). Set a key to null
+  # in your FISH_CONFIG file to leave it untuned.
+  search:
+    freeze_speed_bl_s: {low: 0.03, high: 0.4}
+    freeze_min_s: [1, 2, 3, 4, 5]
+    surface_breach_fraction: {low: 0.1, high: 0.7}
+    lorr_tilt_fraction: {low: 0.2, high: 0.9}
+    lorr_max_speed_bl_s: {low: 0.1, high: 1.5}
+    lorr_min_s: [1, 2, 3, 5, 8]
+    min_bout_s: [0, 1, 2, 3]
+
+export:
+  # Training manifest (behavior_windows.csv): one row per window of this many seconds.
+  window_s: 1.0
+  # A window is use_for_training only when it is tracked and its label confidence is at
+  # least this (bins merged by the bout cleanup have confidence 0).
+  min_confidence: 0.5
+  # Folds by subject (one fish is never in two folds), shuffled with this seed.
+  folds: 5
+  seed: 0
+  # --clips: a square of this many body lengths around the fish ...
+  crop_bl: 1.5
+  # ... resized to this many pixels (gray) ...
+  crop_size: 64
+  # ... and this many frames per window, spread evenly (every frame of a 20-min video
+  # would be ~150 MB per subject).
+  clip_frames: 8
+
+plots:
+  # Resolution of the saved figures (dots per inch).
+  dpi: 150
+  # Overlay review video (plot --overlay): playback speed, 1 = real time, 4 = four times
+  # faster (every 4th frame is kept, so the file stays small), 0.5 = slow motion.
+  overlay_speed: 4.0
+  # Height of the timeline bar under the picture, as a fraction of the frame height.
+  timeline_fraction: 0.08
+
+live:
+  # The live view (python -m fishbehavior live): a local page that processes one video while
+  # showing every step. Local port of the page (127.0.0.1 only) ...
+  port: 8770
+  # ... preview frames sent to the page per second while tracking ...
+  preview_fps: 4
+  # ... how often (seconds of wall time) features and labels are recomputed over the track so far ...
+  update_s: 1.0
+  # ... and the largest video that can be uploaded through the page, in MB.
+  max_upload_mb: 4096

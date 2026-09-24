@@ -1,6 +1,6 @@
 """fishbehavior: automated zebrafish behavior-state labeling pipeline.
 
-Pipeline (each step is added in its own PR):
+Pipeline (`all` runs every step; `live` runs one video through them with a local page):
     workbook + videos -> match & check -> scene setup -> tracking -> features
     -> behavior labels (5 ethogram states) -> calibration -> datasets & plots
 """

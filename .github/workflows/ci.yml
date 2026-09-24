@@ -1,0 +1,110 @@
+# Checks every pull request into master before it can be merged.
+# The jobs run in parallel on throw-away runners, against the PR merged with the current
+# master (GitHub's refs/pull/<n>/merge), with a read-only token: nothing is pushed, published
+# or deployed, so master is never touched. To block merging on a failure, make the
+# "CI passed" check required for master (Settings > Branches > branch protection rule).
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]  # re-check master itself after each merge
+  workflow_dispatch:    # manual run from the Actions tab
+
+permissions:
+  contents: read  # no job can write to the repository
+
+concurrency:  # a new push to the same PR cancels the older, now outdated run
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Privacy and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: No research data, outputs or .env in the repository
+        # Same file types as .gitignore; catches files added with `git add -f`.
+        run: |
+          bad=$(git ls-files | grep -Ei '\.(mp4|avi|mov|mkv|xlsx|xls|csv|pdf|parquet|npz)$|(^|/)\.env(\.|$)|^(data|outputs)/' | grep -v '\.env\.example$' || true)
+          if [ -n "$bad" ]; then echo "::error::restricted files are tracked:"; echo "$bad"; exit 1; fi
+      - name: Notebooks saved without outputs
+        # Cell outputs can hold real paths, subject IDs or frames.
+        shell: python
+        run: |
+          import json, pathlib
+          for path in pathlib.Path("notebooks").glob("*.ipynb"):
+              cells = json.loads(path.read_text(encoding="utf-8"))["cells"]
+              assert not any(c.get("outputs") or c.get("execution_count") for c in cells), f"{path}: clear all outputs before committing"
+      - name: Lint (unused imports and variables, undefined names, syntax errors)
+        run: pipx run ruff==0.16.8 check --select F,E9 src tests
+
+  backend:
+    name: Tests (Python ${{ matrix.python }})
+    # Ubuntu only: macOS/Windows runners are much slower to start and run, so they stay off PRs.
+    # To check them, add macos-latest / windows-latest to runs-on via a matrix again.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # the suite takes ~3 min; a hang (e.g. a deadlocked worker process) fails fast
+    strategy:
+      fail-fast: false  # one failing version should not hide the other
+      matrix:
+        python: ["3.10", "3.13"]  # oldest supported, newest with wheels for every dependency (hmmlearn)
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+
+  frontend:
+    name: Pages (live view, scene review)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Inline JavaScript parses
+        # The Python tests serve the pages but never run their script, so a syntax error would pass them.
+        run: |
+          for page in src/fishbehavior/*_page.html; do
+            python3 -c "import re, sys; print('\n'.join(re.findall(r'<script>(.*?)</script>', open(sys.argv[1], encoding='utf-8').read(), re.S)))" "$page" > "$RUNNER_TEMP/page.js"
+            node --check "$RUNNER_TEMP/page.js" || { echo "::error file=$page::JavaScript syntax error"; exit 1; }
+          done
+      - name: Pages load nothing from the internet
+        # They run offline on 127.0.0.1 and must work without a network.
+        run: |
+          if grep -nE 'https?://' src/fishbehavior/*_page.html; then echo "::error::the pages must stay self-contained"; exit 1; fi
+
+  production:
+    name: Installed package (wheel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Build the wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+      - name: Install it the way users do (not editable)
+        run: python -m pip install dist/*.whl pytest
+      - name: The installed command starts
+        run: fishbehavior --help
+      - name: End-to-end runs on the installed package
+        # src/ is not on the path, so these import the wheel: a file missing from
+        # package-data (default_config.yaml, the pages) fails here.
+        run: python -m pytest -q tests/test_all.py tests/test_live.py tests/test_review.py
+
+  ci-passed:
+    name: CI passed
+    if: always()  # report even when a job failed, so the required check never hangs
+    needs: [hygiene, backend, frontend, production]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fishbehavior live</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --ink: #1d2330; --muted: #5d6677; --line: #d9dde5; --soft: #eef0f4;
+    --accent: #2f6fdf; --ok: #1f8a4c; --bad: #c0392b; --warn: #b7791f;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171d; --card: #1d2129; --ink: #e6e9ef; --muted: #9aa3b2; --line: #333a46; --soft: #262b35; --accent: #6b9cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.4; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
+           padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  header h1 small { font-weight: 400; color: var(--muted); font-size: 12px; display: block; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  select, input, button { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line);
+                          border-radius: 6px; padding: 5px 8px; }
+  input[type=number] { width: 72px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .pill { padding: 3px 10px; border-radius: 99px; background: var(--soft); color: var(--muted); font-size: 12px; }
+  main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 1500px; margin: 0 auto; }
+  .row { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+  @media (max-width: 1000px) { .row { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .card h2 span { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  canvas { display: block; width: 100%; }
+  /* Stepper: the five stages of the pipeline */
+  .steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 800px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .step { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--card); }
+  .step b { display: block; font-size: 13px; }
+  .step .what { color: var(--muted); font-size: 12px; }
+  .step .stat { font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .step.active { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .step.done b::after { content: "  ✓"; color: var(--ok); }
+  /* Now card */
+  .now { display: grid; grid-template-columns: 54px 1fr; gap: 10px; align-items: center; }
+  .swatch { width: 54px; height: 54px; border-radius: 8px; border: 1px solid var(--line); }
+  .now .name { font-size: 20px; font-weight: 600; }
+  .bar { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); }
+  .checks { margin: 10px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+  .checks li { padding: 3px 0; border-top: 1px dashed var(--line); display: grid; grid-template-columns: 22px 1fr; }
+  .checks li.hit { font-weight: 600; }
+  .yes { color: var(--ok); } .no { color: var(--muted); }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--soft); color: var(--warn); margin-left: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td.num, th.num { text-align: right; }
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid #0003; vertical-align: -1px; margin-right: 5px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; margin-top: 8px; }
+  .legend div { max-width: 330px; }
+  .legend b { font-weight: 600; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; font-size: 12.5px; }
+  dt { color: var(--muted); } dd { margin: 0; word-break: break-word; font-variant-numeric: tabular-nums; }
+  details summary { cursor: pointer; font-weight: 600; margin: 8px 0 4px; }
+  pre.log { max-height: 220px; overflow: auto; background: var(--soft); padding: 8px; border-radius: 6px; margin: 0; font-size: 12px; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; margin-top: 6px; }
+  .toggles label { display: inline-flex; gap: 4px; align-items: center; }
+  .scene-edit { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 12.5px; }
+  .message { padding: 8px 10px; border-radius: 6px; background: var(--soft); font-size: 13px; }
+  .message.error { background: color-mix(in srgb, var(--bad) 15%, var(--card)); color: var(--bad); }
+  #tooltip { position: fixed; pointer-events: none; background: var(--ink); color: var(--card); padding: 5px 8px;
+             border-radius: 6px; font-size: 12px; display: none; z-index: 10; max-width: 320px; }
+  .grid-bars { display: grid; grid-template-columns: max-content 1fr max-content max-content max-content; gap: 5px 10px;
+               align-items: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .grid-bars .bar { height: 10px; }
+  .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .kpi { background: var(--soft); border-radius: 6px; padding: 6px 8px; }
+  .kpi b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .kpi span { color: var(--muted); font-size: 11.5px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>fishbehavior live<small>one video through the pipeline, step by step (use <code>all</code> for every subject)</small></h1>
+  <div class="controls">
+    <select id="source" title="A catalog subject (all its part files) or an uploaded video"></select>
+    <label class="pill" style="cursor:pointer">Upload video…<input id="file" type="file" accept="video/*" hidden></label>
+    <button id="open">Open</button>
+    <label class="small muted">Pace
+      <select id="pace" title="Max = as fast as possible; 1x = as long as the video (for demos)">
+        <option value="0">Max</option><option value="1">1× (real time)</option><option value="2">2×</option>
+        <option value="4">4×</option><option value="10">10×</option><option value="30">30×</option>
+      </select></label>
+    <button id="start" class="primary" disabled>Start</button>
+    <button id="stop" disabled>Stop</button>
+    <span id="status" class="pill">idle</span>
+  </div>
+</header>
+
+<main>
+  <div id="message" class="message">Pick a catalog video (or upload one) and press <b>Open</b>.</div>
+
+  <section class="steps" id="steps"></section>
+
+  <div class="row">
+    <div class="card">
+      <h2 id="video-title">Video <span id="video-sub"></span></h2>
+      <canvas id="video" width="640" height="480"></canvas>
+      <div class="toggles" id="toggles">
+        <label><input type="checkbox" data-layer="roi" checked> ROI (green)</label>
+        <label><input type="checkbox" data-layer="waterline" checked> waterline (blue)</label>
+        <label><input type="checkbox" data-layer="ellipse" checked> body ellipse (yellow)</label>
+        <label><input type="checkbox" data-layer="point" checked> track point (red)</label>
+        <label><input type="checkbox" data-layer="head" checked> head / eye (magenta)</label>
+        <label><input type="checkbox" data-layer="trail" checked> last 2 s path (orange)</label>
+      </div>
+      <div id="scene-edit" class="scene-edit" hidden>
+        <b>Scene of</b> <select id="scene-part" title="Every part file has its own scene"></select>
+        <label><input type="radio" name="mode" value="waterline" checked> click = waterline</label>
+        <label><input type="radio" name="mode" value="roi"> drag = ROI</label>
+        waterline y <input id="wl" type="number" min="0">
+        ROI x0 <input id="x0" type="number" min="0"> y0 <input id="y0" type="number" min="0">
+        x1 <input id="x1" type="number" min="0"> y1 <input id="y1" type="number" min="0">
+        <button id="reset-scene" title="Back to the automatic values">Automatic</button>
+        <button id="view-frame" title="Show a real frame instead of the empty-beaker background">Real frame</button>
+        <span id="scene-note" class="muted"></span>
+        <label title="Write every part's scene to scene/overrides.yaml, marked checked, so `scene` and `all` use it too">
+          <input id="save-scene" type="checkbox"> save to scene/overrides.yaml</label>
+        <label title="Empty = measured (median fitted length). A typed value is used for every pass, the final one too, so results can differ from `all`">
+          body length <input id="bl" type="number" min="1" step="0.1" placeholder="measured"> px</label>
+      </div>
+      <div id="frame-caption" class="small muted" style="margin-top:6px"></div>
+    </div>
+
+    <div style="display:grid;gap:14px;align-content:start">
+      <div class="card">
+        <h2>Now <span id="now-time"></span></h2>
+        <div class="now">
+          <div class="swatch" id="now-swatch"></div>
+          <div>
+            <div class="name" id="now-name">–</div>
+            <div class="small muted" id="now-text">No label yet.</div>
+            <div class="small" style="margin-top:4px">confidence <b id="now-conf">–</b></div>
+            <div class="bar"><div id="now-conf-bar" style="width:0"></div></div>
+          </div>
+        </div>
+        <ul class="checks" id="checks"></ul>
+        <div class="small muted" id="checks-note"></div>
+      </div>
+      <div class="card">
+        <h2>Time per state <span id="states-sub"></span></h2>
+        <div class="grid-bars" id="states"></div>
+      </div>
+      <div class="card">
+        <h2>Progress <span id="progress-sub"></span></h2>
+        <div class="bar"><div id="progress-bar" style="width:0"></div></div>
+        <div class="kpis" id="kpis"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 id="etho-title">Ethogram <span id="etho-sub">one column per second</span></h2>
+    <canvas id="ethogram" height="190"></canvas>
+    <div class="legend" id="legend"></div>
+    <div class="scene-edit">
+      <b>Human relabel:</b> from <input id="ov-from" type="number" min="0" step="any"> to
+      <input id="ov-to" type="number" min="0" step="any"> s <select id="ov-label"></select>
+      <button id="ov-apply">Relabel</button>
+      <span class="muted">drag across the ethogram to pick seconds. Saved to <code>labels/overrides.csv</code>;
+        for a catalog subject, <code>label</code> and <code>export</code> use it too.</span>
+    </div>
+    <div id="ov-list" class="small" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Measurements per second <span>the numbers the rules read (dashed = thresholds in use)</span></h2>
+    <canvas id="traces" height="380"></canvas>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Segments <span id="seg-sub"></span></h2>
+      <div style="max-height:360px;overflow:auto"><table id="segments"></table></div>
+    </div>
+    <div class="card">
+      <h2>Details</h2>
+      <div id="details"></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card"><h2>Log</h2><pre class="log" id="log"></pre></div>
+    <div class="card">
+      <h2>Results <span id="out-dir"></span></h2>
+      <div id="downloads" class="small muted">Written when the video is done.</div>
+      <details open><summary>How the pipeline decides</summary>
+        <ol class="small" style="padding-left:18px;margin:4px 0">
+          <li><b>Scene</b>: the empty beaker = a bright percentile of ~100 frames; the waterline = the strongest horizontal edge; the ROI = where anything moved.</li>
+          <li><b>Tracking</b>: every frame minus the background; the dark blob that overlaps last frame's fish is the fish; an ellipse gives its length and tilt, the darkest spot its eye.</li>
+          <li><b>Features</b>: positions smoothed over <code>features.smooth_s</code>, then speed, turning, depth below the waterline and posture per 1 s bin, in body lengths (BL).</li>
+          <li><b>Labels</b>: rules in priority order (untracked, surface, LORR, freeze), the rest split into controlled / erratic by a model fitted on all subjects; short bouts merged.</li>
+          <li><b>Saved</b>: one final pass over the whole track, identical to <code>python -m fishbehavior all</code>.</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+</main>
+<div id="tooltip"></div>
+
+<script>
+"use strict";
+const CONFIG = /*CONFIG*/null;
+const $ = (id) => document.getElementById(id);
+const LABELS = CONFIG.labels;
+const pretty = (name) => name ? name.replace(/_/g, " ") : "–";
+const rgb = (name) => { const c = CONFIG.colors[name] || [200, 200, 200]; return `rgb(${c[0]},${c[1]},${c[2]})`; };
+const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const STEP_TEXT = {
+  scene: "background, waterline, fish region", tracking: "fish outline in every frame",
+  features: "speed, turning, depth, posture per 1 s", labels: "one state per second", saved: "final pass, files written",
+};
+
+let S = { stage: "idle", log: [] };   // the latest state from the server
+let F = null;                          // the latest frame event
+let frameImage = null;                 // decoded frame JPEG
+let sceneImage = null;                 // background (or real frame) for the scene step
+let sceneEdits = [];                   // per part: {waterline_y, roi, auto} being edited on the page
+let scenePart = 0;                     // the part shown in the scene step
+const sceneEdit = () => sceneEdits[scenePart];
+let sceneFrameIndex = -1;              // -1 = background, else index into review_frames
+let reviewT = null;                    // second clicked on the ethogram (review mode)
+const layers = { roi: true, waterline: true, ellipse: true, point: true, head: true, trail: true };
+
+// ---------------------------------------------------------------- server calls
+async function post(url, body) {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify(body || {}) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) throw new Error(data.error || response.statusText);
+  return data;
+}
+function showMessage(text, error = false) {
+  const box = $("message"); box.textContent = text; box.className = "message" + (error ? " error" : "");
+}
+async function loadSources(select) {
+  const data = await (await fetch("/api/sources")).json();
+  const box = $("source"); box.innerHTML = "";
+  const add = (label, items) => {
+    if (!items.length) return;
+    const group = document.createElement("optgroup"); group.label = label;
+    items.forEach(([value, text]) => { const o = document.createElement("option"); o.value = value; o.textContent = text; group.appendChild(o); });
+    box.appendChild(group);
+  };
+  add(`Catalog (${data.catalog.length} subjects with video)`,
+      data.catalog.map((c) => ["s:" + c.subject_id, `${c.subject_id} · ${c.group} · ${c.files.join(" + ")}`]));
+  add("Uploaded", data.uploads.map((u) => ["u:" + u, u]));
+  if (!box.options.length) { const o = document.createElement("option"); o.textContent = "no videos yet: upload one"; o.disabled = true; box.appendChild(o); }
+  if (select) box.value = select;
+}
+$("open").onclick = async () => {
+  const value = $("source").value || "";
+  const body = value.startsWith("s:") ? { subject_id: value.slice(2) } : { upload: value.slice(2) };
+  reviewT = null; F = null; frameImage = null; sceneEdits = []; scenePart = 0; sceneFrameIndex = -1;
+  showMessage("Finding the scene (background, waterline, fish region)…");
+  $("open").disabled = true;
+  try { await post("/api/open", body); } catch (e) { showMessage(e.message, true); }
+  $("open").disabled = false;
+};
+$("start").onclick = async () => {
+  reviewT = null;
+  const body = { pace: Number($("pace").value), save_scene: $("save-scene").checked, body_length_px: Number($("bl").value) || null,
+                 scenes: sceneEdits.map((e) => ({ waterline_y: e.waterline_y, roi: e.roi })) };
+  try { await post("/api/start", body); } catch (e) { showMessage(e.message, true); }
+};
+$("stop").onclick = () => post("/api/stop").catch((e) => showMessage(e.message, true));
+$("file").onchange = () => {
+  const file = $("file").files[0];
+  if (!file) return;
+  if (file.size > CONFIG.max_upload_mb * 1048576) { showMessage(`File larger than ${CONFIG.max_upload_mb} MB (live.max_upload_mb).`, true); return; }
+  const request = new XMLHttpRequest();
+  request.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+  request.upload.onprogress = (e) => showMessage(`Uploading ${file.name}: ${Math.round(100 * e.loaded / e.total)}%`);
+  request.onload = async () => {
+    const data = JSON.parse(request.responseText || "{}");
+    if (request.status !== 200) { showMessage(data.error || "upload failed", true); return; }
+    await loadSources("u:" + data.upload);
+    showMessage(`Uploaded ${data.upload}. Press Open.`);
+  };
+  request.onerror = () => showMessage("upload failed", true);
+  request.send(file);
+};
+document.querySelectorAll("#toggles input").forEach((box) => box.onchange = () => { layers[box.dataset.layer] = box.checked; drawVideo(); });
+
+// ---------------------------------------------------------------- live updates
+const events = new EventSource("/api/events");
+events.addEventListener("state", (e) => { S = JSON.parse(e.data); render(); });
+events.addEventListener("frame", (e) => {
+  if (reviewT !== null) return;          // review mode shows the clicked frame instead
+  showFrame(JSON.parse(e.data));
+});
+events.onerror = () => $("status").textContent = "reconnecting…";
+
+function showFrame(frame) {
+  F = frame;
+  const image = new Image();
+  image.onload = () => { frameImage = image; drawVideo(); renderNow(); drawEthogram(); drawTraces(); };
+  image.src = "data:image/jpeg;base64," + frame.jpeg;
+}
+
+// ---------------------------------------------------------------- helpers on the state
+const part1 = () => (S.parts || [])[0];
+const binS = () => (S.features && S.features.bin_s) || 1;
+const duration = () => (S.parts || []).reduce((sum, p) => sum + p.duration_s, 0);
+const axisSeconds = () => Math.max(CONFIG.axis_seconds, Math.ceil(duration()));
+const currentT = () => reviewT !== null ? reviewT : (F ? F.t : (S.progress ? S.progress.video_s : 0));
+const params = () => (S.labeling && S.labeling.params) || null;
+function binAt(t) {
+  const i = Math.floor(t / binS() + 1e-9);
+  if (!S.labels || i < 0 || i >= S.labels.length) return null;
+  const traces = {};
+  for (const [name, values] of Object.entries(S.traces || {})) traces[name] = values[i];
+  return { index: i, label: LABELS[S.labels[i]], confidence: S.confidence[i], traces,
+           human: (S.human || [])[i] === 1, auto: LABELS[(S.auto_labels || [])[i]] };
+}
+
+// ---------------------------------------------------------------- render everything
+function render() {
+  const stage = S.stage || "idle";
+  $("status").textContent = stage;
+  $("start").disabled = !(stage === "scene" || stage === "saved" || stage === "stopped" || stage === "error");
+  $("stop").disabled = !(stage === "tracking" || stage === "features" || stage === "labels");
+  if (S.message) showMessage(S.message, stage === "error");
+  $("scene-edit").hidden = stage !== "scene";
+  if (stage === "scene" && S.backgrounds) {
+    if (!sceneEdits.length && S.parts) {
+      sceneEdits = S.parts.map((p) => ({ waterline_y: p.waterline_y, roi: [...p.roi], auto: { waterline_y: p.waterline_y, roi: [...p.roi] } }));
+      $("scene-part").innerHTML = S.parts.map((p, i) => `<option value="${i}">part ${i + 1}: ${p.file}</option>`).join("");
+      $("bl").value = ""; $("bl").placeholder = S.known_bl ? `measured (${fmt(S.known_bl)})` : "measured";
+    }
+    loadSceneImage();
+  }
+  $("ov-apply").disabled = !S.source;
+  renderSteps(); renderNow(); renderStates(); renderProgress(); renderSegments(); renderDetails(); renderLog(); renderDownloads(); renderOverrides();
+  drawVideo(); drawEthogram(); drawTraces();
+}
+
+function loadSceneImage() {
+  const data = sceneFrameIndex < 0 ? (S.backgrounds || [])[scenePart] : ((S.review_frames || [])[scenePart] || [])[sceneFrameIndex];
+  if (!data) return;
+  const src = "data:image/jpeg;base64," + data;
+  if (sceneImage && sceneImage.src === src) return;
+  const image = new Image(); image.onload = () => { sceneImage = image; drawVideo(); }; image.src = src;
+}
+
+function renderSteps() {
+  const order = CONFIG.stages, stage = S.stage;
+  const at = order.indexOf(stage === "stopped" || stage === "error" ? "tracking" : stage);
+  const stats = {
+    scene: part1() ? `waterline y=${part1().waterline_y} · conf ${fmt(part1().confidence)} · ${part1().method}` : "",
+    tracking: S.tracking ? `${fmt(S.tracking.detected_pct)}% detected · BL ${fmt(S.tracking.body_length_px)} px` : "",
+    features: S.features ? `${S.features.bins} bins · ${fmt(S.features.distance_bl, 0)} BL swum` : "",
+    labels: S.summary ? `${S.n_segments || 0} segments${S.labeling && S.labeling.calibrated ? " · calibrated" : " · defaults"}` : "",
+    saved: S.outputs ? `${S.outputs.length} files in live/${S.source ? S.source.name : ""}` : "",
+  };
+  $("steps").innerHTML = order.map((name, i) => {
+    const cls = stage === "saved" || i < at ? "done" : (i === at ? "active" : "");
+    return `<div class="step ${cls}"><b>${i + 1}. ${name}</b><div class="what">${STEP_TEXT[name]}</div><div class="stat">${stats[name] || ""}</div></div>`;
+  }).join("");
+}
+
+function renderNow() {
+  const t = currentT();
+  const bin = binAt(t);
+  const provisional = S.labeling && S.labeling.provisional_from_s !== null && S.labeling.provisional_from_s !== undefined
+                      && t >= S.labeling.provisional_from_s && S.stage !== "saved";
+  $("now-time").innerHTML = `${fmt(t)} s${reviewT !== null ? " (review)" : ""}${provisional ? '<span class="badge">provisional</span>' : ""}`;
+  if (!bin) {
+    $("now-name").textContent = "–"; $("now-text").textContent = S.stage === "tracking" ? "Labels appear after the first second of video." : "No label yet.";
+    $("now-swatch").style.background = "transparent"; $("now-conf").textContent = "–"; $("now-conf-bar").style.width = "0";
+    $("checks").innerHTML = ""; $("checks-note").textContent = ""; return;
+  }
+  $("now-name").textContent = pretty(bin.label);
+  $("now-text").textContent = (CONFIG.text[bin.label] || "") + (bin.human ? ` · set by a person (the rules gave ${pretty(bin.auto)})` : "");
+  $("now-swatch").style.background = rgb(bin.label);
+  $("now-conf").textContent = fmt(bin.confidence, 2);
+  $("now-conf-bar").style.width = `${Math.round(100 * (bin.confidence || 0))}%`;
+  const p = params(), f = bin.traces;
+  if (!p) return;
+  // The rules in priority order, with this second's numbers: the first that holds wins.
+  const rules = [
+    ["untracked", `seen in ${fmt(f.tracked_fraction, 2)} of frames < ${p.min_tracked_fraction}`, f.tracked_fraction < p.min_tracked_fraction],
+    ["surface_breach", `nose-up (side-on) at the surface in ${fmt(f.nose_up_surface_fraction, 2)} of frames ≥ ${p.surface_breach_fraction}`, f.nose_up_surface_fraction >= p.surface_breach_fraction],
+    ["lorr", `tilted in ${fmt(f.tilt_fraction, 2)} ≥ ${p.lorr_tilt_fraction} and median speed ${fmt(f.speed_median_bl_s, 2)} < ${p.lorr_max_speed_bl_s} BL/s, for ≥ ${p.lorr_min_s} s in a row`,
+     f.tilt_fraction >= p.lorr_tilt_fraction && f.speed_median_bl_s < p.lorr_max_speed_bl_s],
+    ["freeze_drift", `median speed ${fmt(f.speed_median_bl_s, 2)} < ${p.freeze_speed_bl_s} BL/s, for ≥ ${p.freeze_min_s} s in a row`, f.speed_median_bl_s < p.freeze_speed_bl_s],
+    ["controlled_swim", `mean speed ${fmt(f.speed_mean_bl_s, 2)} < ${p.swim_min_speed_bl_s} BL/s (slow swimming)`, f.speed_mean_bl_s < p.swim_min_speed_bl_s],
+    ["erratic", `otherwise the swim model (speed cv ${fmt(f.speed_cv, 2)}, turn variance ${fmt(f.turn_rate_var_deg2_s2, 0)}) picks controlled or erratic`, true],
+  ];
+  let hit = false;
+  $("checks").innerHTML = rules.map(([name, text, holds], i) => {
+    const first = holds && !hit; if (first) hit = true;
+    const label = i === 5 ? "controlled / erratic" : pretty(name);
+    return `<li class="${first ? "hit" : ""}"><span class="${holds ? "yes" : "no"}">${holds ? "✓" : "✗"}</span>
+            <span><span class="dot" style="background:${rgb(i === 5 ? bin.auto || bin.label : name)}"></span>${i}. ${label}: ${text}</span></li>`;
+  }).join("");
+  const merged = bin.confidence === 0 ? " Confidence 0: this second was merged into its neighbour by the bout cleanup." : "";
+  $("checks-note").textContent = (bin.human ? "A person relabeled this second; the rules below are what the pipeline said. " : "") + "Checked top to bottom on this second's numbers; the first rule that holds wins. "
+    + `Sustained rules also need enough seconds in a row, and bouts shorter than min_bout_s are merged.${merged}`;
+}
+
+function renderStates() {
+  const summary = S.summary || {};
+  const rows = LABELS.map((name) => {
+    const s = summary[name] || { s: 0, pct: 0, bouts: 0 };
+    return `<span><span class="dot" style="background:${rgb(name)}"></span>${pretty(name)}</span>
+            <div class="bar"><div style="width:${Math.min(100, s.pct)}%;background:${rgb(name)}"></div></div>
+            <span class="num">${fmt(s.s, 0)} s</span><span class="num">${fmt(s.pct)}%</span><span class="num muted">${s.bouts} bouts</span>`;
+  });
+  $("states").innerHTML = rows.join("");
+  $("states-sub").textContent = S.summary ? `of ${fmt(Object.values(summary).reduce((a, s) => a + s.s, 0), 0)} s labeled` : "";
+}
+
+function renderProgress() {
+  const p = S.progress, t = S.tracking;
+  $("progress-bar").style.width = p ? `${Math.round(100 * p.frames_done / Math.max(1, p.frames_total))}%` : "0";
+  $("progress-sub").textContent = p ? `${p.frames_done.toLocaleString()} / ${p.frames_total.toLocaleString()} frames` : "";
+  const kpis = [
+    [p ? `${fmt(p.video_s, 0)} / ${fmt(p.total_s, 0)} s` : "–", "video processed"],
+    [p ? `${fmt(p.speed_x, 0)}×` : "–", "speed vs real time"],
+    [p ? `${fmt(p.elapsed_s)} s` : "–", "elapsed"],
+    [p ? `${fmt(p.eta_s, 0)} s` : "–", "time left"],
+    [t ? `${fmt(t.detected_pct)}%` : "–", "frames with the fish found"],
+    [t ? `${fmt(t.interpolated_pct, 2)}%` : "–", "gaps filled (≤ 0.5 s)"],
+    [t ? `${fmt(t.untracked_s)} s` : "–", "not tracked"],
+    [t ? `${fmt(t.body_length_px)} px` : "–", "body length (1 BL)"],
+    [t ? `${fmt(t.head_pct)}%` : "–", "frames with the eye found"],
+  ];
+  $("kpis").innerHTML = kpis.map(([v, k]) => `<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join("");
+}
+
+function renderSegments() {
+  const segments = S.segments || [];
+  $("seg-sub").textContent = S.n_segments ? `${S.n_segments} in total, newest first` : "";
+  const rows = segments.slice(-60).reverse().map((s) => `<tr><td><span class="dot" style="background:${rgb(s.label)}"></span>${pretty(s.label)}</td>
+    <td class="num">${fmt(s.start_s)}</td><td class="num">${fmt(s.end_s)}</td><td class="num">${fmt(s.duration_s)}</td>
+    <td class="num">${s.part}</td><td class="num">${s.start_frame}–${s.end_frame}</td><td class="num">${fmt(s.mean_confidence, 2)}</td></tr>`);
+  $("segments").innerHTML = `<tr><th>label</th><th class="num">start s</th><th class="num">end s</th><th class="num">length s</th>
+    <th class="num">part</th><th class="num">frames in part</th><th class="num">confidence</th></tr>` + rows.join("");
+}
+
+function dl(entries) {
+  return "<dl>" + entries.filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("") + "</dl>";
+}
+function renderDetails() {
+  const parts = S.parts || [], p = params(), lab = S.labeling || {}, src = S.source || {};
+  let html = dl([["video", src.name], ["catalog subject", src.subject_id || "not in the catalog"],
+                 ["parts", parts.map((q, i) => `${i + 1}: ${q.file}`).join("<br>")]]);
+  html += parts.map((q, i) => `<details ${i === 0 ? "open" : ""}><summary>Part ${i + 1}: ${q.file}</summary>` + dl([
+    ["size", `${q.width} × ${q.height} px`], ["frame rate", `${fmt(q.fps, 3)} fps`], ["frames", q.frames],
+    ["duration", `${fmt(q.duration_s)} s`], ["waterline", `y = ${q.waterline_y} (edge strength ${fmt(q.confidence)}, ${q.method})`],
+    ["ROI (x0, y0, x1, y1)", q.roi.join(", ")], ["where it moved", q.activity_box ? q.activity_box.join(", ") : "–"],
+    ["flags", (q.flags || []).join(", ") || "none"]]) + "</details>").join("");
+  if (S.features) html += `<details open><summary>Features</summary>` + dl([
+    ["body length (1 BL)", `${fmt(S.features.body_length_px)} px (${S.features.body_length_from})`], ["bins", `${S.features.bins} × ${S.features.bin_s} s`],
+    ["distance swum", `${fmt(S.features.distance_bl, 0)} BL`], ["mean speed", `${fmt(S.features.mean_speed_bl_s, 2)} BL/s`]]) + "</details>";
+  if (p) html += `<details open><summary>Labeling settings in use</summary>` + dl([
+    ["values", lab.calibrated ? `calibrated (${lab.calibrated})` : "defaults (no calibrated.yaml)"], ["swim model", lab.swim_model],
+    ["untracked", `seen in < ${p.min_tracked_fraction} of frames`], ["surface breach", `nose-up at surface ≥ ${p.surface_breach_fraction} of frames`],
+    ["LORR", `tilted ≥ ${p.lorr_tilt_fraction}, speed < ${p.lorr_max_speed_bl_s} BL/s, ≥ ${p.lorr_min_s} s`],
+    ["freeze / drift", `median speed < ${p.freeze_speed_bl_s} BL/s for ≥ ${p.freeze_min_s} s`],
+    ["slow = controlled", `mean speed < ${p.swim_min_speed_bl_s} BL/s`], ["swim split", p.swim_split],
+    ["shortest bout", Object.entries(p.min_bout_s).map(([k, v]) => `${pretty(k)} ${v} s`).join(", ")],
+    ["provisional", lab.provisional_from_s !== null && lab.provisional_from_s !== undefined ? `from ${fmt(lab.provisional_from_s)} s on (may still change)` : "none (final)"]]) + "</details>";
+  if (src.details && Object.keys(src.details).length) html += `<details><summary>Workbook row (NTT is a different session: hints only)</summary>`
+    + dl(Object.entries(src.details).map(([k, v]) => [k, v === null ? "–" : v])) + "</details>";
+  if (S.reference) html += dl([["reference row", `digitized, group ${S.reference.group}, ${S.reference.labels.length} s`]]);
+  $("details").innerHTML = html;
+}
+function renderOverrides() {
+  const rows = S.overrides || [];
+  $("ov-list").innerHTML = !S.source ? "" : rows.length ? rows.map((o, i) => `<span class="pill"><span class="dot" style="background:${rgb(o.label)}"></span>`
+    + `${fmt(o.start_s)}–${fmt(o.end_s)} s: ${pretty(o.label)} <a href="#" data-i="${i}" title="Back to the automatic label">remove</a></span>`).join(" ")
+    : '<span class="muted">No human relabels for this video.</span>';
+}
+const saveOverrides = (rows) => post("/api/overrides", { overrides: rows }).catch((e) => showMessage(e.message, true));
+$("ov-label").innerHTML = LABELS.map((n) => `<option value="${n}">${pretty(n)}</option>`).join("");
+$("ov-apply").onclick = () => {
+  const from = Number($("ov-from").value), to = Number($("ov-to").value);
+  if ($("ov-from").value === "" || !(to > from)) { showMessage("Relabel: pick seconds on the ethogram, or type 'from' < 'to'.", true); return; }
+  saveOverrides([...(S.overrides || []), { start_s: from, end_s: to, label: $("ov-label").value }]);
+};
+$("ov-list").onclick = (e) => {
+  if (e.target.dataset.i === undefined) return;
+  e.preventDefault();
+  saveOverrides((S.overrides || []).filter((_, k) => k !== Number(e.target.dataset.i)));
+};
+["ov-from", "ov-to"].forEach((id) => $(id).oninput = () => drawEthogram());
+function renderLog() { const box = $("log"); box.textContent = (S.log || []).join("\n"); box.scrollTop = box.scrollHeight; }
+function renderDownloads() {
+  $("out-dir").textContent = S.output_dir || "";
+  $("downloads").innerHTML = S.outputs ? S.outputs.map((n) => `<a href="/files/${n}" download>${n}</a>`).join(" · ") : "Written when the video is done.";
+}
+
+// ---------------------------------------------------------------- video canvas
+const video = $("video");
+function videoSize() {
+  const p = (S.parts || [])[S.stage === "scene" ? scenePart : (F ? F.part - 1 : 0)] || part1();
+  return p ? [p.width, p.height] : [320, 240];
+}
+function drawVideo() {
+  const [w, h] = videoSize();
+  const k = Math.max(1, Math.floor(900 / w));                 // draw small videos 2-3x, sharp
+  if (video.width !== w * k) { video.width = w * k; video.height = h * k; }
+  const ctx = video.getContext("2d");
+  ctx.imageSmoothingEnabled = k === 1;
+  ctx.fillStyle = css("--soft"); ctx.fillRect(0, 0, video.width, video.height);
+  const scene = S.stage === "scene";
+  const image = scene ? sceneImage : frameImage;
+  if (image) ctx.drawImage(image, 0, 0, video.width, video.height);
+  ctx.save(); ctx.scale(k, k); ctx.lineWidth = 1.5 / k * Math.max(1, k / 1.5);
+  const roi = scene && sceneEdit() ? sceneEdit().roi : (F ? F.roi : (part1() || {}).roi);
+  const wl = scene && sceneEdit() ? sceneEdit().waterline_y : (F ? F.waterline_y : (part1() || {}).waterline_y);
+  if (roi && (layers.roi || scene)) { ctx.strokeStyle = "#1db954"; ctx.strokeRect(roi[0], roi[1], roi[2] - roi[0], roi[3] - roi[1]); }
+  if (wl !== undefined && (layers.waterline || scene)) {
+    ctx.strokeStyle = "#2f7bff"; ctx.beginPath(); ctx.moveTo(roi ? roi[0] : 0, wl); ctx.lineTo(roi ? roi[2] : w, wl); ctx.stroke();
+  }
+  if (!scene && F) {
+    const r = F.row || {};
+    if (layers.trail && F.trail && F.trail.length > 1) {
+      ctx.strokeStyle = "#ff9f1c"; ctx.beginPath(); F.trail.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+    }
+    if (r.x !== null && r.x !== undefined) {
+      if (layers.ellipse && r.major_axis && r.angle_deg !== null) {
+        ctx.strokeStyle = "#ffd400"; ctx.beginPath();
+        // Our tilt turns counter-clockwise on screen; canvas rotation turns clockwise.
+        ctx.ellipse(r.x, r.y, r.major_axis / 2, (r.minor_axis || 1) / 2, -r.angle_deg * Math.PI / 180, 0, 2 * Math.PI); ctx.stroke();
+      }
+      if (layers.point) { ctx.fillStyle = "#ff2d2d"; ctx.beginPath(); ctx.arc(r.x, r.y, 2.2, 0, 2 * Math.PI); ctx.fill(); }
+      if (layers.head && r.head_x !== null && r.head_x !== undefined) { ctx.fillStyle = "#ff3df2"; ctx.beginPath(); ctx.arc(r.head_x, r.head_y, 2, 0, 2 * Math.PI); ctx.fill(); }
+    }
+  }
+  ctx.restore();
+  if (!image) { ctx.fillStyle = css("--muted"); ctx.font = "16px sans-serif"; ctx.fillText(scene ? "loading the scene…" : "no frame yet", 20, 30); }
+  const r = F && F.row;
+  $("video-sub").textContent = scene ? `part ${scenePart + 1}: ` + (sceneFrameIndex < 0 ? "empty-beaker background (fish removed)" : `real frame ${sceneFrameIndex + 1}`)
+    : F ? `part ${F.part}, frame ${F.frame}` : "";
+  $("frame-caption").textContent = scene ? "Click to set the waterline, or choose 'drag = ROI' and drag a box around the water the fish can reach. Check every part, then press Start."
+    : F ? `t = ${fmt(F.t, 2)} s · ${r && r.x !== null && r.x !== undefined ? `fish at (${fmt(r.x, 0)}, ${fmt(r.y, 0)}) px, length ${fmt(r.major_axis, 0)} px, tilt ${fmt(r.angle_deg, 0)}°, pitch ${fmt(r.pitch_deg, 0)}°, ${r.n_blobs} dark blob(s)` : "fish not found in this frame"}` : "";
+}
+// Scene editing: click = waterline, drag = ROI (in original video pixels).
+let drag = null;
+function toVideo(e) {
+  const box = video.getBoundingClientRect(), [w, h] = videoSize();
+  return [Math.round((e.clientX - box.left) / box.width * w), Math.round((e.clientY - box.top) / box.height * h)];
+}
+video.onmousedown = (e) => {
+  if (S.stage !== "scene" || !sceneEdit()) return;
+  const [x, y] = toVideo(e);
+  if (document.querySelector("input[name=mode]:checked").value === "waterline") { sceneEdit().waterline_y = y; syncSceneInputs(); drawVideo(); }
+  else drag = [x, y];
+};
+video.onmousemove = (e) => {
+  if (drag && sceneEdit()) { const [x, y] = toVideo(e); sceneEdit().roi = [Math.min(drag[0], x), Math.min(drag[1], y), Math.max(drag[0], x), Math.max(drag[1], y)]; syncSceneInputs(); drawVideo(); }
+};
+window.onmouseup = () => { drag = null; ethoDrag = null; };
+function syncSceneInputs() {
+  const edit = sceneEdit();
+  if (!edit) return;
+  $("scene-part").value = scenePart;
+  $("wl").value = edit.waterline_y; ["x0", "y0", "x1", "y1"].forEach((id, i) => $(id).value = edit.roi[i]);
+  const auto = edit.auto, changed = auto.waterline_y !== edit.waterline_y || auto.roi.join() !== edit.roi.join();
+  $("scene-note").textContent = changed ? "corrected on the page (used when you press Start)" : "automatic";
+}
+["wl", "x0", "y0", "x1", "y1"].forEach((id, i) => $(id).onchange = () => {
+  if (!sceneEdit()) return;
+  if (id === "wl") sceneEdit().waterline_y = Number($(id).value); else sceneEdit().roi[i - 1] = Number($(id).value);
+  syncSceneInputs(); drawVideo();
+});
+$("reset-scene").onclick = () => { const e = sceneEdit(); if (e) { e.waterline_y = e.auto.waterline_y; e.roi = [...e.auto.roi]; syncSceneInputs(); drawVideo(); } };
+$("scene-part").onchange = () => {
+  scenePart = Number($("scene-part").value); sceneFrameIndex = -1; $("view-frame").textContent = "Real frame";
+  syncSceneInputs(); loadSceneImage(); drawVideo();
+};
+$("view-frame").onclick = () => {
+  const n = ((S.review_frames || [])[scenePart] || []).length;
+  sceneFrameIndex = sceneFrameIndex + 1 < n ? sceneFrameIndex + 1 : -1;
+  $("view-frame").textContent = sceneFrameIndex < 0 ? "Real frame" : (sceneFrameIndex + 1 < n ? "Next frame" : "Background");
+  loadSceneImage(); drawVideo();
+};
+new MutationObserver(() => syncSceneInputs()).observe($("scene-edit"), { attributes: true });
+
+// ---------------------------------------------------------------- ethogram canvas
+const etho = $("ethogram");
+const ETHO = { left: 118, right: 16, top: 22, row: 38, gap: 12, conf: 22 };
+function ethoX(t) { return ETHO.left + t / axisSeconds() * (etho.width - ETHO.left - ETHO.right); }
+function hatch(ctx, x0, y0, x1, y1, color) {
+  ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip(); ctx.strokeStyle = color; ctx.lineWidth = 1;
+  for (let x = x0 - (y1 - y0); x < x1; x += 6) { ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x + (y1 - y0), y0); ctx.stroke(); }
+  ctx.restore();
+}
+function drawEthogram() {
+  const width = etho.clientWidth; if (etho.width !== width) etho.width = width;
+  const rows = [["video labels", "ours"]].concat(S.reference ? [["reference", "ref"]] : []);
+  const height = ETHO.top + rows.length * (ETHO.row + ETHO.gap) + ETHO.conf + 44;
+  if (etho.height !== height) etho.height = height;
+  const ctx = etho.getContext("2d"), seconds = axisSeconds(), bs = binS();
+  ctx.clearRect(0, 0, etho.width, etho.height);
+  ctx.font = "12px sans-serif"; ctx.textBaseline = "middle";
+  const src = S.source || {};
+  $("etho-title").firstChild.textContent = `Ethogram: ${src.name || "no video"}${S.reference ? ` (reference group ${S.reference.group})` : ""} `;
+  $("etho-sub").textContent = `x = time on the joined timeline (0–${seconds} s), one column per ${bs} s · click to review a second`;
+  let y = ETHO.top;
+  for (const [title, kind] of rows) {
+    ctx.fillStyle = css("--ink"); ctx.textAlign = "right"; ctx.fillText(title, ETHO.left - 8, y + ETHO.row / 2);
+    ctx.fillStyle = css("--soft"); ctx.fillRect(ethoX(0), y, ethoX(seconds) - ethoX(0), ETHO.row);  // not processed yet
+    if (kind === "ours" && S.labels) {
+      S.labels.forEach((index, i) => { ctx.fillStyle = rgb(LABELS[index]); ctx.fillRect(ethoX(i * bs), y, Math.max(1, ethoX((i + 1) * bs) - ethoX(i * bs) + 0.5), ETHO.row); });
+      const from = S.labeling && S.labeling.provisional_from_s;
+      if (from !== null && from !== undefined && S.stage !== "saved") hatch(ctx, ethoX(from), y, ethoX(S.labels.length * bs), y + ETHO.row, "rgba(0,0,0,.45)");
+      ctx.fillStyle = css("--ink");  // a bar above every second a person relabeled
+      (S.human || []).forEach((h, i) => { if (h) ctx.fillRect(ethoX(i * bs), y - 5, Math.max(1, ethoX((i + 1) * bs) - ethoX(i * bs) + 0.5), 3); });
+      const a = Number($("ov-from").value), b = Number($("ov-to").value);  // the seconds picked for a relabel
+      if ($("ov-from").value !== "" && b > a) { ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.strokeRect(ethoX(a), y - 1, ethoX(b) - ethoX(a), ETHO.row + 2); ctx.lineWidth = 1; }
+    }
+    if (kind === "ref") S.reference.labels.forEach((name, i) => {
+      ctx.fillStyle = name === "no_data" ? "#fff" : (name === "unknown" ? "#000" : rgb(name));
+      ctx.fillRect(ethoX(i), y, Math.max(1, ethoX(i + 1) - ethoX(i) + 0.5), ETHO.row);
+    });
+    ctx.strokeStyle = css("--line"); ctx.strokeRect(ethoX(0), y, ethoX(seconds) - ethoX(0), ETHO.row);
+    y += ETHO.row + ETHO.gap;
+  }
+  // Confidence strip: bar height = confidence of that second's label.
+  ctx.fillStyle = css("--ink"); ctx.textAlign = "right"; ctx.fillText("confidence", ETHO.left - 8, y + ETHO.conf / 2);
+  if (S.confidence) S.confidence.forEach((c, i) => {
+    const hgt = (c || 0) * ETHO.conf; ctx.fillStyle = css("--muted");
+    ctx.fillRect(ethoX(i * bs), y + ETHO.conf - hgt, Math.max(1, ethoX((i + 1) * bs) - ethoX(i * bs)), hgt);
+  });
+  ctx.strokeStyle = css("--line"); ctx.strokeRect(ethoX(0), y, ethoX(seconds) - ethoX(0), ETHO.conf);
+  y += ETHO.conf + 6;
+  axis(ctx, y, seconds);
+  // Cursor: the second being processed (or reviewed).
+  const t = currentT(); if (S.stage !== "scene" && S.stage !== "idle") { ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ethoX(t), ETHO.top - 6); ctx.lineTo(ethoX(t), y); ctx.stroke(); ctx.lineWidth = 1; }
+  renderLegend();
+}
+function axis(ctx, y, seconds) {
+  const step = [10, 20, 50, 100, 200, 500, 1000].find((s) => seconds / s <= 14) || 1000;
+  ctx.strokeStyle = css("--muted"); ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; ctx.font = "11px sans-serif";
+  ctx.beginPath(); ctx.moveTo(ethoX(0), y); ctx.lineTo(ethoX(seconds), y); ctx.stroke();
+  for (let s = 0; s <= seconds; s += step) { ctx.beginPath(); ctx.moveTo(ethoX(s), y); ctx.lineTo(ethoX(s), y + 4); ctx.stroke(); ctx.fillText(String(s), ethoX(s), y + 13); }
+  ctx.fillText("time (s)", ethoX(seconds / 2), y + 28);
+}
+function renderLegend() {
+  const items = LABELS.map((n) => `<div><span class="dot" style="background:${rgb(n)}"></span><b>${pretty(n)}</b>: <span class="muted">${CONFIG.text[n]}</span></div>`);
+  items.push(`<div><span class="dot" style="background:repeating-linear-gradient(45deg,#0007 0 2px,transparent 2px 5px)"></span><b>provisional</b>: <span class="muted">may still change when later frames arrive</span></div>`);
+  items.push(`<div><span class="dot" style="background:${css("--soft")}"></span><b>not processed yet</b></div>`);
+  items.push(`<div><span class="dot" style="background:${css("--ink")};height:4px"></span><b>bar above</b>: <span class="muted">relabeled by a person</span></div>`);
+  if (S.reference) items.push(`<div><span class="dot" style="background:#fff"></span><b>reference: no data</b> · <span class="dot" style="background:#000"></span><b>unknown color</b></div>`);
+  $("legend").innerHTML = items.join("");
+}
+function ethoTime(e) { const box = etho.getBoundingClientRect(); return ((e.clientX - box.left) * etho.width / box.width - ETHO.left) / (etho.width - ETHO.left - ETHO.right) * axisSeconds(); }
+etho.onmousemove = (e) => {
+  const t = ethoTime(e), tip = $("tooltip");
+  if (t < 0 || t > axisSeconds()) { tip.style.display = "none"; return; }
+  const bin = binAt(t), ref = S.reference ? S.reference.labels[Math.floor(t)] : null;
+  if (ethoDrag !== null) pickRange(ethoDrag, t);
+  tip.innerHTML = `<b>${fmt(t)} s</b><br>ours: ${bin ? `${pretty(bin.label)} (confidence ${fmt(bin.confidence, 2)})` : "not labeled yet"}`
+    + (bin && bin.human ? `<br>set by a person (the rules gave ${pretty(bin.auto)})` : "")
+    + (ref ? `<br>reference: ${pretty(ref)}` : "") + (S.stage === "saved" ? "<br><i>click to see this frame</i>" : "") + "<br><i>drag to pick seconds to relabel</i>";
+  tip.style.display = "block"; tip.style.left = `${e.clientX + 12}px`; tip.style.top = `${e.clientY + 12}px`;
+};
+etho.onmouseleave = () => { $("tooltip").style.display = "none"; };
+// Drag = pick whole bins for a relabel; a click also picks its second and shows that frame.
+let ethoDrag = null;                   // time where the mouse went down on the ethogram
+function pickRange(a, b) {
+  const bs = binS(), from = Math.floor(Math.max(0, Math.min(a, b)) / bs) * bs;
+  $("ov-from").value = from; $("ov-to").value = Math.max(Math.ceil(Math.max(0, a, b) / bs) * bs, from + bs);
+  drawEthogram();
+}
+etho.onmousedown = (e) => { ethoDrag = ethoTime(e); pickRange(ethoDrag, ethoDrag); };
+etho.onmouseup = (e) => {
+  if (ethoDrag === null) return;
+  const t = ethoTime(e), click = Math.abs(t - ethoDrag) < binS();
+  pickRange(ethoDrag, t); ethoDrag = null;
+  if (click) review(t);
+};
+async function review(time) {
+  if (S.stage !== "saved" && S.stage !== "stopped") { showMessage("Review is available when the video is done (or stopped)."); return; }
+  const t = Math.max(0, Math.min(duration(), time));
+  try {
+    const frame = await (await fetch(`/api/frame?t=${t}`)).json();
+    if (frame.ok === false) throw new Error(frame.error);
+    reviewT = frame.t; showFrame(frame);
+    showMessage(`Review: ${fmt(frame.t, 2)} s (part ${frame.part}, frame ${frame.frame}). Click another second, or Start to process again.`);
+  } catch (err) { showMessage(err.message, true); }
+}
+
+// ---------------------------------------------------------------- traces canvas
+const traces = $("traces");
+function drawTraces() {
+  const width = traces.clientWidth; if (traces.width !== width) traces.width = width;
+  const ctx = traces.getContext("2d"), seconds = axisSeconds(), bs = binS(), T = S.traces || {}, p = params();
+  ctx.clearRect(0, 0, traces.width, traces.height);
+  const panels = [
+    { title: "speed (BL/s)", series: [["speed_median_bl_s", "median", css("--ink")], ["speed_mean_bl_s", "mean", css("--muted")]],
+      max: 4, lines: p ? [[p.freeze_speed_bl_s, "freeze <", rgb("freeze_drift")], [p.swim_min_speed_bl_s, "slow swim <", rgb("controlled_swim")], [p.lorr_max_speed_bl_s, "LORR <", rgb("lorr")]] : [] },
+    { title: "depth below the waterline (BL, top of fish)", series: [["depth_bl_min", "depth", "#2f7bff"]], max: 3, lines: [[0, "waterline", "#2f7bff"]] },
+    { title: "share of frames (0–1)", series: [["nose_up_surface_fraction", "nose-up at surface", rgb("surface_breach")], ["tilt_fraction", "tilted side-on", rgb("lorr")], ["tracked_fraction", "fish seen", css("--muted")]],
+      max: 1, lines: p ? [[p.surface_breach_fraction, "surface ≥", rgb("surface_breach")], [p.lorr_tilt_fraction, "LORR tilt ≥", rgb("lorr")], [p.min_tracked_fraction, "tracked ≥", css("--muted")]] : [] },
+  ];
+  const top = 8, gap = 30, bottom = 34, h = (traces.height - top - bottom - gap * (panels.length - 1)) / panels.length;
+  panels.forEach((panel, k) => {
+    const y0 = top + k * (h + gap), y = (v) => y0 + h - Math.max(0, Math.min(1, v / panel.max)) * h;
+    ctx.fillStyle = css("--ink"); ctx.font = "12px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText(panel.title, ETHO.left, y0 - 2);
+    ctx.fillStyle = css("--muted"); ctx.textAlign = "right"; ctx.font = "11px sans-serif"; ctx.textBaseline = "middle";
+    [0, panel.max / 2, panel.max].forEach((v) => ctx.fillText(fmt(v, panel.max < 2 ? 1 : 0), ETHO.left - 6, y(v)));
+    ctx.strokeStyle = css("--line"); ctx.strokeRect(ethoX(0), y0, ethoX(seconds) - ethoX(0), h);
+    panel.lines.forEach(([v, name, color]) => {
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = color; ctx.beginPath(); ctx.moveTo(ethoX(0), y(v)); ctx.lineTo(ethoX(seconds), y(v)); ctx.stroke(); ctx.setLineDash([]);
+    });
+    panel.series.forEach(([key, , color]) => {
+      const values = T[key]; if (!values) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.beginPath(); let pen = false;
+      values.forEach((v, i) => { if (v === null) { pen = false; return; } const x = ethoX((i + 0.5) * bs); pen ? ctx.lineTo(x, y(v)) : ctx.moveTo(x, y(v)); pen = true; });
+      ctx.stroke(); ctx.lineWidth = 1;
+    });
+    // Legend of the panel (series + threshold lines), right-aligned above it.
+    const names = panel.series.map(([, n, c]) => [n, c, false]).concat(panel.lines.map(([v, n, c]) => [`${n} ${v}`, c, true]));
+    let x = ethoX(seconds); ctx.textBaseline = "bottom"; ctx.textAlign = "right"; ctx.font = "11px sans-serif";
+    names.reverse().forEach(([n, c, dashed]) => { ctx.fillStyle = c; ctx.fillText((dashed ? "- - " : "— ") + n, x, y0 - 2); x -= ctx.measureText((dashed ? "- - " : "— ") + n).width + 14; });
+  });
+  axis(ctx, traces.height - bottom + 4, seconds);
+  const t = currentT(); if (S.stage !== "scene" && S.stage !== "idle") { ctx.strokeStyle = css("--ink"); ctx.beginPath(); ctx.moveTo(ethoX(t), top); ctx.lineTo(ethoX(t), traces.height - bottom + 4); ctx.stroke(); }
+}
+
+window.onresize = () => { drawEthogram(); drawTraces(); };
+loadSources().catch(() => {});
+fetch("/api/state").then((r) => r.json()).then((state) => { S = state; render(); }).catch(() => {});
+</script>
+</body>
+</html>
