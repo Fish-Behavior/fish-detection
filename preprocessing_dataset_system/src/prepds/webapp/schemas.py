@@ -9,6 +9,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from prepds.models import BehaviorState, FrameSource, ReviewStatus
 
 MAX_EDITS_PER_REQUEST = 1000
+MAX_WATERLINE_PX = 10_000.0  # sanity cap when the frame height is unknown
 
 
 def _clean_name(value: str) -> str:
@@ -69,8 +70,65 @@ class SegmentOut(BaseModel):
 
 class FrameSummary(BaseModel):
     seconds_by_state: dict[str, float]
+    bouts_by_state: dict[str, int] = {}
+    total_s: float = 0.0
     has_undetermined: bool
     has_dead: bool
+
+
+class RuleOut(BaseModel):
+    state: str
+    frames: int
+    wins: bool
+    detail: str
+
+
+class SecondExplanation(BaseModel):
+    second: int
+    start_s: float
+    end_s: float
+    n_frames: int
+    n_detected: int
+    stored_state: str
+    stored_source: str
+    speed_median_px_per_s: float | None
+    y_min_px: float | None
+    thresholds_available: bool
+    thresholds_error: str | None = None
+    auto_state: str | None
+    matches_stored: bool | None
+    votes: dict[str, int]
+    rules: list[RuleOut]
+
+
+class DetectionOut(BaseModel):
+    frame_idx: int
+    t: float
+    score: float
+    box: list[float]
+    keypoints: dict[str, list[float]]
+
+
+class OverlayWindow(BaseModel):
+    fps: float
+    width: int | None = None
+    height: int | None = None
+    t: list[float]
+    x: list[float | None]
+    y: list[float | None]
+    detected: list[bool]
+    detections: list[DetectionOut]
+    detections_error: str | None = None
+    has_detector: bool = False
+
+
+class WaterlineIn(BaseModel):
+    y_px: float = Field(ge=0, le=MAX_WATERLINE_PX, allow_inf_nan=False)
+
+
+class WaterlineOut(BaseModel):
+    y_px: float | None = None
+    source: str | None = None
 
 
 class ListingFlagOut(BaseModel):

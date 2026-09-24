@@ -28,7 +28,7 @@ from prepds.catalog import (
     match_videos,
     to_trials,
 )
-from prepds.config import PATH_VARIABLES, ConfigError, Settings, default_workers, load_settings
+from prepds.config import DEFAULT_CONFIG_FILE, PATH_VARIABLES, ConfigError, Settings, default_workers, load_settings
 from prepds.models import MatchStatus, Trial
 
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
@@ -242,7 +242,9 @@ def run_review(settings: Settings, args: argparse.Namespace) -> int:
     from prepds.webapp.app import create_app
 
     processed = settings.paths.output_dir / "processed"
-    app = create_app(processed, settings.paths.accepted_dir, video_dir=settings.paths.video_dir)
+    profiles = DEFAULT_CONFIG_FILE.parent / "calibration_profiles"
+    app = create_app(processed, settings.paths.accepted_dir, video_dir=settings.paths.video_dir,
+                     profile_dir=profiles if profiles.is_dir() else None)
     print(f"Review app: http://{args.host}:{args.port}/  (videos in {processed})")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
