@@ -77,6 +77,7 @@ async function openVideo(id) {
   render();
   const player = $("player");
   player.src = app.detail.video_url;
+  resetOverlay();
   player.load();
   await loadList();
 }
@@ -98,6 +99,7 @@ function render() {
   $("flags").replaceChildren(...m.review_flags.map((f) =>
     el("li", { textContent: `Check ${f.start_s.toFixed(0)}–${f.end_s.toFixed(0)} s: ${f.message}` })));
   renderListingFlags(d);
+  requestWhy(true);
   renderSegments();
   renderSummary();
   renderPicker();
@@ -141,9 +143,72 @@ function renderSegments() {
 }
 
 function renderSummary() {
-  const seconds = app.detail.frame_summary.seconds_by_state;
-  $("summary").replaceChildren(...STATES.filter(([n]) => seconds[n]).map(([n]) =>
-    el("li", {}, el("span", { className: "swatch", style: `background:${colorOf(n)}` }), `${n} ${seconds[n].toFixed(1)} s`)));
+  const s = app.detail.frame_summary;
+  const total = s.total_s || 0;
+  $("summary-total").textContent = total ? `of ${total.toFixed(0)} s in this video` : "";
+  $("summary").replaceChildren(...STATES.map(([name]) => {
+    const sec = s.seconds_by_state[name] || 0, bouts = s.bouts_by_state[name] || 0;
+    const pct = total ? (sec / total) * 100 : 0;
+    const bar = el("span", {});
+    bar.style.width = `${pct}%`;
+    bar.style.background = colorOf(name);
+    return el("li", { className: sec ? "" : "none" },
+      el("span", { className: "swatch", style: `background:${colorOf(name)}` }),
+      el("span", { textContent: name }),
+      el("span", { className: "bar" }, bar),
+      el("span", { className: "num", textContent: `${sec.toFixed(1)} s` }),
+      el("span", { className: "num pct", textContent: `${pct.toFixed(1)}%` }),
+      el("span", { className: "num bouts", textContent: `${bouts} bout${bouts === 1 ? "" : "s"}` }));
+  }));
+}
+
+// ---------- why this label ----------
+const why = { second: null, video: null, seq: 0, timer: null };
+
+function requestWhy(force = false) {
+  if (!app.videoId) return;
+  const second = Math.max(0, Math.floor($("player").currentTime || 0));
+  if (!force && second === why.second && why.video === app.videoId) return;
+  why.second = second; why.video = app.videoId;
+  clearTimeout(why.timer);
+  why.timer = setTimeout(() => loadWhy(app.videoId, second), 150);
+}
+
+async function loadWhy(videoId, second) {
+  const seq = ++why.seq;
+  try {
+    const data = await api(`/videos/${encodeURIComponent(videoId)}/explain?second=${second}`);
+    if (seq === why.seq) renderWhy(data);
+  } catch (error) {
+    if (seq !== why.seq) return;
+    $("why-second").textContent = `${second}–${second + 1} s`;
+    $("why-summary").textContent = "Not available for this second.";
+    $("why-summary").className = "why-summary";
+    $("why-rules").replaceChildren();
+  }
+}
+
+function renderWhy(d) {
+  $("why-second").textContent = `${d.start_s.toFixed(0)}–${d.end_s.toFixed(0)} s`;
+  const parts = [`Label: ${d.stored_state}${d.stored_source === "manual" ? " (set by a reviewer)" : ""}.`,
+    `${d.n_detected} of ${d.n_frames} frames have the fish detected.`];
+  if (d.speed_median_px_per_s !== null) parts.push(`Median speed ${d.speed_median_px_per_s.toFixed(1)} px/s.`);
+  const votes = Object.entries(d.votes).sort((a, b) => b[1] - a[1]).map(([s, n]) => `${n} ${s}`).join(", ");
+  if (votes) parts.push(`Frame votes: ${votes}.`);
+  let changed = false;
+  if (d.auto_state && d.stored_state !== d.auto_state) {
+    changed = true;
+    parts.push(d.stored_source === "manual"
+      ? `The automatic label was ${d.auto_state}.`
+      : `Recomputed with the profile thresholds this second would be ${d.auto_state}, not ${d.stored_state}: the profile file may have changed since the run, or the second sits right on a threshold (the stored track is rounded).`);
+  }
+  if (!d.thresholds_available) parts.push(`Rules unavailable: ${d.thresholds_error || "no thresholds"}.`);
+  $("why-summary").textContent = parts.join(" ");
+  $("why-summary").className = changed ? "why-summary changed" : "why-summary";
+  $("why-rules").replaceChildren(...d.rules.map((r) => el("li", { className: r.wins ? "wins" : "" },
+    el("span", { className: "mark", textContent: r.wins ? "✓" : "–" }),
+    el("span", { className: "frames", textContent: r.frames ? String(r.frames) : "" }),
+    el("span", { textContent: `${r.state}: ${r.detail}` }))));
 }
 
 function renderPicker() {
@@ -243,8 +308,8 @@ function movePlayhead() {
   timeline.setAttribute("aria-valuetext", `${t.toFixed(1)} s${seg ? `, ${seg.state}` : ""}`);
   timeline.setAttribute("aria-valuemax", String(duration()));
 }
-$("player").addEventListener("timeupdate", movePlayhead);
-$("player").addEventListener("seeked", movePlayhead);
+$("player").addEventListener("timeupdate", () => { movePlayhead(); requestWhy(); });
+$("player").addEventListener("seeked", () => { movePlayhead(); requestWhy(); });
 
 // ---------- actions ----------
 $("stage").addEventListener("click", () => {
@@ -325,3 +390,200 @@ $("status-filter").addEventListener("change", () => loadList().catch((e) => say(
 try { $("reviewer").value = localStorage.getItem("prepds.reviewer") || ""; } catch (_) { /* storage blocked */ }
 $("reviewer").addEventListener("change", () => { try { localStorage.setItem("prepds.reviewer", reviewer()); } catch (_) { /* ignore */ } });
 loadList().catch((e) => say(e.message, true));
+
+
+// ---------- fish markers on the video ----------
+const OVERLAY_CHUNK_S = 20;
+const OVERLAY_PATH_S = 2;
+const KEYPOINT_COLORS = { snout: "#e0e", dorsal_fin_base: "#0bb", ventral: "#0bb", tail_base: "#0a0", tail_tip: "#0a0" };
+const overlay = { video: null, chunks: new Map(), inflight: new Set(), message: "", waterline: null, picking: false };
+
+function resetOverlay() {
+  overlay.video = app.videoId;
+  overlay.chunks.clear();
+  overlay.inflight.clear();
+  overlay.message = "";
+  overlay.waterline = null;
+  setPicking(false);
+  $("water-clear").hidden = true;
+  $("overlay-note").textContent = "";
+  drawOverlay();
+  loadWaterline();
+}
+
+async function ensureOverlayChunk(index) {
+  const key = `${overlay.video}:${index}`;
+  if (index < 0 || overlay.chunks.has(key) || overlay.inflight.has(key)) return;
+  overlay.inflight.add(key);
+  const videoId = overlay.video;
+  try {
+    const data = await api(`/videos/${encodeURIComponent(videoId)}/overlay?start_s=${index * OVERLAY_CHUNK_S}&end_s=${(index + 1) * OVERLAY_CHUNK_S}`);
+    if (videoId === overlay.video) {
+      overlay.chunks.set(key, data);
+      if (data.detections_error) overlay.message = data.detections_error;
+      $("overlay-note").textContent = overlay.message || (data.has_detector ? "" :
+        "This run has no detector output (classical tracker): only the track point and path exist. Box and keypoints need a model run (outputs_r3).");
+      drawOverlay();
+    }
+  } catch (error) {
+    overlay.message = "Fish markers unavailable.";
+  } finally {
+    overlay.inflight.delete(key);
+  }
+}
+
+function nearestIndex(times, t) {
+  let lo = 0, hi = times.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < t) lo = mid + 1; else hi = mid; }
+  if (lo > 0 && Math.abs(times[lo - 1] - t) < Math.abs(times[lo] - t)) lo -= 1;
+  return lo;
+}
+
+function drawOverlay() {
+  const video = $("player"), canvas = $("overlay");
+  if (!video || !overlay.video || !video.videoWidth) return;
+  const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  // marker coordinates are in the decoded frame's pixels; the browser may show a non-square pixel aspect, so
+  // each axis is scaled from the coded size when the server knows it
+  const first = overlay.chunks.get(`${overlay.video}:0`) || [...overlay.chunks.values()][0];
+  const codedW = (first && first.width) || video.videoWidth, codedH = (first && first.height) || video.videoHeight;
+  const sx = w / codedW, sy = h / codedH, t = video.currentTime || 0;
+  const index = Math.floor(t / OVERLAY_CHUNK_S);
+  ensureOverlayChunk(index);
+  if (t - index * OVERLAY_CHUNK_S > OVERLAY_CHUNK_S - 4) ensureOverlayChunk(index + 1);
+  if (overlay.waterline !== null && $("ov-water").checked) {
+    const y = overlay.waterline * sy;
+    ctx.strokeStyle = "#2a7fff"; ctx.lineWidth = 2; ctx.setLineDash([8, 4]);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#2a7fff"; ctx.font = "11px monospace"; ctx.fillText(`waterline y=${Math.round(overlay.waterline)}`, 6, Math.max(12, y - 4));
+  }
+  const chunk = overlay.chunks.get(`${overlay.video}:${index}`);
+  if (!chunk || !chunk.t.length) return;
+  const tolerance = 1.5 / (chunk.fps || 30);
+  const i = nearestIndex(chunk.t, t);
+  const near = Math.abs(chunk.t[i] - t) <= tolerance;
+  if ($("ov-path").checked) {
+    ctx.strokeStyle = "#e80"; ctx.lineWidth = 2; ctx.beginPath();
+    let started = false;
+    for (let k = i; k >= 0 && chunk.t[k] >= t - OVERLAY_PATH_S; k--) {
+      if (chunk.x[k] === null) { started = false; continue; }
+      const px = chunk.x[k] * sx, py = chunk.y[k] * sy;
+      if (started) ctx.lineTo(px, py); else { ctx.moveTo(px, py); started = true; }
+    }
+    ctx.stroke();
+  }
+  if (near && $("ov-track").checked && chunk.x[i] !== null) {
+    ctx.fillStyle = "#e11"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(chunk.x[i] * sx, chunk.y[i] * sy, 4, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+  }
+  if (near && chunk.x[i] === null) {
+    ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(4, 4, 96, 16);
+    ctx.fillStyle = "#fff"; ctx.font = "11px monospace"; ctx.fillText("fish not found", 8, 16);
+  }
+  const samples = chunk.detections;
+  if (samples.length && near) {
+    const times = samples.map((d) => d.t), j = nearestIndex(times, t);
+    if (Math.abs(times[j] - t) <= 3 / (chunk.fps || 30)) {
+      const d = samples[j];
+      if ($("ov-box").checked) {
+        ctx.strokeStyle = "#e8b800"; ctx.lineWidth = 1.5;
+        ctx.strokeRect(d.box[0] * sx, d.box[1] * sy, (d.box[2] - d.box[0]) * sx, (d.box[3] - d.box[1]) * sy);
+      }
+      if ($("ov-kp").checked) {
+        const kp = d.keypoints, line = (a, b) => { ctx.beginPath(); ctx.moveTo(kp[a][0] * sx, kp[a][1] * sy); ctx.lineTo(kp[b][0] * sx, kp[b][1] * sy); ctx.stroke(); };
+        ctx.strokeStyle = "rgba(0,170,170,.8)"; ctx.lineWidth = 1.5; line("snout", "tail_base"); line("tail_base", "tail_tip"); line("dorsal_fin_base", "ventral");
+        for (const [name, [x, y]] of Object.entries(kp)) {
+          ctx.fillStyle = KEYPOINT_COLORS[name] || "#fff"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(x * sx, y * sy, name === "snout" ? 4 : 3, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+        }
+      }
+    }
+  }
+}
+
+(function wireOverlay() {
+  const video = $("player");
+  const schedule = () => { if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(loop); else requestAnimationFrame(loop); };
+  const loop = () => { drawOverlay(); if (!video.paused && !video.ended) schedule(); };
+  video.addEventListener("play", schedule);
+  for (const type of ["pause", "seeked", "timeupdate", "loadedmetadata", "loadeddata"]) video.addEventListener(type, drawOverlay);
+  window.addEventListener("resize", drawOverlay);
+  for (const id of ["ov-track", "ov-path", "ov-box", "ov-kp", "ov-water"]) $(id).addEventListener("change", drawOverlay);
+})();
+
+
+// ---------- waterline (manual, advisory: no labeling rule reads it) ----------
+function codedSize() {
+  const first = [...overlay.chunks.values()][0], video = $("player");
+  return { w: (first && first.width) || video.videoWidth, h: (first && first.height) || video.videoHeight };
+}
+
+function setPicking(on) {
+  overlay.picking = on;
+  document.querySelector(".video-wrap").classList.toggle("picking", on);
+  $("water-set").textContent = on ? "Click the water surface..." : "Set waterline";
+}
+
+async function loadWaterline() {
+  const videoId = overlay.video;
+  try {
+    const data = await api(`/videos/${encodeURIComponent(videoId)}/waterline`);
+    if (videoId !== overlay.video) return;
+    overlay.waterline = data.y_px;
+    $("water-clear").hidden = data.y_px === null;
+    drawOverlay();
+  } catch (error) { /* the line is optional; the review works without it */ }
+}
+
+async function saveWaterline(y) {
+  const videoId = overlay.video;
+  try {
+    const data = await api(`/videos/${encodeURIComponent(videoId)}/waterline`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ y_px: y }),
+    });
+    if (videoId !== overlay.video) return;
+    overlay.waterline = data.y_px; $("water-clear").hidden = false; $("ov-water").checked = true; drawOverlay();
+  } catch (error) { say(`Waterline not saved: ${error.message}`, true); }
+}
+
+$("water-set").addEventListener("click", () => { setPicking(!overlay.picking); });
+$("water-clear").addEventListener("click", async () => {
+  const videoId = overlay.video;
+  try {
+    await api(`/videos/${encodeURIComponent(videoId)}/waterline`, { method: "DELETE" });
+    if (videoId === overlay.video) { overlay.waterline = null; $("water-clear").hidden = true; drawOverlay(); }
+  } catch (error) { say(`Waterline not cleared: ${error.message}`, true); }
+});
+
+// ---------- playback controls (kept outside the picture so nothing covers the fish) ----------
+const playerEl = $("player");
+const fmtClock = (t) => (Number.isFinite(t) ? t : 0).toFixed(1);
+function syncControls() {
+  const d = Number.isFinite(playerEl.duration) ? playerEl.duration : 0;
+  $("seek").max = String(d);
+  if (document.activeElement !== $("seek")) $("seek").value = String(playerEl.currentTime || 0);
+  $("clock").textContent = `${fmtClock(playerEl.currentTime)} / ${fmtClock(d)} s`;
+  $("play").textContent = playerEl.paused ? "Play" : "Pause";
+  $("play").setAttribute("aria-label", playerEl.paused ? "Play" : "Pause");
+}
+function togglePlay() { if (playerEl.paused) playerEl.play().catch(() => {}); else playerEl.pause(); }
+$("play").addEventListener("click", togglePlay);
+$("seek").addEventListener("input", () => { playerEl.currentTime = Number($("seek").value); });
+$("speed").addEventListener("change", () => { playerEl.playbackRate = Number($("speed").value); });
+for (const type of ["timeupdate", "play", "pause", "loadedmetadata", "durationchange", "seeked", "ended"]) playerEl.addEventListener(type, syncControls);
+playerEl.addEventListener("loadedmetadata", () => { playerEl.playbackRate = Number($("speed").value); });
+playerEl.addEventListener("click", (event) => {
+  if (overlay.picking) {
+    const rect = playerEl.getBoundingClientRect(), size = codedSize();
+    if (rect.height > 0 && size.h) { setPicking(false); saveWaterline(Math.round(((event.clientY - rect.top) / rect.height) * size.h * 10) / 10); }
+    return;
+  }
+  togglePlay();
+});
