@@ -90,6 +90,17 @@ remains (no override) and asks for confirmation when `Dead` is present. Reject c
 Keys on the timeline: arrows seek, `[` / `]` set the selection start/end at the playhead. Review flags (e.g. no
 movement until the end of the video) are shown above the player.
 
+- **Large video, controls below it:** play/pause, seek bar, clock and speed sit under the picture, so nothing covers the fish.
+- **Markers on the video** (toggle each): track point, last-2-s path, and, for model-run output only, the detector box
+  and 5 keypoints. Classical output has no box; the page says so. A dashed blue **waterline** can be set by hand
+  ("Set waterline", then click the water surface; stored as `waterline.json`). It is advisory: no labeling rule reads it.
+- **Why this label:** for the second under the playhead, the labeling rules in order with the measured value next to each
+  threshold, the frame votes, and whether a reviewer changed the automatic label.
+- **Time per state:** seconds, percent and bouts for all seven states.
+- **Possible Listing hints:** advisory ranges (model run + `scripts/phase15_flag_listing.py`) with a "Go to" button.
+
+Full step-by-step instructions: [`docs/user-manual.md`](docs/user-manual.md).
+
 ## How labels are produced (and what to trust)
 
 Tracking is classical OpenCV (KNN background subtraction; a motionless fish is absorbed and becomes undetected).
@@ -142,4 +153,4 @@ added, not assumed.
 ## Status
 
 Implementation is tracked task-by-task in [`docs/progress.md`](docs/progress.md),
-mirroring the PRD §12 phase breakdown (Phase 0-14).
+mirroring the PRD §12 phase breakdown (Phase 0-15). User manual: [`docs/user-manual.md`](docs/user-manual.md).

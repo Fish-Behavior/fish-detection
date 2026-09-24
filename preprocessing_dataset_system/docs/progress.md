@@ -1390,3 +1390,7 @@ Leftovers outside the repo: git worktree /tmp/theirs (remove with `git worktree 
 - Waterline: manual only. "Set waterline" then a click on the video stores `waterline.json` beside the artifacts (`GET/PUT/DELETE /videos/{id}/waterline`, validated to lie inside the frame). It is drawn as a dashed blue line. It is advisory: no labeling rule reads it. An automatic waterline was not added because `roi.detect_waterline` finds the beaker bottom in most videos (see its docstring).
 - Fixed: a NaN in a request body made the default 422 response fail to serialize (HTTP 500); the app now returns a plain 422 without echoing the input.
 - Tests: `tests/test_waterline_api.py` (13). Full suite: 560 passed. Browser-checked on F_0029 at 100.2 s (marker alignment, waterline click, play/pause).
+
+### User manual and README refresh (2026-09-24)
+
+`docs/user-manual.md` added (setup, workflow, review app, output layout, model tracker, hints, what to trust, troubleshooting, command reference); README "Review UI" and status updated for the explain panel, time-per-state, markers, external controls and manual waterline. Uncommitted.
