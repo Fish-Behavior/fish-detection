@@ -1,0 +1,53 @@
+calibration_profile:
+  version: cal-2026-09-24-r3-model
+  created_at: '2026-09-24'
+  metrics:
+    mean_tv_in_sample: 0.1771
+    mean_tv_leave_one_group_out: 0.253
+    scored_on: 1 s-consolidated output
+    per_group_tv:
+      dob_30: 0.092
+      dob_100: 0.066
+      fentanyl_30: 0.104
+      mdma_30: 0.331
+      methylone_30: 0.182
+      methylone_100: 0.356
+      veh_0: 0.109
+    per_group_coverage:
+      dob_30: 0.91
+      dob_100: 0.96
+      fentanyl_30: 0.99
+      mdma_30: 0.9
+      methylone_30: 0.98
+      methylone_100: 0.95
+      veh_0: 0.91
+    placeholder_mean_tv_on_model_tracks: 0.4768
+    r2_thresholds_on_model_tracks_mean_tv: 0.437
+    previous_profile: 'cal-2026-09-23-r2 (classical tracker: in-sample 0.198, LOGO
+      0.246, coverage 0.67-0.88)'
+    n_videos: 38
+    search_seeds:
+    - 1
+    - 2
+    search_seed_thresholds: 'seed1 floor 13.3 / bout 0.57 / erratic 14.7 (TV 0.1772);
+      seed2 floor 8.2 / bout 0.18 / erratic 15.0 (TV 0.1812): floor is weakly identified,
+      erratic stable ~15'
+  notes: 'Profile r3 for the MODEL tracker (fine-tuned Keypoint R-CNN run r1, stride
+    5, box-centre positions); do NOT use it with the classical tracker (use r2). Same
+    45 calibration videos and cohort rules as r2. Box-centre speeds are systematically
+    lower than the classical blob-centroid speeds, so the r2 thresholds label ~85%
+    of frames Freezing on these tracks (TV 0.437); the refit moves the erratic threshold
+    from 41 to ~15 px/s. The Controlled Swim band is thin (1.4 px/s wide at the chosen
+    point) and the freeze floor is weakly identified. Weak groups: MDMA 30 (pipeline
+    Freezing 79% vs reference 46%) and methylone 100 (Erratic 41% vs 5.9%): speed
+    thresholds alone cannot fix them. Coverage (determined share) rises to 0.90-0.99
+    from 0.67-0.88. Surface Breach depth and Dead bout remain UNCALIBRATED placeholders;
+    Listing/LORR is not produced by the rule.'
+labeling:
+  freeze_speed_floor_px_per_s: 13.34
+  min_freeze_bout_s: 0.57
+  erratic_speed_threshold_px_per_s: 14.74
+  surface_breach_depth_threshold_px: 20.0
+  min_dead_bout_s: 60.0
+  speed_lag_s: 1.0
+  listing_orientation_deviation_deg: null
