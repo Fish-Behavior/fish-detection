@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Behavior review</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Behavior review</h1>
+  <label class="reviewer">Reviewer
+    <input id="reviewer" type="text" maxlength="100" autocomplete="name" placeholder="your name">
+  </label>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" aria-label="Videos">
+    <label class="filter">Status
+      <select id="status-filter">
+        <option value="">All</option>
+        <option value="PROCESSED_AUTO">Auto-labeled</option>
+        <option value="EDITED">Edited</option>
+        <option value="ACCEPTED">Accepted</option>
+        <option value="REJECTED">Rejected</option>
+      </select>
+    </label>
+    <ul id="video-list" class="video-list"></ul>
+    <p id="list-empty" class="muted" hidden>No videos.</p>
+  </nav>
+
+  <main id="review" class="review" hidden>
+    <section class="meta" aria-label="Video details">
+      <h2 id="title"></h2>
+      <p id="subtitle" class="muted"></p>
+    </section>
+
+    <div class="stage">
+    <div class="stage-top">
+      <div class="video-col">
+        <div class="video-wrap">
+          <video id="player" preload="metadata" playsinline></video>
+          <canvas id="overlay" class="overlay" aria-hidden="true"></canvas>
+        </div>
+        <div class="player-bar" role="group" aria-label="Playback">
+          <button id="play" type="button" aria-label="Play">Play</button>
+          <input id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Seek">
+          <span id="clock" class="clock">0.0 / 0.0 s</span>
+          <select id="speed" aria-label="Playback speed">
+            <option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option>
+          </select>
+        </div>
+        <div class="overlay-toggles" role="group" aria-label="Fish markers on the video">
+          <label><input type="checkbox" id="ov-track" checked> <span style="color:#e11">track point</span></label>
+          <label><input type="checkbox" id="ov-path" checked> <span style="color:#e80">last 2 s path</span></label>
+          <label><input type="checkbox" id="ov-box" checked> <span style="color:#b90">detector box</span></label>
+          <label><input type="checkbox" id="ov-kp" checked> <span style="color:#c0c">keypoints</span></label>
+          <label><input type="checkbox" id="ov-water" checked> <span style="color:#2a7fff">waterline</span></label>
+          <button id="water-set" type="button">Set waterline</button>
+          <button id="water-clear" type="button" hidden>Clear</button>
+        </div>
+        <p id="overlay-note" class="muted overlay-note" role="status"></p>
+      </div>
+      <section class="hints" aria-label="Reviewer hints">
+        <ul id="flags" class="flags"></ul>
+        <ul id="listing-flags" class="flags listing-flags"></ul>
+      </section>
+    </div>
+
+    <section aria-label="Timeline">
+      <div id="timeline" class="timeline" tabindex="0" role="slider" aria-label="Timeline: drag to select a time range"
+           aria-valuemin="0" aria-valuenow="0">
+        <div id="segments" class="segments"></div>
+        <div id="pending-layer" class="pending-layer"></div>
+        <div id="listing-layer" class="listing-layer" aria-hidden="true"></div>
+        <div id="selection" class="selection" hidden></div>
+        <div id="playhead" class="playhead"></div>
+      </div>
+      <div class="axis"><span>0 s</span><span id="axis-end"></span></div>
+      <p id="selection-info" class="muted">Drag on the timeline to select a time range.</p>
+    </section>
+    </div>
+
+    <section class="picker" aria-label="Relabel selection">
+      <div id="state-buttons" class="state-buttons"></div>
+      <button id="stage" type="button" disabled>Stage relabel</button>
+    </section>
+
+    <section aria-label="Staged edits">
+      <ul id="pending-list" class="pending-list"></ul>
+    </section>
+
+    <section class="why" aria-label="Why this label" aria-live="polite">
+      <h3>Why this label <span id="why-second" class="muted"></span></h3>
+      <p id="why-summary" class="why-summary"></p>
+      <ol id="why-rules" class="why-rules"></ol>
+    </section>
+
+    <section class="summary" aria-label="Time per state">
+      <h3>Time per state <span id="summary-total" class="muted"></span></h3>
+      <ul id="summary" class="state-times"></ul>
+    </section>
+
+    <section class="actions">
+      <button id="save" type="button" disabled>Save edits</button>
+      <button id="accept" type="button" class="primary">Accept</button>
+      <button id="reject" type="button" class="danger">Reject</button>
+      <button id="discard" type="button" disabled>Discard staged</button>
+    </section>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+  </main>
+
+  <p id="placeholder" class="placeholder">Choose a video from the list.</p>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

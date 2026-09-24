@@ -1,0 +1,34 @@
+# Extends the repo root .gitignore for this package's own restricted data/output
+# folders (PRD FR-018 / NFR-004). Restated here for local clarity even where the
+# root patterns already cover it (data/, outputs/, .env, *.mp4, *.xlsx, *.pdf, *.png).
+data/
+outputs/
+outputs_r3/
+accepted/
+accepted_r3/
+.env
+.env.*
+!.env.example
+
+# Python tooling local to this package
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Narrow, explicit exceptions: exactly the named synthetic test fixtures, never
+# a wildcard. A wildcard negation (e.g. `!tests/fixtures/*.png`) would also
+# un-ignore a real restricted file if one were ever mistakenly saved into this
+# folder (e.g. during Phase 6 calibration work, which reads the real reference
+# PNGs) - naming each committable fixture exactly closes that gap. Verified
+# with `git check-ignore -v` / `git add` dry-run before each fixture is
+# committed, not assumed (see docs/progress.md §1).
+# ---------------------------------------------------------------------------
+!tests/fixtures/
+!tests/fixtures/synth_tiny.mp4
+!tests/fixtures/synth_db.xlsx
+!tests/fixtures/legend_swatches.png
