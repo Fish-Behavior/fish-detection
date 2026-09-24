@@ -7,6 +7,7 @@ parallelise, fall back and report progress the same way.
 from __future__ import annotations
 
 import logging
+import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Callable, Sequence, TypeVar
 
@@ -40,7 +41,10 @@ def run_parallel(func: Callable[[Job], Result], jobs: Sequence[Job], workers: in
         bar.close()
         return results
     try:
-        pool = ProcessPoolExecutor(max_workers=min(workers, len(jobs)), initializer=_init_worker)
+        # spawn on every OS, not Linux's default fork: a forked child inherits OpenCV's
+        # thread pool without its threads and hangs on its first cv2 call.
+        pool = ProcessPoolExecutor(max_workers=min(workers, len(jobs)), initializer=_init_worker,
+                                   mp_context=multiprocessing.get_context("spawn"))
     except (OSError, NotImplementedError) as error:
         # Some locked-down environments forbid the semaphores a process pool needs.
         log.warning("cannot start %d worker processes (%s); running jobs one by one", workers, error)

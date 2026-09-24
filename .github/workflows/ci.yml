@@ -46,7 +46,7 @@ jobs:
     # Ubuntu only: macOS/Windows runners are much slower to start and run, so they stay off PRs.
     # To check them, add macos-latest / windows-latest to runs-on via a matrix again.
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # a hung server test should not hold a runner for hours
+    timeout-minutes: 10  # the suite takes ~3 min; a hang (e.g. a deadlocked worker process) fails fast
     strategy:
       fail-fast: false  # one failing version should not hide the other
       matrix:
@@ -81,7 +81,7 @@ jobs:
   production:
     name: Installed package (wheel)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
