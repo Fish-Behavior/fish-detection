@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prepds"
+version = "0.1.0"
+description = "Zebrafish drug-response labeling pipeline: video+trial-metadata -> reviewed, per-subject ethogram strip (gold-dataset builder). See docs/PRD.md."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=15.0",
+    "openpyxl>=3.1",
+    "matplotlib>=3.8",
+    "scikit-learn>=1.4",
+    "Pillow>=10.2",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=4", "httpx>=0.27"]
+# Best-effort per-subject-row OCR during calibration digitization (PRD §9.5.5).
+# Its absence must never block Phase 6 - only degrade it to group-level-only.
+ocr = ["pytesseract>=0.3"]
+# Phase 15 (fine-tuned tracker/pose model). Not in the core dependencies: ~2 GB with CUDA wheels. Install the CUDA
+# build of torch first: uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+ml = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.45"]
+
+[project.scripts]
+prepds = "prepds.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"prepds.webapp" = ["static/*"]
+"prepds.annotation" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
