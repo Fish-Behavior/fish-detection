@@ -4,7 +4,7 @@ Inputs: catalog/trials.csv, labels/ (segments + labeled bins), features/endpoint
 tracks/ (which part file and frame every moment is). Outputs in ``<FISH_OUTPUT_DIR>/datasets/``:
 
     segments.csv                every labeled segment + sex and group (compound, concentration)
-    per_second_labels.csv       subject_id, second, label, confidence + key bin features
+    per_second_labels.csv       subject_id, second, label, confidence, label_source + key bin features
     behavior_dataset.csv/.xlsx  ONE row per subject: the cleaned workbook columns, then time,
                                 bouts, mean bout and latency per state, transition counts,
                                 untracked time and the video endpoints. Subjects without a
@@ -31,7 +31,7 @@ from fishbehavior.calibrate import fold_split, per_second
 from fishbehavior.catalog import STATUS_MATCHED
 from fishbehavior.config import ConfigError, Settings
 from fishbehavior.features import features_dir
-from fishbehavior.labeling import LABELS, SEGMENTS_FILE, STATES, UNTRACKED, labeled_bins_path, labels_dir
+from fishbehavior.labeling import AUTO, LABELS, SEGMENTS_FILE, STATES, UNTRACKED, labeled_bins_path, labels_dir
 from fishbehavior.parallel import run_parallel
 from fishbehavior.priors import ENDPOINTS_FILE
 from fishbehavior.tracking import track_path, tracks_dir
@@ -329,6 +329,9 @@ def run_export(settings: Settings, trials: pd.DataFrame, clip_subjects: pd.DataF
         seconds.append(pd.DataFrame({"subject_id": subject_id, "second": np.arange(n_seconds),
                                      "label": per_second(labeled, bin_s, n_seconds),
                                      "confidence": labeled["confidence"].to_numpy(float)[index],
+                                     # human = set by a person (labels/overrides.csv); older label runs lack the column
+                                     "label_source": labeled["label_source"].to_numpy(object)[index]
+                                     if "label_source" in labeled else AUTO,
                                      **{f: labeled[f].to_numpy(float)[index] for f in KEY_FEATURES}}))
         timeline = pd.read_csv(track_path(tracks_dir(settings), subject_id), usecols=["part", "part_frame", "time_s"])
         windows.append(make_windows(labeled, timeline, paths[subject_id].split(";"), float(params["window_s"]),

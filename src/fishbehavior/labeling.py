@@ -17,8 +17,10 @@ Rules, in priority order (the first that matches wins; thresholds in `labeling:`
    `swim_split: hmm`) fitted on these bins of ALL subjects together, so "erratic" means
    the same for every fish.
 
-Then bouts shorter than `min_bout_s[state]` are merged into their longer neighbour, and
-equal consecutive labels become segments (split where one video part ends).
+Then bouts shorter than `min_bout_s[state]` are merged into their longer neighbour. Last,
+human relabels from ``labels/overrides.csv`` (written by the live page, or by hand) replace the
+automatic label of every bin they cover. Equal consecutive labels become segments (split where
+one video part ends).
 
 The label functions are pure (bins table in, labels out), so calibration can relabel
 quickly. A `<FISH_OUTPUT_DIR>/calibration/calibrated.yaml` with a `labeling:` section is
@@ -26,10 +28,11 @@ merged over the config (written by the calibration step).
 
 Outputs (in ``<FISH_OUTPUT_DIR>/labels/``, git-ignored):
     swim_model.json            the pooled swim model and the settings it was fitted with
-    <subject_id>_bins.csv      the feature bins plus `label` and `confidence`
+    <subject_id>_bins.csv      the feature bins plus `label`, `confidence`, `auto_label`, `label_source`
     <subject_id>_segments.csv  that subject's segments (SEGMENT_COLUMNS)
     segments.csv               every labeled subject's segments
     summary.csv                seconds and % of the video per label, per subject
+    overrides.csv              INPUT, kept across runs: human relabels (OVERRIDE_COLUMNS)
 """
 
 from __future__ import annotations
@@ -70,6 +73,9 @@ SEGMENT_COLUMNS = [
     "subject_id", "label", "start_s", "end_s", "duration_s", "start_frame", "end_frame", "part", "mean_confidence",
 ]
 MODEL_FILE, SEGMENTS_FILE, SUMMARY_FILE = "swim_model.json", "segments.csv", "summary.csv"
+# Human relabels: seconds [start_s, end_s) on the joined timeline of one subject (or live video name).
+OVERRIDES_FILE, OVERRIDE_COLUMNS = "overrides.csv", ["subject_id", "start_s", "end_s", "label"]
+HUMAN, AUTO = "human", "auto"  # label_source values
 CALIBRATED_FILE = Path("calibration") / "calibrated.yaml"
 SEED = 0  # fixed, so the same data always gives the same swim model
 
@@ -284,6 +290,48 @@ def label_bins(bins: pd.DataFrame, params: dict[str, Any], model: dict[str, Any]
     return bins.assign(label=label, confidence=np.round(confidence, 4))
 
 
+def check_label_overrides(table: pd.DataFrame, source: str) -> pd.DataFrame:
+    """Human relabels with numeric times, a known label and start < end; ConfigError naming `source`."""
+    if set(OVERRIDE_COLUMNS) - set(table.columns):
+        raise ConfigError(f"{source}: needs the columns {', '.join(OVERRIDE_COLUMNS)}")
+    table = table.assign(subject_id=table["subject_id"].astype(str),  # "0042" stays text
+                         start_s=pd.to_numeric(table["start_s"], errors="coerce"),
+                         end_s=pd.to_numeric(table["end_s"], errors="coerce"))[OVERRIDE_COLUMNS]
+    bad = ~table["label"].isin(LABELS) | ~(table["start_s"] < table["end_s"])  # NaN times fail the `<`
+    if bad.any():
+        row = table[bad].iloc[0].to_dict()
+        raise ConfigError(f"{source}: bad relabel {row}: label must be one of {', '.join(LABELS)} "
+                          f"and start_s < end_s (seconds)")
+    return table.reset_index(drop=True)
+
+
+def load_label_overrides(labels_dir: Path) -> pd.DataFrame:
+    """Every human relabel in `labels_dir/overrides.csv`, in file order; empty if there is none."""
+    path = labels_dir / OVERRIDES_FILE
+    if not path.is_file():
+        return pd.DataFrame(columns=OVERRIDE_COLUMNS)
+    return check_label_overrides(pd.read_csv(path, dtype={"subject_id": str}), str(path))
+
+
+def apply_label_overrides(labeled: pd.DataFrame, overrides: pd.DataFrame, bin_s: float) -> pd.DataFrame:
+    """One subject's human relabels over its automatic labels.
+
+    A bin whose middle lies in [start_s, end_s) takes the relabel with confidence 1 (a person
+    decided it); later rows win where ranges overlap. `auto_label` keeps the rules/model label,
+    `label_source` says which one `label` is. Applied after the bout cleanup, so a human bout
+    is never merged away.
+    """
+    label = labeled["label"].to_numpy(object).copy()
+    confidence = labeled["confidence"].to_numpy(float).copy()
+    human = np.zeros(len(labeled), bool)
+    middle = labeled["t_start_s"].to_numpy(float) + bin_s / 2
+    for row in overrides.itertuples(index=False):
+        inside = (middle >= row.start_s) & (middle < row.end_s)
+        label[inside], confidence[inside], human[inside] = row.label, 1.0, True
+    return labeled.assign(label=label, confidence=confidence, auto_label=labeled["label"],
+                          label_source=np.where(human, HUMAN, AUTO))
+
+
 def make_segments(labeled: pd.DataFrame, timeline: pd.DataFrame, bin_s: float) -> pd.DataFrame:
     """Runs of equal labels on the frame timeline (part, part_frame, time_s), split at part changes.
 
@@ -346,6 +394,7 @@ class LabelJob:
     bin_s: float  # features.bin_s
     model: dict[str, Any]
     force: bool
+    overrides: pd.DataFrame  # this subject's human relabels (rows of overrides.csv)
 
 
 def labeled_bins_path(labels_dir: Path, subject_id: str) -> Path:
@@ -359,12 +408,12 @@ def segments_path(labels_dir: Path, subject_id: str) -> Path:
 
 
 def _is_cached(job: LabelJob) -> bool:
-    """Outputs exist and are newer than the features and the swim model they were made from."""
+    """Outputs exist and are newer than the features, swim model and human relabels they were made from."""
     outputs = [labeled_bins_path(job.labels_dir, job.subject_id), segments_path(job.labels_dir, job.subject_id)]
     if job.force or not all(p.is_file() for p in outputs):
         return False
     oldest = min(p.stat().st_mtime for p in outputs)
-    inputs = [bins_path(job.features_dir, job.subject_id), job.labels_dir / MODEL_FILE]
+    inputs = [bins_path(job.features_dir, job.subject_id), job.labels_dir / MODEL_FILE, job.labels_dir / OVERRIDES_FILE]
     return all(not p.is_file() or p.stat().st_mtime <= oldest for p in inputs)
 
 
@@ -382,7 +431,7 @@ def process_subject(job: LabelJob) -> dict[str, Any]:
         return {"subject_id": job.subject_id, "cached": True}
     try:
         bins = read_bins(job.features_dir, job.subject_id)
-        labeled = label_bins(bins, job.params, job.model, job.bin_s)
+        labeled = apply_label_overrides(label_bins(bins, job.params, job.model, job.bin_s), job.overrides, job.bin_s)
         track_file = track_path(job.tracks_dir, job.subject_id)
         if not track_file.is_file():
             raise RuntimeError(f"no track ({track_file.name}); run `track` first")
@@ -468,7 +517,9 @@ def run_labeling(settings: Settings, trials: pd.DataFrame, selected: pd.DataFram
     is_matched = selected["video_status"] == STATUS_MATCHED
     skipped = [f"{row.subject_id} ({row.video_status})" for row in selected[~is_matched].itertuples()]
     bin_s = float(settings.params["features"]["bin_s"])
-    jobs = [LabelJob(s, features, get_tracks_dir(settings), out, params, bin_s, model, force)
+    overrides = load_label_overrides(out)  # human relabels (live page / by hand), read once for all subjects
+    jobs = [LabelJob(s, features, get_tracks_dir(settings), out, params, bin_s, model, force,
+                     overrides[overrides["subject_id"] == s])
             for s in selected.loc[is_matched, "subject_id"]]
     records = run_parallel(process_subject, jobs, settings.workers, desc="label")
 

@@ -22,6 +22,8 @@ from fishbehavior.labeling import (
     SURFACE,
     SWIM,
     UNTRACKED,
+    apply_label_overrides,
+    check_label_overrides,
     clean_bouts,
     erratic_probability,
     fit_swim_model,
@@ -93,7 +95,7 @@ def test_sustained_rules_count_seconds_not_bins():
     assert list(rule_labels(bins, {**PARAMS, "freeze_min_s": 2.5}, bin_s=0.5)[0]) == [SWIM] * 4
 
 
-# --- bout cleanup and segments ------------------------------------------------------------
+# --- bout cleanup, human relabels and segments ---------------------------------------------
 
 
 def test_short_bouts_merge_into_the_longer_neighbour_but_untracked_stays():
@@ -107,6 +109,22 @@ def test_short_bouts_merge_into_the_longer_neighbour_but_untracked_stays():
     # 1 s untracked gap is never hidden, so the 2 s calm bout after it joins it instead.
     assert list(cleaned) == [CALM] * 3 + [FREEZE] * 6 + [UNTRACKED] * 3
     assert conf[3] == 0 and conf[10] == 0 and conf[0] == 0.9  # merged bins lose their confidence
+
+
+def test_human_relabels_win_over_the_automatic_labels_and_bad_rows_are_refused():
+    labeled = make_bins([(6, {})], bin_s=0.5).assign(label=[CALM] * 6, confidence=0.4)
+    overrides = pd.DataFrame({"subject_id": "0042", "start_s": [0.5, 1.0], "end_s": [2.0, 1.5], "label": [FREEZE, LORR]})
+
+    out = apply_label_overrides(labeled, check_label_overrides(overrides, "test"), bin_s=0.5)
+
+    # Bin middles 0.75, 1.25, 1.75 s are in 0.5-2.0 s: freeze, except 1.25 s, which the later row makes lorr.
+    assert list(out["label"]) == [CALM, FREEZE, LORR, FREEZE, CALM, CALM]
+    assert list(out["auto_label"]) == [CALM] * 6
+    assert list(out["label_source"]) == ["auto", "human", "human", "human", "auto", "auto"]
+    assert list(out["confidence"]) == [0.4, 1.0, 1.0, 1.0, 0.4, 0.4]  # a person decided: confidence 1
+    for bad in ({"label": "sleeping"}, {"start_s": 3.0}, {"end_s": "soon"}):
+        with pytest.raises(ConfigError, match="bad relabel"):
+            check_label_overrides(overrides.assign(**bad), "test")
 
 
 def test_segments_tile_the_video_and_split_at_the_part_boundary():
@@ -301,3 +319,21 @@ def test_label_is_cached_and_calibrated_values_are_used(project, capsys):
         patch.chdir(root)
         assert main([*env, "label"]) == 0
     assert "fitted now" in capsys.readouterr().out
+
+
+def test_human_relabels_in_overrides_csv_reach_the_labels_and_segments(project):
+    root, env = project
+    labels = root / "outputs" / "labels"
+    before = pd.read_csv(labels / "0042_bins.csv")["label"].tolist()
+    pd.DataFrame({"subject_id": ["0042"], "start_s": [2.0], "end_s": [5.0], "label": [LORR]}).to_csv(
+        labels / "overrides.csv", index=False)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(root)
+        assert main([*env, "label"]) == 0  # no --force: the relabels are newer than the outputs
+
+    bins = pd.read_csv(labels / "0042_bins.csv")
+    assert bins["label"].iloc[2:5].tolist() == [LORR] * 3 and bins["label_source"].iloc[2:5].eq("human").all()
+    assert bins["auto_label"].tolist() == before and bins["label_source"].eq("human").sum() == 3
+    segments = pd.read_csv(labels / "segments.csv")
+    human = segments[(segments["label"] == LORR) & (segments["end_s"] < 6)]
+    assert human[["start_s", "end_s"]].values.tolist() == [pytest.approx([2.0, 5.0], abs=0.05)]

@@ -116,6 +116,7 @@ def test_per_second_labels_and_xlsx_sheets(exported):
     seconds = pd.read_csv(exported / "per_second_labels.csv", dtype={"subject_id": str})
     assert seconds[seconds["subject_id"] == "0012"]["label"].tolist() == SUBJECTS["0012"][1]
     assert {"confidence", "speed_mean_bl_s", "tracked_fraction"} <= set(seconds.columns)
+    assert set(seconds["label_source"]) == {"auto"}  # bins from before human relabels existed: all automatic
     sheets = pd.read_excel(exported / "behavior_dataset.xlsx", sheet_name=None)
     assert list(sheets) == ["behavior_dataset", "column_guide"]
     guide = sheets["column_guide"].set_index("column")["meaning"]

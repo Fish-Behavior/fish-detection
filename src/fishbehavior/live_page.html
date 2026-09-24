@@ -121,7 +121,7 @@
         <label><input type="checkbox" data-layer="trail" checked> last 2 s path (orange)</label>
       </div>
       <div id="scene-edit" class="scene-edit" hidden>
-        <b>Scene of part 1:</b>
+        <b>Scene of</b> <select id="scene-part" title="Every part file has its own scene"></select>
         <label><input type="radio" name="mode" value="waterline" checked> click = waterline</label>
         <label><input type="radio" name="mode" value="roi"> drag = ROI</label>
         waterline y <input id="wl" type="number" min="0">
@@ -130,6 +130,10 @@
         <button id="reset-scene" title="Back to the automatic values">Automatic</button>
         <button id="view-frame" title="Show a real frame instead of the empty-beaker background">Real frame</button>
         <span id="scene-note" class="muted"></span>
+        <label title="Write every part's scene to scene/overrides.yaml, marked checked, so `scene` and `all` use it too">
+          <input id="save-scene" type="checkbox"> save to scene/overrides.yaml</label>
+        <label title="Empty = measured (median fitted length). A typed value is used for every pass, the final one too, so results can differ from `all`">
+          body length <input id="bl" type="number" min="1" step="0.1" placeholder="measured"> px</label>
       </div>
       <div id="frame-caption" class="small muted" style="margin-top:6px"></div>
     </div>
@@ -165,6 +169,14 @@
     <h2 id="etho-title">Ethogram <span id="etho-sub">one column per second</span></h2>
     <canvas id="ethogram" height="190"></canvas>
     <div class="legend" id="legend"></div>
+    <div class="scene-edit">
+      <b>Human relabel:</b> from <input id="ov-from" type="number" min="0" step="any"> to
+      <input id="ov-to" type="number" min="0" step="any"> s <select id="ov-label"></select>
+      <button id="ov-apply">Relabel</button>
+      <span class="muted">drag across the ethogram to pick seconds. Saved to <code>labels/overrides.csv</code>;
+        for a catalog subject, <code>label</code> and <code>export</code> use it too.</span>
+    </div>
+    <div id="ov-list" class="small" style="margin-top:6px"></div>
   </div>
 
   <div class="card">
@@ -220,7 +232,9 @@ let S = { stage: "idle", log: [] };   // the latest state from the server
 let F = null;                          // the latest frame event
 let frameImage = null;                 // decoded frame JPEG
 let sceneImage = null;                 // background (or real frame) for the scene step
-let sceneEdit = null;                  // {waterline_y, roi} being edited on the page
+let sceneEdits = [];                   // per part: {waterline_y, roi, auto} being edited on the page
+let scenePart = 0;                     // the part shown in the scene step
+const sceneEdit = () => sceneEdits[scenePart];
 let sceneFrameIndex = -1;              // -1 = background, else index into review_frames
 let reviewT = null;                    // second clicked on the ethogram (review mode)
 const layers = { roi: true, waterline: true, ellipse: true, point: true, head: true, trail: true };
@@ -254,7 +268,7 @@ async function loadSources(select) {
 $("open").onclick = async () => {
   const value = $("source").value || "";
   const body = value.startsWith("s:") ? { subject_id: value.slice(2) } : { upload: value.slice(2) };
-  reviewT = null; F = null; frameImage = null; sceneEdit = null; sceneFrameIndex = -1;
+  reviewT = null; F = null; frameImage = null; sceneEdits = []; scenePart = 0; sceneFrameIndex = -1;
   showMessage("Finding the scene (background, waterline, fish region)…");
   $("open").disabled = true;
   try { await post("/api/open", body); } catch (e) { showMessage(e.message, true); }
@@ -262,8 +276,8 @@ $("open").onclick = async () => {
 };
 $("start").onclick = async () => {
   reviewT = null;
-  const body = { pace: Number($("pace").value) };
-  if (sceneEdit) { body.waterline_y = sceneEdit.waterline_y; body.roi = sceneEdit.roi; }
+  const body = { pace: Number($("pace").value), save_scene: $("save-scene").checked, body_length_px: Number($("bl").value) || null,
+                 scenes: sceneEdits.map((e) => ({ waterline_y: e.waterline_y, roi: e.roi })) };
   try { await post("/api/start", body); } catch (e) { showMessage(e.message, true); }
 };
 $("stop").onclick = () => post("/api/stop").catch((e) => showMessage(e.message, true));
@@ -313,7 +327,8 @@ function binAt(t) {
   if (!S.labels || i < 0 || i >= S.labels.length) return null;
   const traces = {};
   for (const [name, values] of Object.entries(S.traces || {})) traces[name] = values[i];
-  return { index: i, label: LABELS[S.labels[i]], confidence: S.confidence[i], traces };
+  return { index: i, label: LABELS[S.labels[i]], confidence: S.confidence[i], traces,
+           human: (S.human || [])[i] === 1, auto: LABELS[(S.auto_labels || [])[i]] };
 }
 
 // ---------------------------------------------------------------- render everything
@@ -324,17 +339,21 @@ function render() {
   $("stop").disabled = !(stage === "tracking" || stage === "features" || stage === "labels");
   if (S.message) showMessage(S.message, stage === "error");
   $("scene-edit").hidden = stage !== "scene";
-  if (stage === "scene" && S.background) {
-    const p = part1();
-    if (!sceneEdit && p) sceneEdit = { waterline_y: p.waterline_y, roi: [...p.roi], auto: { waterline_y: p.waterline_y, roi: [...p.roi] } };
+  if (stage === "scene" && S.backgrounds) {
+    if (!sceneEdits.length && S.parts) {
+      sceneEdits = S.parts.map((p) => ({ waterline_y: p.waterline_y, roi: [...p.roi], auto: { waterline_y: p.waterline_y, roi: [...p.roi] } }));
+      $("scene-part").innerHTML = S.parts.map((p, i) => `<option value="${i}">part ${i + 1}: ${p.file}</option>`).join("");
+      $("bl").value = ""; $("bl").placeholder = S.known_bl ? `measured (${fmt(S.known_bl)})` : "measured";
+    }
     loadSceneImage();
   }
-  renderSteps(); renderNow(); renderStates(); renderProgress(); renderSegments(); renderDetails(); renderLog(); renderDownloads();
+  $("ov-apply").disabled = !S.source;
+  renderSteps(); renderNow(); renderStates(); renderProgress(); renderSegments(); renderDetails(); renderLog(); renderDownloads(); renderOverrides();
   drawVideo(); drawEthogram(); drawTraces();
 }
 
 function loadSceneImage() {
-  const data = sceneFrameIndex < 0 ? S.background : (S.review_frames || [])[sceneFrameIndex];
+  const data = sceneFrameIndex < 0 ? (S.backgrounds || [])[scenePart] : ((S.review_frames || [])[scenePart] || [])[sceneFrameIndex];
   if (!data) return;
   const src = "data:image/jpeg;base64," + data;
   if (sceneImage && sceneImage.src === src) return;
@@ -369,7 +388,7 @@ function renderNow() {
     $("checks").innerHTML = ""; $("checks-note").textContent = ""; return;
   }
   $("now-name").textContent = pretty(bin.label);
-  $("now-text").textContent = CONFIG.text[bin.label] || "";
+  $("now-text").textContent = (CONFIG.text[bin.label] || "") + (bin.human ? ` · set by a person (the rules gave ${pretty(bin.auto)})` : "");
   $("now-swatch").style.background = rgb(bin.label);
   $("now-conf").textContent = fmt(bin.confidence, 2);
   $("now-conf-bar").style.width = `${Math.round(100 * (bin.confidence || 0))}%`;
@@ -390,10 +409,10 @@ function renderNow() {
     const first = holds && !hit; if (first) hit = true;
     const label = i === 5 ? "controlled / erratic" : pretty(name);
     return `<li class="${first ? "hit" : ""}"><span class="${holds ? "yes" : "no"}">${holds ? "✓" : "✗"}</span>
-            <span><span class="dot" style="background:${rgb(i === 5 ? bin.label : name)}"></span>${i}. ${label}: ${text}</span></li>`;
+            <span><span class="dot" style="background:${rgb(i === 5 ? bin.auto || bin.label : name)}"></span>${i}. ${label}: ${text}</span></li>`;
   }).join("");
   const merged = bin.confidence === 0 ? " Confidence 0: this second was merged into its neighbour by the bout cleanup." : "";
-  $("checks-note").textContent = "Checked top to bottom on this second's numbers; the first rule that holds wins. "
+  $("checks-note").textContent = (bin.human ? "A person relabeled this second; the rules below are what the pipeline said. " : "") + "Checked top to bottom on this second's numbers; the first rule that holds wins. "
     + `Sustained rules also need enough seconds in a row, and bouts shorter than min_bout_s are merged.${merged}`;
 }
 
@@ -465,6 +484,25 @@ function renderDetails() {
   if (S.reference) html += dl([["reference row", `digitized, group ${S.reference.group}, ${S.reference.labels.length} s`]]);
   $("details").innerHTML = html;
 }
+function renderOverrides() {
+  const rows = S.overrides || [];
+  $("ov-list").innerHTML = !S.source ? "" : rows.length ? rows.map((o, i) => `<span class="pill"><span class="dot" style="background:${rgb(o.label)}"></span>`
+    + `${fmt(o.start_s)}–${fmt(o.end_s)} s: ${pretty(o.label)} <a href="#" data-i="${i}" title="Back to the automatic label">remove</a></span>`).join(" ")
+    : '<span class="muted">No human relabels for this video.</span>';
+}
+const saveOverrides = (rows) => post("/api/overrides", { overrides: rows }).catch((e) => showMessage(e.message, true));
+$("ov-label").innerHTML = LABELS.map((n) => `<option value="${n}">${pretty(n)}</option>`).join("");
+$("ov-apply").onclick = () => {
+  const from = Number($("ov-from").value), to = Number($("ov-to").value);
+  if ($("ov-from").value === "" || !(to > from)) { showMessage("Relabel: pick seconds on the ethogram, or type 'from' < 'to'.", true); return; }
+  saveOverrides([...(S.overrides || []), { start_s: from, end_s: to, label: $("ov-label").value }]);
+};
+$("ov-list").onclick = (e) => {
+  if (e.target.dataset.i === undefined) return;
+  e.preventDefault();
+  saveOverrides((S.overrides || []).filter((_, k) => k !== Number(e.target.dataset.i)));
+};
+["ov-from", "ov-to"].forEach((id) => $(id).oninput = () => drawEthogram());
 function renderLog() { const box = $("log"); box.textContent = (S.log || []).join("\n"); box.scrollTop = box.scrollHeight; }
 function renderDownloads() {
   $("out-dir").textContent = S.output_dir || "";
@@ -473,7 +511,10 @@ function renderDownloads() {
 
 // ---------------------------------------------------------------- video canvas
 const video = $("video");
-function videoSize() { const p = part1(); return p ? [p.width, p.height] : [320, 240]; }
+function videoSize() {
+  const p = (S.parts || [])[S.stage === "scene" ? scenePart : (F ? F.part - 1 : 0)] || part1();
+  return p ? [p.width, p.height] : [320, 240];
+}
 function drawVideo() {
   const [w, h] = videoSize();
   const k = Math.max(1, Math.floor(900 / w));                 // draw small videos 2-3x, sharp
@@ -485,8 +526,8 @@ function drawVideo() {
   const image = scene ? sceneImage : frameImage;
   if (image) ctx.drawImage(image, 0, 0, video.width, video.height);
   ctx.save(); ctx.scale(k, k); ctx.lineWidth = 1.5 / k * Math.max(1, k / 1.5);
-  const roi = scene && sceneEdit ? sceneEdit.roi : (F ? F.roi : (part1() || {}).roi);
-  const wl = scene && sceneEdit ? sceneEdit.waterline_y : (F ? F.waterline_y : (part1() || {}).waterline_y);
+  const roi = scene && sceneEdit() ? sceneEdit().roi : (F ? F.roi : (part1() || {}).roi);
+  const wl = scene && sceneEdit() ? sceneEdit().waterline_y : (F ? F.waterline_y : (part1() || {}).waterline_y);
   if (roi && (layers.roi || scene)) { ctx.strokeStyle = "#1db954"; ctx.strokeRect(roi[0], roi[1], roi[2] - roi[0], roi[3] - roi[1]); }
   if (wl !== undefined && (layers.waterline || scene)) {
     ctx.strokeStyle = "#2f7bff"; ctx.beginPath(); ctx.moveTo(roi ? roi[0] : 0, wl); ctx.lineTo(roi ? roi[2] : w, wl); ctx.stroke();
@@ -509,9 +550,9 @@ function drawVideo() {
   ctx.restore();
   if (!image) { ctx.fillStyle = css("--muted"); ctx.font = "16px sans-serif"; ctx.fillText(scene ? "loading the scene…" : "no frame yet", 20, 30); }
   const r = F && F.row;
-  $("video-sub").textContent = scene ? (sceneFrameIndex < 0 ? "empty-beaker background (fish removed)" : `real frame ${sceneFrameIndex + 1}`)
+  $("video-sub").textContent = scene ? `part ${scenePart + 1}: ` + (sceneFrameIndex < 0 ? "empty-beaker background (fish removed)" : `real frame ${sceneFrameIndex + 1}`)
     : F ? `part ${F.part}, frame ${F.frame}` : "";
-  $("frame-caption").textContent = scene ? "Click to set the waterline, or choose 'drag = ROI' and drag a box around the water the fish can reach. Then press Start."
+  $("frame-caption").textContent = scene ? "Click to set the waterline, or choose 'drag = ROI' and drag a box around the water the fish can reach. Check every part, then press Start."
     : F ? `t = ${fmt(F.t, 2)} s · ${r && r.x !== null && r.x !== undefined ? `fish at (${fmt(r.x, 0)}, ${fmt(r.y, 0)}) px, length ${fmt(r.major_axis, 0)} px, tilt ${fmt(r.angle_deg, 0)}°, pitch ${fmt(r.pitch_deg, 0)}°, ${r.n_blobs} dark blob(s)` : "fish not found in this frame"}` : "";
 }
 // Scene editing: click = waterline, drag = ROI (in original video pixels).
@@ -521,29 +562,35 @@ function toVideo(e) {
   return [Math.round((e.clientX - box.left) / box.width * w), Math.round((e.clientY - box.top) / box.height * h)];
 }
 video.onmousedown = (e) => {
-  if (S.stage !== "scene" || !sceneEdit) return;
+  if (S.stage !== "scene" || !sceneEdit()) return;
   const [x, y] = toVideo(e);
-  if (document.querySelector("input[name=mode]:checked").value === "waterline") { sceneEdit.waterline_y = y; syncSceneInputs(); drawVideo(); }
+  if (document.querySelector("input[name=mode]:checked").value === "waterline") { sceneEdit().waterline_y = y; syncSceneInputs(); drawVideo(); }
   else drag = [x, y];
 };
 video.onmousemove = (e) => {
-  if (drag && sceneEdit) { const [x, y] = toVideo(e); sceneEdit.roi = [Math.min(drag[0], x), Math.min(drag[1], y), Math.max(drag[0], x), Math.max(drag[1], y)]; syncSceneInputs(); drawVideo(); }
+  if (drag && sceneEdit()) { const [x, y] = toVideo(e); sceneEdit().roi = [Math.min(drag[0], x), Math.min(drag[1], y), Math.max(drag[0], x), Math.max(drag[1], y)]; syncSceneInputs(); drawVideo(); }
 };
-window.onmouseup = () => { drag = null; };
+window.onmouseup = () => { drag = null; ethoDrag = null; };
 function syncSceneInputs() {
-  if (!sceneEdit) return;
-  $("wl").value = sceneEdit.waterline_y; ["x0", "y0", "x1", "y1"].forEach((id, i) => $(id).value = sceneEdit.roi[i]);
-  const auto = sceneEdit.auto, changed = auto.waterline_y !== sceneEdit.waterline_y || auto.roi.join() !== sceneEdit.roi.join();
+  const edit = sceneEdit();
+  if (!edit) return;
+  $("scene-part").value = scenePart;
+  $("wl").value = edit.waterline_y; ["x0", "y0", "x1", "y1"].forEach((id, i) => $(id).value = edit.roi[i]);
+  const auto = edit.auto, changed = auto.waterline_y !== edit.waterline_y || auto.roi.join() !== edit.roi.join();
   $("scene-note").textContent = changed ? "corrected on the page (used when you press Start)" : "automatic";
 }
 ["wl", "x0", "y0", "x1", "y1"].forEach((id, i) => $(id).onchange = () => {
-  if (!sceneEdit) return;
-  if (id === "wl") sceneEdit.waterline_y = Number($(id).value); else sceneEdit.roi[i - 1] = Number($(id).value);
+  if (!sceneEdit()) return;
+  if (id === "wl") sceneEdit().waterline_y = Number($(id).value); else sceneEdit().roi[i - 1] = Number($(id).value);
   syncSceneInputs(); drawVideo();
 });
-$("reset-scene").onclick = () => { if (sceneEdit) { sceneEdit.waterline_y = sceneEdit.auto.waterline_y; sceneEdit.roi = [...sceneEdit.auto.roi]; syncSceneInputs(); drawVideo(); } };
+$("reset-scene").onclick = () => { const e = sceneEdit(); if (e) { e.waterline_y = e.auto.waterline_y; e.roi = [...e.auto.roi]; syncSceneInputs(); drawVideo(); } };
+$("scene-part").onchange = () => {
+  scenePart = Number($("scene-part").value); sceneFrameIndex = -1; $("view-frame").textContent = "Real frame";
+  syncSceneInputs(); loadSceneImage(); drawVideo();
+};
 $("view-frame").onclick = () => {
-  const n = (S.review_frames || []).length;
+  const n = ((S.review_frames || [])[scenePart] || []).length;
   sceneFrameIndex = sceneFrameIndex + 1 < n ? sceneFrameIndex + 1 : -1;
   $("view-frame").textContent = sceneFrameIndex < 0 ? "Real frame" : (sceneFrameIndex + 1 < n ? "Next frame" : "Background");
   loadSceneImage(); drawVideo();
@@ -578,6 +625,10 @@ function drawEthogram() {
       S.labels.forEach((index, i) => { ctx.fillStyle = rgb(LABELS[index]); ctx.fillRect(ethoX(i * bs), y, Math.max(1, ethoX((i + 1) * bs) - ethoX(i * bs) + 0.5), ETHO.row); });
       const from = S.labeling && S.labeling.provisional_from_s;
       if (from !== null && from !== undefined && S.stage !== "saved") hatch(ctx, ethoX(from), y, ethoX(S.labels.length * bs), y + ETHO.row, "rgba(0,0,0,.45)");
+      ctx.fillStyle = css("--ink");  // a bar above every second a person relabeled
+      (S.human || []).forEach((h, i) => { if (h) ctx.fillRect(ethoX(i * bs), y - 5, Math.max(1, ethoX((i + 1) * bs) - ethoX(i * bs) + 0.5), 3); });
+      const a = Number($("ov-from").value), b = Number($("ov-to").value);  // the seconds picked for a relabel
+      if ($("ov-from").value !== "" && b > a) { ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.strokeRect(ethoX(a), y - 1, ethoX(b) - ethoX(a), ETHO.row + 2); ctx.lineWidth = 1; }
     }
     if (kind === "ref") S.reference.labels.forEach((name, i) => {
       ctx.fillStyle = name === "no_data" ? "#fff" : (name === "unknown" ? "#000" : rgb(name));
@@ -610,6 +661,7 @@ function renderLegend() {
   const items = LABELS.map((n) => `<div><span class="dot" style="background:${rgb(n)}"></span><b>${pretty(n)}</b>: <span class="muted">${CONFIG.text[n]}</span></div>`);
   items.push(`<div><span class="dot" style="background:repeating-linear-gradient(45deg,#0007 0 2px,transparent 2px 5px)"></span><b>provisional</b>: <span class="muted">may still change when later frames arrive</span></div>`);
   items.push(`<div><span class="dot" style="background:${css("--soft")}"></span><b>not processed yet</b></div>`);
+  items.push(`<div><span class="dot" style="background:${css("--ink")};height:4px"></span><b>bar above</b>: <span class="muted">relabeled by a person</span></div>`);
   if (S.reference) items.push(`<div><span class="dot" style="background:#fff"></span><b>reference: no data</b> · <span class="dot" style="background:#000"></span><b>unknown color</b></div>`);
   $("legend").innerHTML = items.join("");
 }
@@ -618,21 +670,37 @@ etho.onmousemove = (e) => {
   const t = ethoTime(e), tip = $("tooltip");
   if (t < 0 || t > axisSeconds()) { tip.style.display = "none"; return; }
   const bin = binAt(t), ref = S.reference ? S.reference.labels[Math.floor(t)] : null;
+  if (ethoDrag !== null) pickRange(ethoDrag, t);
   tip.innerHTML = `<b>${fmt(t)} s</b><br>ours: ${bin ? `${pretty(bin.label)} (confidence ${fmt(bin.confidence, 2)})` : "not labeled yet"}`
-    + (ref ? `<br>reference: ${pretty(ref)}` : "") + (S.stage === "saved" ? "<br><i>click to see this frame</i>" : "");
+    + (bin && bin.human ? `<br>set by a person (the rules gave ${pretty(bin.auto)})` : "")
+    + (ref ? `<br>reference: ${pretty(ref)}` : "") + (S.stage === "saved" ? "<br><i>click to see this frame</i>" : "") + "<br><i>drag to pick seconds to relabel</i>";
   tip.style.display = "block"; tip.style.left = `${e.clientX + 12}px`; tip.style.top = `${e.clientY + 12}px`;
 };
 etho.onmouseleave = () => { $("tooltip").style.display = "none"; };
-etho.onclick = async (e) => {
+// Drag = pick whole bins for a relabel; a click also picks its second and shows that frame.
+let ethoDrag = null;                   // time where the mouse went down on the ethogram
+function pickRange(a, b) {
+  const bs = binS(), from = Math.floor(Math.max(0, Math.min(a, b)) / bs) * bs;
+  $("ov-from").value = from; $("ov-to").value = Math.max(Math.ceil(Math.max(0, a, b) / bs) * bs, from + bs);
+  drawEthogram();
+}
+etho.onmousedown = (e) => { ethoDrag = ethoTime(e); pickRange(ethoDrag, ethoDrag); };
+etho.onmouseup = (e) => {
+  if (ethoDrag === null) return;
+  const t = ethoTime(e), click = Math.abs(t - ethoDrag) < binS();
+  pickRange(ethoDrag, t); ethoDrag = null;
+  if (click) review(t);
+};
+async function review(time) {
   if (S.stage !== "saved" && S.stage !== "stopped") { showMessage("Review is available when the video is done (or stopped)."); return; }
-  const t = Math.max(0, Math.min(duration(), ethoTime(e)));
+  const t = Math.max(0, Math.min(duration(), time));
   try {
     const frame = await (await fetch(`/api/frame?t=${t}`)).json();
     if (frame.ok === false) throw new Error(frame.error);
     reviewT = frame.t; showFrame(frame);
     showMessage(`Review: ${fmt(frame.t, 2)} s (part ${frame.part}, frame ${frame.frame}). Click another second, or Start to process again.`);
   } catch (err) { showMessage(err.message, true); }
-};
+}
 
 // ---------------------------------------------------------------- traces canvas
 const traces = $("traces");

@@ -15,6 +15,13 @@ same functions as the batch steps. The last few seconds are PROVISIONAL: the sus
 one final pass over the whole track gives exactly what `all` gives for that video. The page only
 shows how the process works; `all` remains the way to process every subject.
 
+Human overrides (a person has the last word):
+- relabel seconds: saved to ``labels/overrides.csv`` under the video's name (the subject id for a
+  catalog subject), applied to the page at once and, for catalog subjects, by `label` / `export`;
+- the scene (waterline + ROI) of every part, optionally saved to ``scene/overrides.yaml`` (the file
+  `scene-review` writes), so the batch steps use it too;
+- the body length in px, instead of the measured median (this page only).
+
 Outputs (``<FISH_OUTPUT_DIR>/live/<name>/``, git-ignored): scene.json, background.png,
 track.csv.gz, bins.csv (labeled), segments.csv, summary.csv. Uploads go to live/uploads/.
 """
@@ -24,6 +31,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -44,10 +52,12 @@ from fishbehavior.config import ConfigError, Settings
 from fishbehavior.features import bin_features, body_length_px, frame_features, meta_path
 from fishbehavior.features import features_dir as get_features_dir
 from fishbehavior.labeling import (
-    LABELS, MODEL_FILE, STATES, SWIM, UNTRACKED, fit_swim_model, label_bins, labeling_params, labels_dir,
+    HUMAN, LABELS, MODEL_FILE, OVERRIDE_COLUMNS, OVERRIDES_FILE, STATES, SWIM, UNTRACKED, apply_label_overrides,
+    check_label_overrides, fit_swim_model, label_bins, labeling_params, labels_dir, load_label_overrides,
     make_segments, moving, rule_labels, summarize,
 )
 from fishbehavior.reference import label_colors, reference_dir
+from fishbehavior.review import write_overrides as write_scene_overrides
 from fishbehavior.roi import SceneDetection, detect_scene, load_overrides, override_for, scene_dir
 from fishbehavior.tracking import fill_gaps, finalize, join_parts, track_frames, track_table
 from fishbehavior.tracking import summarize as track_summary
@@ -200,8 +210,11 @@ class Session:
         self.source: Source | None = None
         self.detections: list[SceneDetection] = []
         self.track: pd.DataFrame | None = None
-        self.labeled: pd.DataFrame | None = None
+        self.auto_labeled: pd.DataFrame | None = None  # rules + model labels, before the human relabels
+        self.labeled: pd.DataFrame | None = None  # with the human relabels
+        self.labels_lock = threading.Lock()  # relabels from the page vs. the processing thread's passes
         self.known_bl: float | None = None  # BL (px) from an earlier `features` run of this subject
+        self.bl_override: float | None = None  # BL (px) typed on the page: used for every pass
 
     def reset(self, **state: Any) -> None:
         """Start over for a new video (the page clears everything it shows)."""
@@ -261,8 +274,8 @@ def open_source(settings: Settings, session: Session, source: Source) -> None:
         session.thread.join()
     session.cancel.clear()
     session.reset(stage="scene", message=f"Finding the scene of {source.name}...")
-    session.source, session.track, session.labeled = source, None, None
-    session.known_bl = known_body_length(settings, source)
+    session.source, session.track, session.auto_labeled, session.labeled = source, None, None, None
+    session.known_bl, session.bl_override = known_body_length(settings, source), None
     session.say(f"opened {source.name}: {len(source.video_paths)} part file(s) "
                 f"({', '.join(p.name for p in source.video_paths)})")
     if session.known_bl:
@@ -276,13 +289,14 @@ def open_source(settings: Settings, session: Session, source: Source) -> None:
         session.say(f"scene {path.name}: waterline y={detection.waterline_y} (confidence "
                     f"{detection.waterline_confidence:.1f}, {detection.method}), ROI {list(detection.roi)} "
                     f"in {time.perf_counter() - start:.1f} s")
-    first = session.detections[0]
     session.update(
         stage="scene", source={"name": source.name, "subject_id": source.subject_id, "details": source.details},
         parts=[scene_info(d) for d in session.detections], reference=reference_row(settings, source.subject_id),
-        background=jpeg_data(first.background, 90),
-        review_frames=[jpeg_data(f, 80) for f in first.review_frames[:4]],
-        message="Check the waterline (blue) and fish region (green) of part 1, then press Start.",
+        # ponytail: every part's images ride along in every state event; serve them per part if splits get long
+        backgrounds=[jpeg_data(d.background, 90) for d in session.detections],
+        review_frames=[[jpeg_data(f, 80) for f in d.review_frames[:4]] for d in session.detections],
+        overrides=override_records(settings, source.name), known_bl=session.known_bl,
+        message="Check the waterline (blue) and fish region (green) of each part, then press Start.",
     )
 
 
@@ -348,7 +362,8 @@ def compute(settings: Settings, session: Session, source: Source, rows: list[lis
     stats = track_summary(joined)  # the same numbers as tracks/summary.csv
     tracking = {**stats, "body_length_px": stats["median_body_length_px"]}
     track = finalize(joined)  # what the batch steps store and read back
-    known = None if final else session.known_bl
+    # A BL typed on the page wins in every pass; the earlier `features` BL only until the final pass.
+    known = session.bl_override or (None if final else session.known_bl)
     bl_px = known or body_length_px(track)
     session.track = track
     if not bl_px > 0:
@@ -364,7 +379,8 @@ def compute(settings: Settings, session: Session, source: Source, rows: list[lis
                 "provisional_from_s": None if final else 0.0 if known is None
                 else max(0.0, float(track["time_s"].iloc[-1]) - provisional_seconds(params))}
     features = {"body_length_px": bl_px, "bins": len(bins),
-                "body_length_from": "earlier `features` run (until the final pass)" if known
+                "body_length_from": "typed on the page (human override)" if session.bl_override
+                else "earlier `features` run (until the final pass)" if known
                 else "median fitted length of the whole track" if final
                 else "median fitted length of the frames so far (settles as the video plays)", "distance_bl": float(bins["distance_bl"].sum()),
                 "mean_speed_bl_s": float(bins["speed_mean_bl_s"].mean()), "bin_s": bin_s}
@@ -372,17 +388,54 @@ def compute(settings: Settings, session: Session, source: Source, rows: list[lis
         session.update(stage="features", tracking=tracking, features=features, labeling=labeling,
                        traces={f: bins[f].tolist() for f in TRACE_FEATURES})
         return
-    labeled = label_bins(bins, params, model, bin_s)
+    with session.labels_lock:  # one consistent state, even if the page relabels right now
+        session.auto_labeled = label_bins(bins, params, model, bin_s)
+        session.update(stage=stage, tracking=tracking, features=features, labeling=labeling,
+                       traces={f: bins[f].tolist() for f in TRACE_FEATURES}, **label_state(settings, session, final))
+
+
+def override_records(settings: Settings, name: str) -> list[dict[str, Any]]:
+    """This video's human relabels ({start_s, end_s, label}, in file order), for the page."""
+    table = load_label_overrides(labels_dir(settings))
+    return table.loc[table["subject_id"] == name, ["start_s", "end_s", "label"]].to_dict("records")
+
+
+def label_state(settings: Settings, session: Session, final: bool) -> dict[str, Any]:
+    """The human relabels over the automatic labels: the page's label fields (and the files when final).
+
+    Call with session.labels_lock held.
+    """
+    bin_s, source, track = float(settings.params["features"]["bin_s"]), session.source, session.track
+    table = load_label_overrides(labels_dir(settings))
+    labeled = apply_label_overrides(session.auto_labeled, table[table["subject_id"] == source.name], bin_s)
     segments = make_segments(labeled, track[["part", "part_frame", "time_s"]], bin_s)
     session.labeled = labeled
-    session.update(
-        stage=stage, tracking=tracking, features=features, labeling=labeling,
-        labels=[LABELS.index(x) for x in labeled["label"]], confidence=labeled["confidence"].tolist(),
-        traces={f: labeled[f].tolist() for f in TRACE_FEATURES}, summary=label_summary(segments),
-        segments=segments.tail(400).drop(columns=["subject_id"]).to_dict("records"), n_segments=len(segments),
-    )
     if final:
         write_outputs(settings, session, source, track, labeled, segments)
+    return {"labels": [LABELS.index(x) for x in labeled["label"]], "confidence": labeled["confidence"].tolist(),
+            "auto_labels": [LABELS.index(x) for x in labeled["auto_label"]],
+            "human": labeled["label_source"].eq(HUMAN).astype(int).tolist(),
+            "overrides": override_records(settings, source.name), "summary": label_summary(segments),
+            "segments": segments.tail(400).drop(columns=["subject_id"]).to_dict("records"), "n_segments": len(segments)}
+
+
+def set_overrides(settings: Settings, session: Session, rows: list[dict[str, Any]]) -> None:
+    """Replace this video's human relabels in labels/overrides.csv (other videos kept), then relabel."""
+    if session.source is None:
+        raise ConfigError("open a video first")
+    name, folder = session.source.name, labels_dir(settings)
+    mine = check_label_overrides(pd.DataFrame(rows, columns=OVERRIDE_COLUMNS[1:]).assign(subject_id=name), "page")
+    table = load_label_overrides(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    temporary = folder / f"{OVERRIDES_FILE}.tmp"  # atomic: a crash never leaves half the human work
+    pd.concat([table[table["subject_id"] != name], mine]).to_csv(temporary, index=False)
+    os.replace(temporary, folder / OVERRIDES_FILE)
+    session.say(f"{len(mine)} human relabel(s) of {name} saved to {folder / OVERRIDES_FILE}")
+    with session.labels_lock:
+        if session.auto_labeled is None:  # nothing labeled yet: the next pass applies them
+            session.update(overrides=mine[["start_s", "end_s", "label"]].to_dict("records"))
+        else:  # rewrite the files too when the video is done
+            session.update(**label_state(settings, session, final=session.state.get("stage") == "saved"))
 
 
 def write_outputs(settings: Settings, session: Session, source: Source, track: pd.DataFrame,
@@ -465,20 +518,29 @@ def process(settings: Settings, session: Session, pace: float) -> None:
                                           f"Click the ethogram to look at any second.")
 
 
-def start_processing(settings: Settings, session: Session, waterline_y: int | None, roi: list[int] | None,
-                     pace: float) -> None:
-    """Apply the page's scene corrections to part 1 (if any), then process in a background thread."""
+def start_processing(settings: Settings, session: Session, scenes: list[dict[str, Any] | None] | None = None,
+                     pace: float = 0.0, body_length_px: float | None = None, save_scene: bool = False) -> None:
+    """Apply the page's overrides, then process in a background thread.
+
+    scenes: per part, {"waterline_y", "roi"} from the page (None = keep); save_scene: also write
+    them to scene/overrides.yaml as checked by a person; body_length_px: BL for every pass.
+    """
     if session.source is None or not session.detections:
         raise ConfigError("open a video first")
     if session.busy():
         raise ConfigError("already processing; press Stop first")
-    first = session.detections[0]
-    if waterline_y is not None or roi is not None:
-        override = {k: v for k, v in (("waterline_y", waterline_y), ("roi", roi)) if v is not None}
-        if override != {"waterline_y": first.waterline_y, "roi": list(first.roi)}:
-            session.detections[0] = detect_scene(first.info.path, settings.params["scene"], override)
-            session.say(f"part 1 scene corrected on the page: {override}")
-            session.update(parts=[scene_info(d) for d in session.detections])
+    if body_length_px is not None and not body_length_px > 0:
+        raise ConfigError(f"body length must be > 0 px, got {body_length_px}")
+    for i, (detection, scene) in enumerate(zip(list(session.detections), scenes or [])):
+        if scene and scene != {"waterline_y": detection.waterline_y, "roi": list(detection.roi)}:
+            session.detections[i] = detect_scene(detection.info.path, settings.params["scene"], scene)
+            session.say(f"part {i + 1} scene corrected on the page: {scene}")
+    session.update(parts=[scene_info(d) for d in session.detections])
+    if save_scene:
+        save_scene_overrides(settings, session)
+    session.bl_override = body_length_px
+    if body_length_px:
+        session.say(f"body length set on the page: {body_length_px:g} px (every pass, also the final one)")
     session.cancel.clear()
 
     def run() -> None:
@@ -491,6 +553,20 @@ def start_processing(settings: Settings, session: Session, waterline_y: int | No
 
     session.thread = threading.Thread(target=run, daemon=True)
     session.thread.start()
+
+
+def save_scene_overrides(settings: Settings, session: Session) -> None:
+    """Every part's scene as used now -> scene/overrides.yaml, marked checked (other videos kept),
+    so `scene` / `all` use the same waterline and ROI."""
+    folder = scene_dir(settings)
+    overrides = load_overrides(folder)
+    for detection in session.detections:
+        name = detection.info.path.name
+        overrides[name] = {**overrides.get(name, {}), "waterline_y": int(detection.waterline_y),
+                           "roi": [int(v) for v in detection.roi], "checked": True}
+    folder.mkdir(parents=True, exist_ok=True)
+    write_scene_overrides(folder, overrides)
+    session.say(f"scene of {len(session.detections)} part(s) saved to {folder}/overrides.yaml (checked)")
 
 
 def review_frame(session: Session, t: float) -> dict[str, Any]:
@@ -543,7 +619,8 @@ def make_server(settings: Settings, port: int) -> ThreadingHTTPServer:
     GET  /files/<name>     a result file of the current video (only OUTPUT_FILES)
     POST /api/upload?name= the raw video bytes (size limited)
     POST /api/open         {"subject_id": "42"} or {"upload": "file.mp4"}
-    POST /api/start        {"waterline_y", "roi", "pace"}
+    POST /api/start        {"scenes": [{"waterline_y", "roi"}, ...], "save_scene", "body_length_px", "pace"}
+    POST /api/overrides    {"overrides": [{"start_s", "end_s", "label"}, ...]}: this video's human relabels
     POST /api/stop
     """
     session, page = Session(), render_page(settings)
@@ -629,16 +706,21 @@ def make_server(settings: Settings, port: int) -> ThreadingHTTPServer:
                     self._json(200, {"ok": True})
                 elif url.path == "/api/start":
                     body = self._body()
-                    roi = [int(v) for v in body["roi"]] if body.get("roi") else None
-                    waterline = int(body["waterline_y"]) if body.get("waterline_y") is not None else None
-                    start_processing(settings, session, waterline, roi, float(body.get("pace") or 0))
+                    scenes = [{"waterline_y": int(s["waterline_y"]), "roi": [int(v) for v in s["roi"]]} if s else None
+                              for s in body.get("scenes") or []]
+                    bl = float(body["body_length_px"]) if body.get("body_length_px") else None
+                    start_processing(settings, session, scenes, float(body.get("pace") or 0), bl,
+                                     bool(body.get("save_scene")))
+                    self._json(200, {"ok": True})
+                elif url.path == "/api/overrides":
+                    set_overrides(settings, session, list(self._body().get("overrides") or []))
                     self._json(200, {"ok": True})
                 elif url.path == "/api/stop":
                     session.cancel.set()
                     self._json(200, {"ok": True})
                 else:
                     self._json(404, {"ok": False, "error": "unknown address"})
-            except (ConfigError, ValueError, KeyError) as error:  # ValueError includes bad JSON / bad scene values
+            except (ConfigError, ValueError, KeyError, TypeError) as error:  # bad JSON / scene values / relabel rows
                 self._json(400, {"ok": False, "error": str(error)})
 
         def _save_upload(self, url: Any) -> str:

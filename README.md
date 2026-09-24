@@ -75,7 +75,7 @@ fish-detection/
 │   ├── export.py             # final datasets: segments, per-second labels, one row per subject, training windows, clips
 │   ├── features.py           # per subject: speed, turning, depth, posture per frame and per time bin; endpoints
 │   ├── labeling.py           # per subject: behavior state of every time bin (rules + pooled swim model), segments
-│   ├── live.py               # live view: process one video step by step while a local page shows every stage
+│   ├── live.py               # live view: one video step by step on a local page, with human overrides (relabel, scene, BL)
 │   ├── live_page.html        # the live page (self-contained: canvas ethogram, traces, no external files)
 │   ├── parallel.py           # runs per-video / per-subject jobs in FISH_WORKERS processes, with a progress bar
 │   ├── plots.py              # ethograms per group, bar charts per state, overlay review videos
@@ -90,7 +90,7 @@ fish-detection/
     ├── synthetic.py          # draws synthetic beaker/fish videos for the tests
     ├── test_<module>.py      # one file per module above
     ├── test_all.py           # `all` end to end on a tiny synthetic project (workbook, 20 s video, reference PDF)
-    └── test_live.py          # live view: labels grow while reading and end equal to the batch labels; the server
+    └── test_live.py          # live view: labels grow while reading and end equal to the batch labels; human overrides; the server
 ```
 
 Everything the pipeline generates is written to the output folder (`outputs/` by
@@ -565,7 +565,8 @@ the configured ones (the command prints that calibrated values are in use).
 
 Results go to `<FISH_OUTPUT_DIR>/labels/`:
 
-- `<subject>_bins.csv`: the feature bins plus `label` and `confidence`;
+- `<subject>_bins.csv`: the feature bins plus `label`, `confidence`, `auto_label` (what the
+  rules and the swim model said) and `label_source` (`auto`, or `human` for a relabeled bin);
 - `<subject>_segments.csv` and `segments.csv` (all subjects): runs of the same label,
   `subject_id, label, start_s, end_s, duration_s, start_frame, end_frame, part,
   mean_confidence`. Times are seconds on the joined timeline, and the segments tile the
@@ -577,7 +578,14 @@ Results go to `<FISH_OUTPUT_DIR>/labels/`:
 - `swim_model.json`: the swim model and the settings it was made with.
 
 A subject is skipped when its results exist, unless `--force` is given, its features
-are newer, or the swim model was refitted.
+are newer, the swim model was refitted, or `overrides.csv` changed.
+
+**Human relabels.** `labels/overrides.csv` (`subject_id, start_s, end_s, label`) holds seconds a
+person relabeled, usually from the `live` page (step 11), or written by hand. It is an input,
+never rewritten by `label`. Every bin whose middle lies in `[start_s, end_s)` gets that label
+with confidence 1, after the bout cleanup (so a human bout is never merged away); later rows win
+where ranges overlap. Any of the six labels can be used, `untracked` included. `export` carries
+the human labels into every dataset.
 
 **7. Reference ethograms (for tuning)**
 
@@ -744,7 +752,8 @@ subjects whose clip file already exists. Everything goes to `<FISH_OUTPUT_DIR>/d
 
 - `segments.csv`: every labeled segment (see step 6) plus `sex, compound,
   concentration_raw, concentration_mm` from `trials.csv`.
-- `per_second_labels.csv`: `subject_id, second, label, confidence` plus the key bin
+- `per_second_labels.csv`: `subject_id, second, label, confidence, label_source` (`human` where
+  a person relabeled that second, see step 6) plus the key bin
   features `tracked_fraction, speed_mean_bl_s, speed_median_bl_s, speed_cv,
   jerk_abs_mean_bl_s3, turn_rate_var_deg2_s2, meander_deg_per_bl, depth_bl_min,
   nose_up_surface_fraction, tilt_fraction` of the bin that covers that second.
@@ -821,8 +830,11 @@ video. `all` stays the way to process every subject. Pick a catalog subject (all
 or upload a video, press **Open**, and:
 
 1. **Scene**: the empty-beaker background with the detected waterline (blue) and fish region
-   (green). Click to move the waterline, or drag a new ROI; "Real frame" shows actual frames.
-   Your corrections from `scene-review` are already applied.
+   (green) of each part file (pick the part next to "Scene of"). Click to move the waterline, or
+   drag a new ROI; "Real frame" shows actual frames. Your corrections from `scene-review` are
+   already applied. Tick **save to scene/overrides.yaml** to keep the scene of every part for the
+   batch steps (marked checked, like `scene-review` does). **body length** replaces the measured
+   body length (px) in every pass, the final one too, so the results can differ from `all`.
 2. **Start**: every frame is tracked. The video panel shows the frame with the ROI, waterline,
    fitted body ellipse, track point, eye and the last 2 s of path (each layer can be switched off).
 3. About once per second, features and labels are recomputed over the track so far, with the
@@ -848,6 +860,13 @@ or upload a video, press **Open**, and:
    to `<FISH_OUTPUT_DIR>/live/<name>/` (`scene.json, background.png, track.csv.gz, bins.csv,
    segments.csv, summary.csv`, downloadable from the page). Click any second of the ethogram to
    see that frame and its numbers.
+5. **Human relabel** (any time after Open): drag across the ethogram (or type from/to seconds),
+   pick a state and press **Relabel**. The page relabels at once (a dark bar marks relabeled
+   seconds; "Now" and the tooltip show what the rules said) and, when the video is done, rewrites
+   the files. Relabels go to `labels/overrides.csv` under the video's name; "remove" takes one
+   back. For a catalog subject that name is its id, so `label` and then `export` put the human
+   labels into the datasets (step 6). An uploaded video keeps its own name and only changes
+   the live results.
 
 **Pace**: `Max` (default) processes as fast as possible, about 10 s for a 20-minute 320×240
 video on a laptop (roughly 100–150× real time). `1×`, `2×`, `4×`, `10×` or `30×` slow it down to

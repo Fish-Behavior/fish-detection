@@ -12,9 +12,10 @@ import pytest
 import yaml
 
 from fishbehavior.cli import main
-from fishbehavior.config import load_settings
+from fishbehavior.config import ConfigError, load_settings
 from fishbehavior.live import (
-    LABELS, OUTPUT_FILES, Session, Source, make_server, open_source, resolve_source, safe_name, start_processing,
+    LABELS, OUTPUT_FILES, Session, Source, make_server, open_source, resolve_source, safe_name, set_overrides,
+    start_processing,
 )
 from synthetic import make_video
 
@@ -59,7 +60,7 @@ def test_live_labels_grow_while_reading_and_end_equal_to_the_batch_labels(projec
     open_source(settings, session, resolve_source(settings, subject_id="42"))
     assert session.state["stage"] == "scene" and session.state["parts"][0]["file"] == "F_0042.avi"
 
-    start_processing(settings, session, None, None, pace=10.0)  # 20 s of video in about 2 s
+    start_processing(settings, session, pace=10.0)  # 20 s of video in about 2 s
     states = wait(session)
 
     lengths = [len(s["labels"]) for s in states if s.get("labels")]
@@ -85,22 +86,52 @@ def test_live_labels_grow_while_reading_and_end_equal_to_the_batch_labels(projec
     assert session.frame is not None and session.frame["jpeg"]  # preview frames were sent
 
 
-def test_page_corrections_to_the_scene_are_used(project):
-    _, settings = project
+def test_page_corrections_to_the_scene_and_body_length_are_used_and_the_scene_saved(project):
+    root, settings = project
     session = Session()
     open_source(settings, session, resolve_source(settings, subject_id="0042"))
     auto = session.state["parts"][0]
-    start_processing(settings, session, auto["waterline_y"] + 3, auto["roi"], pace=0)
+    scene = {"waterline_y": auto["waterline_y"] + 3, "roi": auto["roi"]}
+    start_processing(settings, session, [scene], pace=0, body_length_px=20.0, save_scene=True)
     final = wait(session)[-1]
     assert final["parts"][0]["waterline_y"] == auto["waterline_y"] + 3 and final["parts"][0]["method"] == "override"
-    assert any("corrected on the page" in line for line in final["log"])
+    assert any("part 1 scene corrected on the page" in line for line in final["log"])
+    assert final["features"]["body_length_px"] == 20.0 and "typed" in final["features"]["body_length_from"]
+    saved = root / "outputs" / "scene" / "overrides.yaml"
+    try:  # the batch steps get the same scene, marked as checked by a person
+        assert yaml.safe_load(saved.read_text())["F_0042.avi"] == {**scene, "checked": True}
+    finally:
+        saved.unlink()  # the other tests use the automatic scene
+
+
+def test_human_relabels_change_the_page_and_the_saved_files_at_once(project):
+    root, settings = project
+    session = Session()
+    open_source(settings, session, resolve_source(settings, subject_id="42"))
+    start_processing(settings, session, pace=0)
+    auto = wait(session)[-1]["labels"]
+    overrides, lorr = root / "outputs" / "labels" / "overrides.csv", LABELS.index("lorr")
+    try:
+        set_overrides(settings, session, [{"start_s": 3, "end_s": 6, "label": "lorr"}])
+        state = session.snapshot()
+        assert state["labels"][3:6] == [lorr] * 3 and state["human"][3:6] == [1] * 3 and sum(state["human"]) == 3
+        assert state["auto_labels"] == auto and state["overrides"] == [{"start_s": 3.0, "end_s": 6.0, "label": "lorr"}]
+        saved = pd.read_csv(root / "outputs" / "live" / "0042" / "bins.csv")  # the video was done: files rewritten
+        assert saved["label"].iloc[3:6].eq("lorr").all() and saved["label_source"].eq("human").sum() == 3
+        assert pd.read_csv(overrides, dtype={"subject_id": str})["subject_id"].tolist() == ["0042"]  # for `label`
+        with pytest.raises(ConfigError, match="bad relabel"):
+            set_overrides(settings, session, [{"start_s": 6, "end_s": 3, "label": "lorr"}])
+        set_overrides(settings, session, [])  # back to the automatic labels
+        assert session.snapshot()["labels"] == auto
+    finally:
+        overrides.unlink(missing_ok=True)
 
 
 def test_a_new_video_is_provisional_throughout_until_the_final_pass(project):
     root, settings = project
     session = Session()
     open_source(settings, session, Source("new", [root / "F_0042.avi"]))  # not in the catalog: no known BL
-    start_processing(settings, session, None, None, pace=10.0)
+    start_processing(settings, session, pace=10.0)
     states = wait(session)
     running = [s for s in states if s["stage"] == "labels"]
     assert running and all(s["labeling"]["provisional_from_s"] == 0.0 for s in running)
@@ -173,3 +204,6 @@ def test_server_upload_open_process_review_and_download(server, project):
     assert status == 200 and body.startswith(b"subject_id,label")
     assert request(base + "/files/..%2F..%2Fcatalog%2Ftrials.csv")[0] == 404  # only the result files
     assert request(base + "/api/start", {"pace": "fast"})[0] == 400  # bad input: an error, not a crash
+    assert request(base + "/api/overrides", {"overrides": [{"start_s": 0, "end_s": 2, "label": "nap"}]})[0] == 400
+    assert request(base + "/api/overrides", {"overrides": [{"start_s": 0, "end_s": 2, "label": "erratic"}]})[0] == 200
+    assert sum(json.loads(request(base + "/api/state")[1])["human"]) == 2
