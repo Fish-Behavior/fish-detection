@@ -1,0 +1,46 @@
+calibration_profile:
+  version: cal-2026-09-23
+  created_at: '2026-09-23'
+  metrics:
+    mean_tv_in_sample: 0.1932
+    mean_tv_leave_one_group_out: 0.266
+    per_group_tv:
+      dob_30: 0.047
+      dob_100: 0.078
+      fentanyl_30: 0.25
+      mdma_30: 0.32
+      methylone_30: 0.146
+      methylone_100: 0.325
+      veh_0: 0.187
+    per_group_coverage:
+      dob_30: 0.63
+      dob_100: 0.64
+      fentanyl_30: 0.51
+      mdma_30: 0.53
+      methylone_30: 0.65
+      methylone_100: 0.69
+      veh_0: 0.77
+    placeholder_mean_tv: 0.4161
+    n_videos: 45
+    search_seeds:
+    - 1
+    - 2
+    - 3
+    search_seed_thresholds: floor 19.7-23.1, erratic 32.7-35.3, min_freeze_bout at
+      lower bound on all seeds
+  notes: 'Calibrated on 7 cohort-matched groups (Fentanyl 30uM = subjects 331-341;
+    Fentanyl 100uM, MDMA 100uM and one Veh cohort have no local videos and are excluded).
+    Listing/LORR excluded from the objective and disabled (manual review). min_freeze_bout_s
+    sits at the search lower bound: the 1 s displacement speed already smooths, so
+    the bout gate is not needed. surface_breach_depth_threshold_px and min_dead_bout_s
+    are UNCALIBRATED placeholders: reference mass is ~0% so the data cannot identify
+    them. Known weak groups (held out): MDMA 30 (TV~0.32-0.38), methylone 100 (~0.30-0.34),
+    Fentanyl 30 (~0.28-0.31).'
+labeling:
+  freeze_speed_floor_px_per_s: 20.59
+  min_freeze_bout_s: 0.03
+  erratic_speed_threshold_px_per_s: 32.77
+  surface_breach_depth_threshold_px: 20.0
+  min_dead_bout_s: 60.0
+  speed_lag_s: 1.0
+  listing_orientation_deviation_deg: null

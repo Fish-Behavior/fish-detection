@@ -1,0 +1,48 @@
+calibration_profile:
+  version: cal-2026-09-24-r4-model-m3
+  created_at: '2026-09-24'
+  metrics:
+    mean_tv_in_sample: 0.1768
+    mean_tv_leave_one_group_out: 0.203
+    scored_on: 1 s-consolidated output
+    per_group_tv:
+      dob_30: 0.05
+      dob_100: 0.065
+      fentanyl_30: 0.169
+      mdma_30: 0.311
+      methylone_30: 0.173
+      methylone_100: 0.335
+      veh_0: 0.135
+    per_group_coverage:
+      dob_30: 0.93
+      dob_100: 1.0
+      fentanyl_30: 1.0
+      mdma_30: 1.0
+      methylone_30: 0.99
+      methylone_100: 1.0
+      veh_0: 1.0
+    placeholder_mean_tv_on_model_tracks: 0.4433
+    search_seeds:
+    - 1
+    - 2
+    - 3
+    search_seed_thresholds: 'seed1 floor 5.9/bout 0.04/erratic 13.1 (TV 0.1790); seed2
+      7.2/0.29/11.8 (0.1821); seed3 6.0/0.03/13.2 (0.1768): floor ~6-7 and erratic
+      ~12-13 are stable across seeds'
+    previous_profile: 'cal-2026-09-24-r3-model (model r1: in-sample 0.177, LOGO 0.253)'
+  notes: 'Profile r4 for the MODEL tracker run m3 (Keypoint R-CNN trained on 330 labels,
+    stride 5, box-centre positions, run via build_model_track_cache on the same 54-video
+    calibration set as r2/r3); do NOT use it with the classical tracker (use r2) or
+    another model run without recalibrating. Weak groups persist: MDMA 30 (TV 0.311)
+    and methylone 100 (0.335): speed thresholds alone cannot fix them. min_freeze_bout
+    0.03 s is the search lower bound (effectively no minimum bout). Surface Breach
+    depth and Dead bout remain UNCALIBRATED placeholders; Listing/LORR is not produced
+    by the rule.'
+labeling:
+  freeze_speed_floor_px_per_s: 5.99
+  min_freeze_bout_s: 0.03
+  erratic_speed_threshold_px_per_s: 13.2
+  surface_breach_depth_threshold_px: 20.0
+  min_dead_bout_s: 60.0
+  speed_lag_s: 1.0
+  listing_orientation_deviation_deg: null

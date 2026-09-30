@@ -1,0 +1,274 @@
+{
+  "panels": [
+    {
+      "label": "VEH",
+      "compound": "veh",
+      "concentration_uM": 0,
+      "source_image": "sample_labeled_1.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.320501307929567,
+        "ERRATIC_MOVEMENT": 0.34256041853746144,
+        "FREEZING_DRIFT": 0.32583063288173975,
+        "LISTING_LORR": 0.003709053996017647,
+        "SURFACE_BREACH": 0.000800374809666966,
+        "DEAD": 0.006598211845547183
+      },
+      "rejected_fraction": 0.4308222222222222,
+      "n_samples": 90000
+    },
+    {
+      "label": "MDMA 30uM",
+      "compound": "mdma",
+      "concentration_uM": 30,
+      "source_image": "sample_labeled_1.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.4757021921681514,
+        "ERRATIC_MOVEMENT": 0.06329523582414961,
+        "FREEZING_DRIFT": 0.45544976068405185,
+        "LISTING_LORR": 0.0021291454461837196,
+        "SURFACE_BREACH": 0.002180244936892129,
+        "DEAD": 0.0012434209405712924
+      },
+      "rejected_fraction": 0.3298059360730594,
+      "n_samples": 87600
+    },
+    {
+      "label": "METHYLONE 30uM",
+      "compound": "methylone",
+      "concentration_uM": 30,
+      "source_image": "sample_labeled_1.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.14609492840212346,
+        "ERRATIC_MOVEMENT": 0.3349331034888049,
+        "FREEZING_DRIFT": 0.5162295049854062,
+        "LISTING_LORR": 0.0024290387666751553,
+        "SURFACE_BREACH": 0.0002938353346784462,
+        "DEAD": 1.9589022311896412e-05
+      },
+      "rejected_fraction": 0.40915509259259264,
+      "n_samples": 86400
+    },
+    {
+      "label": "DOB 30uM",
+      "compound": "dob",
+      "concentration_uM": 30,
+      "source_image": "sample_labeled_1.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.10877507526808972,
+        "ERRATIC_MOVEMENT": 0.5113832414329691,
+        "FREEZING_DRIFT": 0.3737864077669903,
+        "LISTING_LORR": 0.0015730185041101451,
+        "SURFACE_BREACH": 0.004482257027840736,
+        "DEAD": 0.0
+      },
+      "rejected_fraction": 0.32509132420091325,
+      "n_samples": 87600
+    },
+    {
+      "label": "FENT 30uM",
+      "compound": "fentanyl",
+      "concentration_uM": 30,
+      "source_image": "sample_labeled_1.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.07553363799386822,
+        "ERRATIC_MOVEMENT": 0.3389396656447041,
+        "FREEZING_DRIFT": 0.14505119453924914,
+        "LISTING_LORR": 0.44025857580841093,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.000216926013767571
+      },
+      "rejected_fraction": 0.22130630630630632,
+      "n_samples": 88800
+    },
+    {
+      "label": "VEH",
+      "compound": "veh",
+      "concentration_uM": 0,
+      "source_image": "sample_labeled_2.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.3075182019626464,
+        "ERRATIC_MOVEMENT": 0.3668091168091168,
+        "FREEZING_DRIFT": 0.31136435580880023,
+        "LISTING_LORR": 0.00560303893637227,
+        "SURFACE_BREACH": 0.0020734409623298514,
+        "DEAD": 0.0066318455207344095
+      },
+      "rejected_fraction": 0.38058823529411767,
+      "n_samples": 102000
+    },
+    {
+      "label": "MDMA 100uM",
+      "compound": "mdma",
+      "concentration_uM": 100,
+      "source_image": "sample_labeled_2.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.19216332877557038,
+        "ERRATIC_MOVEMENT": 0.3348213088822757,
+        "FREEZING_DRIFT": 0.4387517091611035,
+        "LISTING_LORR": 0.02994718357060511,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.00431646961044532
+      },
+      "rejected_fraction": 0.2771511627906976,
+      "n_samples": 103200
+    },
+    {
+      "label": "METHYLONE 100uM",
+      "compound": "methylone",
+      "concentration_uM": 100,
+      "source_image": "sample_labeled_2.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.32780279097534887,
+        "ERRATIC_MOVEMENT": 0.058978632372329046,
+        "FREEZING_DRIFT": 0.6088032636004079,
+        "LISTING_LORR": 0.0006591875823984478,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.0037561254695156836
+      },
+      "rejected_fraction": 0.19275100401606426,
+      "n_samples": 99600
+    },
+    {
+      "label": "DOB 100uM",
+      "compound": "dob",
+      "concentration_uM": 100,
+      "source_image": "sample_labeled_2.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.06177035023188869,
+        "ERRATIC_MOVEMENT": 0.3863212324750786,
+        "FREEZING_DRIFT": 0.5513486859640706,
+        "LISTING_LORR": 0.00030651953728876805,
+        "SURFACE_BREACH": 0.0002532117916733301,
+        "DEAD": 0.0
+      },
+      "rejected_fraction": 0.2555952380952381,
+      "n_samples": 100800
+    },
+    {
+      "label": "FENTANYL 100uM",
+      "compound": "fentanyl",
+      "concentration_uM": 100,
+      "source_image": "sample_labeled_2.png",
+      "proportions": {
+        "CONTROLLED_SWIM": 0.025938376705040147,
+        "ERRATIC_MOVEMENT": 0.1658484086291961,
+        "FREEZING_DRIFT": 0.10354793460385024,
+        "LISTING_LORR": 0.295383089871336,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.40928219019057754
+      },
+      "rejected_fraction": 0.1595934959349593,
+      "n_samples": 98400
+    }
+  ],
+  "groups": [
+    {
+      "compound": "dob",
+      "concentration_uM": 30,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.10877507526808972,
+        "ERRATIC_MOVEMENT": 0.5113832414329691,
+        "FREEZING_DRIFT": 0.3737864077669903,
+        "LISTING_LORR": 0.0015730185041101451,
+        "SURFACE_BREACH": 0.004482257027840736,
+        "DEAD": 0.0
+      }
+    },
+    {
+      "compound": "dob",
+      "concentration_uM": 100,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.06177035023188869,
+        "ERRATIC_MOVEMENT": 0.3863212324750786,
+        "FREEZING_DRIFT": 0.5513486859640706,
+        "LISTING_LORR": 0.00030651953728876805,
+        "SURFACE_BREACH": 0.0002532117916733301,
+        "DEAD": 0.0
+      }
+    },
+    {
+      "compound": "fentanyl",
+      "concentration_uM": 30,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.07553363799386822,
+        "ERRATIC_MOVEMENT": 0.3389396656447041,
+        "FREEZING_DRIFT": 0.14505119453924914,
+        "LISTING_LORR": 0.44025857580841093,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.000216926013767571
+      }
+    },
+    {
+      "compound": "fentanyl",
+      "concentration_uM": 100,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.025938376705040147,
+        "ERRATIC_MOVEMENT": 0.1658484086291961,
+        "FREEZING_DRIFT": 0.10354793460385024,
+        "LISTING_LORR": 0.295383089871336,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.40928219019057754
+      }
+    },
+    {
+      "compound": "mdma",
+      "concentration_uM": 30,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.4757021921681514,
+        "ERRATIC_MOVEMENT": 0.06329523582414961,
+        "FREEZING_DRIFT": 0.45544976068405185,
+        "LISTING_LORR": 0.0021291454461837196,
+        "SURFACE_BREACH": 0.002180244936892129,
+        "DEAD": 0.0012434209405712924
+      }
+    },
+    {
+      "compound": "mdma",
+      "concentration_uM": 100,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.19216332877557038,
+        "ERRATIC_MOVEMENT": 0.3348213088822757,
+        "FREEZING_DRIFT": 0.4387517091611035,
+        "LISTING_LORR": 0.02994718357060511,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.00431646961044532
+      }
+    },
+    {
+      "compound": "methylone",
+      "concentration_uM": 30,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.14609492840212346,
+        "ERRATIC_MOVEMENT": 0.3349331034888049,
+        "FREEZING_DRIFT": 0.5162295049854062,
+        "LISTING_LORR": 0.0024290387666751553,
+        "SURFACE_BREACH": 0.0002938353346784462,
+        "DEAD": 1.9589022311896412e-05
+      }
+    },
+    {
+      "compound": "methylone",
+      "concentration_uM": 100,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.32780279097534887,
+        "ERRATIC_MOVEMENT": 0.058978632372329046,
+        "FREEZING_DRIFT": 0.6088032636004079,
+        "LISTING_LORR": 0.0006591875823984478,
+        "SURFACE_BREACH": 0.0,
+        "DEAD": 0.0037561254695156836
+      }
+    },
+    {
+      "compound": "veh",
+      "concentration_uM": 0,
+      "proportions": {
+        "CONTROLLED_SWIM": 0.3140097549461067,
+        "ERRATIC_MOVEMENT": 0.35468476767328916,
+        "FREEZING_DRIFT": 0.31859749434526996,
+        "LISTING_LORR": 0.004656046466194958,
+        "SURFACE_BREACH": 0.0014369078859984086,
+        "DEAD": 0.006615028683140796
+      }
+    }
+  ]
+}

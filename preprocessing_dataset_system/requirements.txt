@@ -1,0 +1,5 @@
+# Installs this project (and its runtime dependencies from pyproject.toml)
+# in editable mode, plus the developer tools.
+# Usage (inside an activated virtual environment):
+#   pip install -r requirements.txt
+-e .[dev]
