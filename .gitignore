@@ -32,6 +32,7 @@ build/
 dist/
 .pytest_cache/
 .ipynb_checkpoints/
+graphify-out/
 # Editors / OS
 .vscode/
 .idea/

@@ -1,0 +1,55 @@
+# Versioned, calibrated classification parameters (PRD §9.4.1, §9.5.5-9.5.6).
+#
+# This file is checked into git (unlike the two reference PNGs used to derive
+# it, which are restricted data - PRD Clarification C14). Values below are a
+# PLACEHOLDER structure only until Phase 6 calibration (T040-T046) freezes real
+# numbers via calibration/calibrate.py's search against the digitized reference
+# targets. Do not hand-pick "reasonable-looking" numbers here outside that
+# search (PRD §9.5.5 / "Don't skip these" list) - a placeholder version string
+# makes it obvious this file hasn't been calibrated yet.
+
+calibration_profile:
+  version: "cal-2026-09-23-r2"
+  created_at: "2026-09-23"
+  # Seed for any stochastic step, stored here so NFR-002 determinism holds for a
+  # given profile version (labeling itself is now deterministic thresholds).
+  random_state: 0
+
+tracking:
+  # Minimum plausible fish contour area (px^2) at 304x240; below this a
+  # detection is rejected as noise, not a genuine (tiny) fish.
+  min_contour_area_px2: null
+  # Frame-to-frame centroid jump (px) beyond which a detection is treated as
+  # implausible (occlusion/glare artifact) rather than real motion.
+  max_plausible_jump_px: null
+
+features:
+  # Rolling window (frames) for the immobility flag, to avoid single-frame
+  # noise flipping it.
+  immobility_window_frames: null
+
+labeling:
+  # Freezing/Drift: sustained smoothed speed (px/s, displacement over ~1 s) at or
+  # below this floor for >= min_freeze_bout_s.
+  freeze_speed_floor_px_per_s: 22.67
+  min_freeze_bout_s: 0.03
+  # Erratic Movement: smoothed speed at or above this; moving frames below it are
+  # Controlled Swim.
+  erratic_speed_threshold_px_per_s: 41.2
+  # Surface Breach: depth_from_surface crossing this near-surface threshold.
+  surface_breach_depth_threshold_px: 20.0
+  # Lag (s) of the displacement used as speed; thresholds above are only valid at
+  # the lag they were calibrated with.
+  speed_lag_s: 1.0
+  # Listing/LORR is labeled manually in review (body angle does not separate it on
+  # real footage). null disables the automatic rule.
+  listing_orientation_deviation_deg: null
+  # Dead / No Action Recorded (FR-007a): sustained near-zero speed with no recovery
+  # through end-of-video, for longer than this - deliberately well above any
+  # plausible Freezing/Drift bout length.
+  min_dead_bout_s: 60.0
+
+rendering:
+  # Undetermined marker colour (PRD §5.2): magenta, distinct from all six legend
+  # colours (decided in Phase 8, see docs/progress.md §2).
+  undetermined_color_hex: "#FF00FF"

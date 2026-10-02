@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame labeling</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Frame labeling</h1>
+  <div id="progress" class="progress" role="status" aria-live="polite"></div>
+  <label class="who">Annotator <input id="annotator" type="text" maxlength="100" autocomplete="name" placeholder="your name"></label>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" aria-label="Frames">
+    <div class="filters">
+      <label>Status <select id="f-status"><option value="">All</option><option value="todo">To do</option><option value="done">Done</option><option value="corrupt">Unreadable</option></select></label>
+      <label>Batch <select id="f-batch"><option value="">All</option></select></label>
+      <label>Why sampled <select id="f-reason"><option value="">All</option></select></label>
+      <label>Split <select id="f-split"><option value="">All</option><option value="train">Train</option><option value="heldout">Held-out</option></select></label>
+    </div>
+    <ul id="frame-list" class="frame-list"></ul>
+  </nav>
+
+  <main id="work" class="work" hidden>
+    <div class="meta"><h2 id="title"></h2><p id="subtitle" class="muted"></p></div>
+    <div class="stage">
+      <canvas id="canvas" tabindex="0" aria-label="Frame: drag to draw the box, click to place the selected keypoint"></canvas>
+      <aside class="panel">
+        <fieldset>
+          <legend>Tool</legend>
+          <div id="tools" class="tools"></div>
+          <p class="muted">Keys: <kbd>B</kbd> box, <kbd>1</kbd>-<kbd>5</kbd> keypoints, shift+click = occluded, <kbd>Del</kbd> removes the selected item.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Listing / LORR</legend>
+          <div id="listing" class="listing">
+            <label><input type="radio" name="listing" value="yes"> yes</label>
+            <label><input type="radio" name="listing" value="no"> no</label>
+            <label><input type="radio" name="listing" value="unsure"> unsure</label>
+          </div>
+          <p class="muted">Yes = the fish is rolled, tilted or inverted, not swimming upright.</p>
+        </fieldset>
+        <label class="nofish"><input id="nofish" type="checkbox"> No fish visible</label>
+        <div class="buttons">
+          <button id="suggest" type="button">Use suggested box</button>
+          <button id="save" type="button" class="primary">Save &amp; next</button>
+          <button id="skip" type="button">Skip</button>
+        </div>
+        <p id="message" class="message" role="status" aria-live="polite"></p>
+      </aside>
+    </div>
+  </main>
+  <p id="placeholder" class="placeholder">Choose a frame from the list.</p>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
