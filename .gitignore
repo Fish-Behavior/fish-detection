@@ -20,6 +20,9 @@ agents/
 *.pdf
 *.parquet
 *.npz
+# Trained classifier models (dcs), wherever they are written
+*.pt
+*.joblib
 # ---------------------------------------------------------------------------
 # Python tooling
 # ---------------------------------------------------------------------------
