@@ -1,6 +1,6 @@
 """Phase 15: fine-tune the fish box+keypoint model on the labeled TRAIN frames and evaluate it.
 
-Usage (from preprocessing_dataset_system/, needs the [ml] extra and CUDA torch):
+Usage (from the repo root, needs the [ml] extra and CUDA torch):
     python scripts/phase15_finetune.py --run-name r1 [--epochs 60] [--batch-size 4] [--lr 0.005]
 Writes outputs/phase15/models/<run-name>/{model.pt,run.json,metrics.json}; a run name is never reused.
 Only the frozen train split is used for training. Metrics are computed on the labeled HELD-OUT frames when there

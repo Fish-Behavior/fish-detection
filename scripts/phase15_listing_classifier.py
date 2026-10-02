@@ -1,6 +1,6 @@
 """Phase 15 / T094: train the crop-level 'inverted fish' classifier on TRAIN labels and evaluate it on HELD-OUT.
 
-Usage (from preprocessing_dataset_system/):
+Usage (from the repo root):
     python scripts/phase15_listing_classifier.py --run-name c1 --detector m3 [--epochs 15]
 Evaluated twice on held-out yes/no frames: on the human boxes, and on the detector's predicted boxes (what the
 pipeline would see). Reports AUC and precision/recall at fixed probability thresholds; no threshold is tuned on

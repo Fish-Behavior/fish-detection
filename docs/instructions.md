@@ -1,18 +1,14 @@
-# Preprocessing Dataset System
+# Instructions: Preprocessing Dataset System
 
 Turns each zebrafish drug-exposure trial video plus its trial-metadata row into a
 reviewed, per-subject 5-state ethogram strip and machine-readable labels — the
 labeled dataset a later, separate drug-classification project will train on. Full
-specification: [`docs/PRD.md`](docs/PRD.md). Build status/progress:
-[`docs/progress.md`](docs/progress.md).
-
-Independent top-level package from `src/fishbehavior/` in the parent repo (see PRD
-Clarification C10) — no shared runtime dependency between the two.
+specification: [`PRD.md`](PRD.md). Build status/progress:
+[`progress.md`](progress.md).
 
 ## Setup
 
 ```bash
-cd preprocessing_dataset_system
 uv venv --python 3.11 .venv     # or: python3.11 -m venv .venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"      # add "[dev,ocr]" for optional pytesseract OCR support
@@ -76,7 +72,7 @@ python -m prepds export-index       # accepted_index.parquet from the ACCEPTED v
 
 The fine-tuned detector (`scripts/phase15_finetune.py`, run `m3`, trained on ~330 human-labeled frames) replaces the
 classical tracker in `outputs_r3/` (328 videos: undetected frames median 21.5% -> 0.4%, Undetermined median 13.7% ->
-0.0%). Read `docs/progress.md` ("Review corrections") before relying on it: it is not human-reviewed, detection gain is
+0.0%). Read [`progress.md`](progress.md) ("Review corrections") before relying on it: it is not human-reviewed, detection gain is
 not proof of track accuracy, it can report a fish on empty frames, and its calibration is weakly identified.
 Listing/LORR is still a manual label. `scripts/phase15_flag_listing.py` writes advisory `listing_flags.json` hints
 (crop classifier, high recall, low precision) that the review app shows next to the video; they never change a state
@@ -98,8 +94,6 @@ movement until the end of the video) are shown above the player.
   threshold, the frame votes, and whether a reviewer changed the automatic label.
 - **Time per state:** seconds, percent and bouts for all seven states.
 - **Possible Listing hints:** advisory ranges (model run + `scripts/phase15_flag_listing.py`) with a "Go to" button.
-
-Full step-by-step instructions: [`docs/user-manual.md`](docs/user-manual.md).
 
 ## How labels are produced (and what to trust)
 
@@ -138,19 +132,19 @@ revision) and select it via `PDS_CONFIG`. These scripts are not covered by the t
 - Agreement with a reference figure is a group-level proportion match, not per-frame accuracy: there is no per-frame
   ground truth until reviewers accept videos.
 - Frame rate is fixed by the recordings (~29.84 fps); a better tracker or pose model, not a higher frame rate, is the
-  route to fewer Undetermined frames (see Phase 15 in `docs/progress.md`).
+  route to fewer Undetermined frames (see Phase 15 in [`progress.md`](progress.md)).
 
 ## Data handling
 
 Videos, the trial workbook, and the two reference images are restricted research
 data (PRD FR-018 / NFR-004) and are **never** committed — `data/`, `outputs/`,
 `accepted/`, and the raw-data file extensions are gitignored (see `.gitignore`,
-which extends the repo root's policy). Only synthetic fixtures under
+which also covers the raw-data extensions). Only synthetic fixtures under
 `tests/fixtures/` are committed, via narrow negations in this package's own
 `.gitignore` — verified with `git check-ignore -v <path>` before each fixture is
 added, not assumed.
 
 ## Status
 
-Implementation is tracked task-by-task in [`docs/progress.md`](docs/progress.md),
-mirroring the PRD §12 phase breakdown (Phase 0-15). User manual: [`docs/user-manual.md`](docs/user-manual.md).
+Implementation is tracked task-by-task in [`progress.md`](progress.md),
+mirroring the PRD §12 phase breakdown (Phase 0-15).

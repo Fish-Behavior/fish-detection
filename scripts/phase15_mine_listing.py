@@ -1,6 +1,6 @@
 """Phase 15: mine likely-Listing (inverted fish) frames into a new labeling batch.
 
-Usage (from preprocessing_dataset_system/):
+Usage (from the repo root):
     python scripts/phase15_mine_listing.py --run r1 [--stride 180] [--batch batch_002]
 Scans every `--stride`-th frame of every processed video with the fine-tuned model (results cached in
 outputs/phase15/scan_<run>.parquet, so re-running only re-selects), picks frames with a large predicted

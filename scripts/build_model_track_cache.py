@@ -1,7 +1,7 @@
 """Re-track the calibration videos with the fine-tuned model, keeping the exact same videos (and cache names) as
 the classical cache, so profile r3 can be fitted and compared like-for-like with r2.
 
-Usage (from preprocessing_dataset_system/, after `prepds catalog`):
+Usage (from the repo root, after `prepds catalog`):
     python scripts/build_model_track_cache.py --run outputs/phase15/models/r1 [--stride 5]
 Reads names from outputs/calibration/tracks/ and writes outputs/calibration/tracks_<run>/ (resumable).
 """

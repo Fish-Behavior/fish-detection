@@ -1,6 +1,6 @@
 """Phase 15: scan processed videos for possible Listing/LORR and write `listing_flags.json` for the review app.
 
-Usage (from preprocessing_dataset_system/):
+Usage (from the repo root):
     python scripts/phase15_flag_listing.py --detector m3 --classifier c1 [--step-s 3] [--threshold 0.9] [--limit N] [--force]
 Every `--step-s` seconds the detector finds the fish, the crop classifier scores its box, and consecutive scores
 >= threshold become one flagged range. Hints only: they never change states or acceptance. Videos that already

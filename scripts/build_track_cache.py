@@ -1,6 +1,6 @@
 """Track the calibration videos once and cache the tracks (~40 s per video), so threshold searches are fast.
 
-Usage (from preprocessing_dataset_system/, with PDS_VIDEO_DIR and PDS_DB_PATH set):
+Usage (from the repo root, with PDS_VIDEO_DIR and PDS_DB_PATH set):
     python scripts/build_track_cache.py [--per-group 6] [--workers 10]
 Writes outputs/calibration/tracks/*.json.gz.
 """
