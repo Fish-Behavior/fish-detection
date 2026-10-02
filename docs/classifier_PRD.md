@@ -311,10 +311,12 @@ src/dcs/trainset.py    load/filter table, labels, folds, audit
 src/dcs/models.py      baselines + PyTorch MLP (torch imported lazily)
 src/dcs/train.py       both stages, diagnostics, report, save/load, predict
 config/default_training.yaml        the `training:` defaults (next to the `prepds` thresholds)
-tests/dcs/                          synthetic tables only (a subfolder: no clash with prepds test names)
+tests/dcs/                          synthetic tables only; a subfolder that groups the classifier's tests (see the convention below)
 docs/classifier_PRD.md, docs/classifier_progress.md, docs/plans/classifier_plan.md
 .env.example                        gains the DCS_* variables
 ```
+**Test layout convention.** `tests/` may contain subfolders that group related tests (one per package or topic); `tests/dcs/` is the first. The CI backend job runs `pytest tests/` recursively, so subfolders are picked up without changing the workflow. pytest's default import mode needs test files to have unique base names across folders unless each folder has an `__init__.py`, so either give the new files unique names (for example `test_dcs_trainset.py`; the existing `tests/test_config.py`, `test_cli.py` and `test_catalog.py` must not be reused) or add `tests/dcs/__init__.py`. Shared fixtures go in a `conftest.py` in the subfolder.
+
 `pyproject.toml` gains `[project.scripts] dcs = "dcs.cli:main"` and the extra `train = ["torch>=2.4"]`; `packages.find` already scans `src/` and finds both packages. `train` does not need `featurize`'s inputs. Installing the root project on the GB10 also installs the `prepds` dependencies (OpenCV headless, FastAPI, ...); Phase 0 checks that this works on aarch64, and splitting `dcs` into its own `pyproject.toml` is the fallback.
 
 ### 7.2 CLI

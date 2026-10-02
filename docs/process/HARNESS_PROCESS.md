@@ -59,6 +59,10 @@ When harness-os governance is active for the project, each unit of work follows 
 
 Ask the owner before running it, and say plainly that it commits.
 
+## 4b. Repository conventions to record per project
+
+- **Tests:** keep them in `tests/`. Related tests may be grouped in subfolders (for example `tests/<package>/`). Test files need unique base names across folders unless each folder has an `__init__.py`; shared fixtures go in a `conftest.py` in the subfolder. Check that the CI runs the subfolder (a recursive `pytest tests/` does).
+
 ## 5. Verification loop by project type
 
 | Project part | Loop |
