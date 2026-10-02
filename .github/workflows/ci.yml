@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false            # one version failing must not hide the others
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]   # pyproject: requires-python >=3.11
+    name: pytest (py${{ matrix.python-version }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # synthetic fixtures only; torch tests skip themselves (no [ml] extra)
+      - run: pytest -q
