@@ -41,7 +41,7 @@ Confirmed in `src/prepds` (2026-10-02):
 | C5 | §5.2: `prepds` fails duplicate `sex_subject` ids | It warns and skips; the index is unique per `video_id` by construction | EC-10 kept as a defensive check |
 | C6 | AC-9 / Appendix B step 9: `predict` must equal `predictions.csv` | `predictions.csv` is out-of-fold (FR-5); the final model refit on all fish cannot reproduce it | D-006: save `model/reference_predictions.csv` (final model on the training rows) and compare against that |
 | C7 | §1.5 S5: "CI privacy job green" | No such job exists | D-007: `tests/dcs/test_dcs_privacy.py` checks `git ls-files`; it runs inside the existing backend job (CI file unchanged, Q8) |
-| C8 | §6.3: PyTorch MLP | Scope doc §7 names TensorFlow as the modeling framework | Plan follows the PRD (PyTorch); owner to confirm with the advisor (progress file, open items) |
+| C8 | §6.3: PyTorch MLP | Scope doc §7 names TensorFlow as the modeling framework | Owner decided: PyTorch for now; TensorFlow only if PyTorch proves less efficient (D-027). No PRD change needed |
 | C9 | FR-9: subtract the same-date vehicle median | In evaluation this uses the **labels** of vehicle test fish, which is label leakage when vehicle is also a predicted class | D-008: in the FR-9 ablation, vehicle fish are the per-date reference only and are removed from the evaluated classes; the report says so |
 | C10 | §7.1: four modules (`featurize`, `trainset`, `models`, `train`) | `train.py` would exceed the harness constitution's 200-400 lines per file (CONST-ARCH-003) | D-009: split into the modules of §3 (one step per module, still NFR-6) |
 | C11 | §5.3: state "Erratic" | Code: `Erratic Movement` | Use the code's names |
