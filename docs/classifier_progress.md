@@ -4,7 +4,7 @@
 **Privacy:** placeholders only (`COMPOUND_A`, `F_0042`, `<date>`); no data, outputs, real names, dates or paths.
 **Status legend:** `NOT_STARTED` / `IN_PROGRESS` / `DONE` / `BLOCKED: <reason>` / `OWNER`. Updated after every task.
 
-**Last updated:** 2026-10-02. **U1 done** under the gate (workflow runs 2 and 3, spec `FISH-PROD-001` v2; RED/GREEN observed by harness-os; two review rounds; CI green). C8 answered: PyTorch (D-027). Next: U2 (synthetic data).
+**Last updated:** 2026-10-02. U1 done (branch `feature/dcs-u1-scaffold`, CI green). **U2 done** under the gate (runs 4-6, spec `FISH-PROD-002` v3, three review rounds) on `feature/dcs-u2-synthetic`, stacked on U1. Next: U3 (gold reader). C8 answered: PyTorch (D-027).
 
 ---
 
@@ -15,7 +15,7 @@
 | 0. Environment | IN_PROGRESS | T0.1 done; T0.2-T0.4 owner |
 | 0b. Upstream readiness | OWNER | No video Accepted yet (Q14) |
 | G1 | BLOCKED: no Accepted videos | Real-data audit with `dcs audit` (D-010) |
-| 1. Featurize, training set, folds | IN_PROGRESS | U1 done; U2-U8 next |
+| 1. Featurize, training set, folds | IN_PROGRESS | U1, U2 done; U3-U8 next |
 | 2. Baselines | NOT_STARTED | U9-U12 |
 | G2 | NOT_STARTED | Synthetic baseline report review |
 | 3. MLP and ablations | NOT_STARTED | U13-U14 |
@@ -34,7 +34,7 @@
 | T0.3 GB10 install of root project | - | OWNER | | |
 | T0.4 Windows PC checks | - | OWNER | | |
 | T1.1-T1.3 scaffold, config | U1 | DONE | FISH-PROD-001 v2 (runs 2, 3) | `src/dcs/{__init__,__main__,cli,config,config_rules}.py`, `config/default_training.yaml`, `pyproject.toml`, `.gitignore`, `.env.example`; tests `tests/dcs/{conftest,test_dcs_config,test_dcs_config_params}.py` (129). Reviews: round 1 code-reviewer APPROVE, python-reviewer no blocker; round 2 code-reviewer APPROVE, python-reviewer APPROVE WITH WARNINGS; accepted findings fixed test-first in run 3 |
-| T1.4-T1.5 synthetic data | U2 | NOT_STARTED | | |
+| T1.4-T1.5 synthetic data | U2 | DONE | FISH-PROD-002 v3 (runs 4-6) | `src/dcs/{schema,synthetic,synthetic_config,synthetic_design,synthetic_frames,synthetic_workbook}.py`, `dcs synth --out`; tests `tests/dcs/{test_dcs_synthetic,test_dcs_synthetic_knobs,test_dcs_synthetic_config}.py`, `synth_helpers.py` (213 dcs tests). Three review rounds (code-reviewer, python-reviewer), last one APPROVE; it fed the synthetic tracks into prepds `derive_features` and found 1 coincidental mismatch in 48,000 cells. **U3 note:** the synthetic set has no `strip.png`, so the gold reader must not require it |
 | T1.6-T1.7 gold reader | U3 | NOT_STARTED | | |
 | T1.8-T1.9 workbook | U4 | NOT_STARTED | | |
 | T1.10-T1.11 featurize | U5 | NOT_STARTED | | |
@@ -123,6 +123,10 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | D-026 | 2026-10-02 | Kept as in `prepds` on purpose: configuration errors print to stdout; defaults stay at `config/default_training.yaml` (PRD §7.1), so `dcs` needs a source checkout or `pip install -e .` (a clear `ConfigError` says so otherwise); global options go before the sub-command | Parity with the existing package; revisit only if `dcs` is ever shipped as a wheel |
 | D-027 | 2026-10-02 | The MLP (and the optional 1D-CNN) use PyTorch, not TensorFlow; revisit only if PyTorch proves less efficient | Owner (C8): the PRD already specifies PyTorch; the scope doc's TensorFlow is set aside for now |
 | D-028 | 2026-10-02 | `uv.lock` is not refreshed for the new `train` extra | Owner: fine as is; CI and the runbook install with pip |
+| D-029 | 2026-10-02 | Synthetic gold dataset (U2): the design copies the PRD §2.3 *structure*, not its numbers (vehicle on every date; each compound+dose on two dates; doses of one compound never share a date; compound, dose and date speed effects with strength knobs). Every edge case has a knob, and `SynthResult.targets` names the fish it hit. Fixed timestamps (year 2000) and per-fish random streams `[seed, subject]` make the content reproducible (the xlsx container and the absolute paths in the index differ between runs) and keep every knob local to the fish it names; single-fish knob targets are disjoint, group knobs may overlap them. No `strip.png` (dcs never reads it). Index paths point into the synthetic folder | Phases 1-5 run on synthetic data (D-010); later units need known structure and known edge cases to test against |
+| D-030 | 2026-10-02 | The prepds file contract is restated once, in `src/dcs/schema.py` (states, frames dtypes, undetected sentinels, segments, manifest/provenance keys, index columns, workbook headers); the synthetic writer and the later readers both use it | D-013 (no prepds import) with one place to update if prepds changes |
+| D-031 | 2026-10-02 (rev. run 6) | Synthetic frames copy the prepds conventions later units depend on, as the *running* prepds code applies them (labeling.py, features.py): `confidence` null on every frame; velocity and angular velocity 0.0 on the first frame of each detected run, acceleration and meander 0.0 on the first two; `is_immobile` only when the last 30 frames all have a real velocity <= 5 px/s (prepds defaults, calibratable upstream); in the workbook a plain dose is a number cell and a combination dose text; messy labels are case variants only (prepds strips spaces). Simplification kept: undetected frames keep the surrounding auto state (prepds marks them Undetermined until consolidation or review) | Reviews of U2: feature code (U5) must be tested against what prepds really writes. First version followed a stale `StateFrame` docstring for confidence; corrected after the code reviewer checked the running code |
+| D-032 | 2026-10-02 | Test helpers shared across test files live in `tests/dcs/synth_helpers.py` and are imported as `tests.dcs.synth_helpers` (works in pytest's default and importlib modes); no `tests/dcs/__init__.py`, which would shadow `src/dcs` | Review r1 of U2 (L1) |
 
 ## 6. Hardware record (Phase 0, owner)
 
@@ -146,6 +150,18 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | 2026-10-02 | Run 3 re-reviews: code-reviewer, python-reviewer | APPROVE / APPROVE WITH WARNINGS; no CRITICAL/HIGH. Accepted: invalid-date YAML, huge-int overflow, `~unknownuser`, falsy non-mapping YAML, one-line messages, `isfinite` proven, rule-coverage test, rules moved to `config_rules.py` |
 | 2026-10-02 | U1 run 3, second cycle: `pytest tests/dcs -q` | Gate recorded RED (missing `dcs.config_rules`), then GREEN: 129 passed in 0.4 s |
 | 2026-10-02 | `pytest tests/ -q`; 3.11 grammar check; `prepds` import scan | 664 passed, 4 skipped (535 + 129), 19.9 s; grammar ok; no `prepds` import |
+| 2026-10-02 | U2 run 4: `pytest tests/dcs -q` | Gate: RED (no `dcs.schema`), GREEN 168 passed; refactor redone through the gate after a script edit had bypassed it: RED (import error), GREEN 169 passed in 4.1 s |
+| 2026-10-02 | Signal margins, seeds 0-4 (SMALL design, 40 s) | Compound spread with effect 6.9-8.5 (test needs > 1.5), without 1.02-1.16 (test needs < 1.25); vehicle date spread 6.1-9.1 (needs > 1.3) |
+| 2026-10-02 | `python -m dcs synth --out <scratch>` (defaults) | 48 fish, 0.8 s, 4.6 MB |
+| 2026-10-02 | `pytest tests/ -q`; 3.11 grammar; file sizes | 704 passed, 4 skipped; grammar ok; largest file 373 lines |
+| 2026-10-02 | U2 run 5: `pytest tests/dcs -q` | Gate: RED (new names missing), GREEN 198 passed; split of `synthetic_design.py`: RED (module missing), GREEN 198 passed in 7.5 s. All `.py` edits in run 5 through gated Write/Edit (run 4 had one script edit that bypassed the gate; it was undone and redone through the gate) |
+| 2026-10-02 | `pytest tests/dcs --import-mode=importlib`; `dcs synth` with a broken `DCS_CONFIG`; `--seed -1` | 198 passed; synth runs; one-line configuration error, exit 2, no folder written |
+| 2026-10-02 | `pytest tests/ -q` | 733 passed, 4 skipped |
+| 2026-10-02 | U2 run 6: `pytest tests/dcs -q` | Gate: RED (new schema names missing), GREEN 210 passed (10.7 s after the test split) |
+| 2026-10-02 | Signal margins, seeds 0-7, after run 6 | Compound spread with effect >= 6.85 (> 1.5), without <= 1.16 (< 1.4); vehicle date spread >= 4.96 (> 1.3) |
+| 2026-10-02 | `pytest tests/ -q`; `--import-mode=importlib`; 3.11 grammar | 745 passed, 4 skipped; 210 passed; ok |
+| 2026-10-02 | U2 run 6, final review fixes: `pytest tests/dcs -q` | Gate: RED (immobility constants missing), GREEN 213 passed in 13.4 s |
+| 2026-10-02 | `pytest tests/ -q`; 3.11 grammar; `prepds` import scan | 748 passed, 4 skipped; ok; none |
 
 ## 8. External plan review r1 (2026-10-02, another LLM, plan + PRD with placeholders only)
 
