@@ -1,6 +1,6 @@
 """Search the speed-band thresholds against the digitized reference targets (FR-008) and validate leave-one-group-out.
 
-Usage (from preprocessing_dataset_system/, after scripts/build_track_cache.py):
+Usage (from the repo root, after scripts/build_track_cache.py):
     python scripts/calibrate_thresholds.py [--seeds 1 2 3] [--cache outputs/calibration/tracks_r1]
 Prints the best thresholds per seed, per-group total-variation distance, and leave-one-group-out (LOGO) scores.
 It does NOT write a profile: freeze the chosen numbers with prepds.calibration.profile.write_calibration_profile

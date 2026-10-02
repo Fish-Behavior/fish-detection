@@ -1,6 +1,6 @@
 # Preprocessing Dataset System — Implementation Progress
 
-**PRD:** [`preprocessing_dataset_system/docs/PRD.md`](PRD.md) (1141 lines, read in full before this
+**PRD:** [`docs/PRD.md`](PRD.md) (1141 lines, read in full before this
 plan was written). This plan's phase structure is PRD §12 verbatim — no phases invented, none
 reordered. Its exit criteria are PRD §13 (Review & Acceptance Checklist) + §8 (Success Criteria)
 read together with §7 (NFRs). Its test coverage is the `[P]`-marked test tasks already embedded in
@@ -56,7 +56,7 @@ C15 (owner syncs OneDrive → local; not yet complete for all 353).
 - **Reference images** (`sample_data/sample_labeled_1.png` 1599×1117, `sample_labeled_2.png`
   1794×1141, both RGBA): present locally, used only by Phase 6 calibration, never committed (C14).
 - **Toolchain**: no system `pip`/`venv` available; `uv` is installed and used instead.
-  `preprocessing_dataset_system/.venv` created with `uv venv --python 3.11` (matches §9.1's
+  `.venv` created with `uv venv --python 3.11` (matches §9.1's
   Python 3.11 target — `cpython-3.11.15` was already available locally via `uv python list`).
   `opencv-python-headless` used, not full `opencv-python` — this is WSL2 with no display server;
   the full wheel's `libGL.so.1` dependency would fail at import.
@@ -86,11 +86,11 @@ until the owner syncs the rest, including whatever lands in the now-empty `Phase
   blanket `*.mp4`, `*.xlsx`, `*.csv`, `*.parquet`, `*.pdf` — but Phase 1 commits
   `tests/fixtures/synth_tiny.mp4` (synthetic, not restricted) and a synthetic `.xlsx`, and Phase 6
   commits `config/default_thresholds.yaml`. A child `.gitignore` inside
-  `preprocessing_dataset_system/tests/fixtures/` with narrow `!`-negations (git resolves the
+  `tests/fixtures/` with narrow `!`-negations (git resolves the
   *nearest* `.gitignore` per path) is added in T001 and verified with
   `git check-ignore -v <path>` before any fixture is committed — never assumed. `data/`, `outputs/`,
   `accepted/` stay hard-excluded (no negation) per FR-018/NFR-004.
-- **`PRD.md` actually lives at `preprocessing_dataset_system/docs/PRD.md`**, not at the package
+- **`PRD.md` actually lives at `docs/PRD.md`**, not at the package
   root as §9.3's tree diagram draws it. Noted here so the difference isn't later mistaken for a
   drift from spec — it's just where it was placed when written.
 - **harness-os pipeline stages run at phase granularity, not per-task.** Constitution → Spec → Test

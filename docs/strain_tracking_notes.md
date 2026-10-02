@@ -4,7 +4,7 @@ Informal validation log required by PRD §12 T029: "Spot-check background/waterl
 detection against 1 real video per strain (Casper, Wild-type AB, ABSL) - log
 findings/screenshots... feeding Phase 4 risk mitigation." Findings below are from
 real, local-only research data (never committed - see root `.gitignore` /
-`preprocessing_dataset_system/.gitignore`); this file contains no restricted data
+`.gitignore`); this file contains no restricted data
 itself, only numeric/statistical findings and file-path references.
 
 ## 1. Initial 3-video, 1-per-strain check

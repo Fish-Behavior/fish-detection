@@ -1,6 +1,6 @@
 """Phase 15: freeze the subject-level split, sample frames to annotate, and extract them.
 
-Usage (from preprocessing_dataset_system/):
+Usage (from the repo root):
     python scripts/phase15_prepare.py [--train 250] [--heldout 100] [--seed 15]
 Writes under outputs/phase15/ (restricted data, gitignored): split.json (written once, never overwritten),
 sample.json, frames/<video_id>_<frame>.png. The classical tracker's centroid is stored with each sample for

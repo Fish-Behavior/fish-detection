@@ -1,6 +1,6 @@
 """Phase 15 / T093: compare the model-tracker run (outputs_r3) with the classical baseline (outputs) per video.
 
-Usage (from preprocessing_dataset_system/):
+Usage (from the repo root):
     python scripts/phase15_compare.py [--new outputs_r3/processed] [--old outputs/processed] [--csv out.csv]
 Only videos present in both are compared. Reports, over the shared videos: undetected-frame share, Undetermined
 share, label agreement on frames both runs determined, state mix, review-flag counts, and (if a frozen split and
