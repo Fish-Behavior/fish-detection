@@ -4,7 +4,7 @@
 **Privacy:** placeholders only (`COMPOUND_A`, `F_0042`, `<date>`); no data, outputs, real names, dates or paths.
 **Status legend:** `NOT_STARTED` / `IN_PROGRESS` / `DONE` / `BLOCKED: <reason>` / `OWNER`. Updated after every task.
 
-**Last updated:** 2026-10-02. Plan revised after external review r1 (§8); no code yet. T0.1 done. Next session: confirm `which pytest` resolves to `.venv` (blocker in §4), then U1.
+**Last updated:** 2026-10-02. U1 started: T1.1 and T1.2 done, T1.3 waits on a harness blocker (§4: the hook scripts are not executable, so the gate never observes RED/GREEN). `which pytest` now resolves to `.venv` (old blocker closed).
 
 ---
 
@@ -15,7 +15,7 @@
 | 0. Environment | IN_PROGRESS | T0.1 done; T0.2-T0.4 owner |
 | 0b. Upstream readiness | OWNER | No video Accepted yet (Q14) |
 | G1 | BLOCKED: no Accepted videos | Real-data audit with `dcs audit` (D-010) |
-| 1. Featurize, training set, folds | NOT_STARTED | U1-U8 |
+| 1. Featurize, training set, folds | IN_PROGRESS | U1 started; blocked on the hook permissions (§4) |
 | 2. Baselines | NOT_STARTED | U9-U12 |
 | G2 | NOT_STARTED | Synthetic baseline report review |
 | 3. MLP and ablations | NOT_STARTED | U13-U14 |
@@ -33,7 +33,7 @@
 | T0.2 GB10 checks | - | OWNER | | Record in §6 |
 | T0.3 GB10 install of root project | - | OWNER | | |
 | T0.4 Windows PC checks | - | OWNER | | |
-| T1.1-T1.3 scaffold, config | U1 | NOT_STARTED | | |
+| T1.1-T1.3 scaffold, config | U1 | BLOCKED: gate hooks not executable (§4) | FISH-PROD-001 (workflow run 2) | T1.1 done (`pyproject.toml`, `.gitignore`, `.env.example`, `config/default_training.yaml`); T1.2 done (`tests/dcs/test_dcs_config.py`, 40 tests, fail at import as expected); T1.3 not started: RED not yet observed by the gate |
 | T1.4-T1.5 synthetic data | U2 | NOT_STARTED | | |
 | T1.6-T1.7 gold reader | U3 | NOT_STARTED | | |
 | T1.8-T1.9 workbook | U4 | NOT_STARTED | | |
@@ -86,7 +86,9 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | C1 | Follow the recommendation | D-003; upstream request T5.6 |
 | C3 / C4 | Read the workbook; stop with a hint on a missing date | D-004, D-005 |
 
-**Blocker for D-001:** bare `pytest` is not on the PATH of the Claude Code process (only `.venv/bin/pytest` exists), so the harness gate's own test runs cannot succeed. Owner's fix: relaunch Claude Code from a terminal with `.venv` activated. First step of the next session: confirm `which pytest` points into `.venv`, then start U1.
+**Blocker for D-001 (closed 2026-10-02):** bare `pytest` was not on the PATH of the Claude Code process. Fixed by launching Claude Code with `.venv` active; `which pytest` now points into `.venv/bin/`.
+
+**Blocker for D-001 (open, 2026-10-02):** the four files in `.claude/hooks/` were committed by the harness scaffold commit with mode `100644` (not executable), and `.claude/settings.json` runs them directly. Every hook call therefore fails with "permission denied", which Claude Code treats as a non-blocking error: `enforce-gate.sh` never runs, the `test_runs` table stays empty (checked), the workflow cannot leave `establish_red_phase`, and the write gate does not enforce anything. Fixing it touches the integrity-checked harness files (CONST-CORE-004), so it waits for the owner (options in the session reply).
 
 **Open for the owner:** approve the PRD change list (plan §2) and decide whether it becomes PRD v0.4; confirm with the advisor that PyTorch is fine although the scope doc names TensorFlow (C8); confirm D-008 at G2; file the upstream request once drafted (T5.6).
 
@@ -114,6 +116,10 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | D-018 | 2026-10-02 | `featurize --videos <dir>` builds rows from per-video folders without an index, labels optional; rows from non-Accepted videos are marked unreviewed | Gives `predict` an input for a new fish (R6, C21) |
 | D-019 | 2026-10-02 | Scheme A stays stratified group K-fold, K=5, repeated (PRD §6.4); no leave-one-date-out | Owner, review R4: keeps split randomness for the §6.6 spread rule |
 | D-020 | 2026-10-02 | 1D-CNN (FR-10) stays optional, after G4 only | Owner, review R7; consistent with Q1 |
+| D-021 | 2026-10-02 | EC-11 flag thresholds: `training.duration_range_s` defaults to `null` (no range check until set at G1); `training.min_detected_fraction` defaults to 0.8 (flag only, never drop) | PRD gives no numbers; a duration range would be read off the real recordings ("no data-derived numbers", §7.3), whereas 0.8 is a judgment threshold for a flag |
+| D-022 | 2026-10-02 | Harness spec ids: unit U*n* is `FISH-PROD-0nn` (product spec type; the server only accepts `^[A-Z]{2,10}-PROD-[0-9]{3,}$` and the keys `id, title, summary, goals, nonGoals, stakeholders`). Workflow run 1 (id `FISH-DCS-U1`, never had a spec) is abandoned; run 2 is U1 | Schema found by `validate_spec`; one spec per unit keeps traceability per unit |
+| D-023 | 2026-10-02 | Config overrides are validated: a key absent from `config/default_training.yaml` or a value of the wrong type (bool/int/float/str/list/section) is a `ConfigError` naming the dotted key; `null` only where the default is `null`; an int is accepted for a float. Value ranges are checked by the step that uses them | A typo in an override must not be silently ignored (plan T1.2 "unknown key") |
+| D-024 | 2026-10-02 | MLP defaults not given by the PRD: learning rate 0.001, weight decay 0.01 (the AdamW default), patience 20 epochs, inner validation share 0.2 | Standard starting values, not data-derived; all in `training.mlp` |
 
 ## 6. Hardware record (Phase 0, owner)
 
@@ -127,6 +133,8 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | Date | Command | Result |
 |---|---|---|
 | 2026-10-02 | `.venv/bin/pytest tests/ -q` (baseline, before any `dcs` code) | 535 passed, 4 skipped, 31.7 s |
+| 2026-10-02 | Step 0: `which pytest`; harness MCP `get_constitution`; `docker ps` | `.venv/bin/pytest`; constitution 1.0.0 returned; `harness_postgres` (healthy) and `harness_gate_daemon` up |
+| 2026-10-02 | U1: `pytest tests/dcs -q` (intended RED) | Exit 2, `ModuleNotFoundError: dcs` (expected). **Not recorded by the gate**: hooks not executable (§4) |
 
 ## 8. External plan review r1 (2026-10-02, another LLM, plan + PRD with placeholders only)
 
