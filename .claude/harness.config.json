@@ -1,0 +1,23 @@
+{
+  "specPrefix": "FISH",
+  "gatedGlobs": [
+    "**/*.py"
+  ],
+  "exemptGlobs": [
+    "**/*.md",
+    "**/*.lock",
+    "**/requirements.txt"
+  ],
+  "testGlobs": [
+    "**/test_*.py",
+    "**/*_test.py"
+  ],
+  "testCommands": [
+    {
+      "globs": [
+        "**/*.py"
+      ],
+      "command": "pytest"
+    }
+  ]
+}
