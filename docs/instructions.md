@@ -161,14 +161,15 @@ which compound, and later which dose, a fish received from its behavior. Specifi
 [`classifier_PRD.md`](classifier_PRD.md); plan: [`plans/classifier_plan.md`](plans/classifier_plan.md); status and
 decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
 
-**Where it stands.** The tools that exist today (units U1-U6) build the **training table**, one row per fish, and
-turn it into the **training set** one stage learns from. Folds (U7), auditing (U8) and training models (U9 and later)
-come next. Every unit is tested on synthetic data. Until
+**Where it stands.** The tools that exist today (units U1-U7) build the **training table**, one row per fish, turn it
+into the **training set** one stage learns from, and split that set into the **folds** every model will share.
+Auditing (U8) and training models (U9 and later) come next. Every unit is tested on synthetic data. Until
 reviewers Accept videos, the real input is the **unreviewed** prepds output, so no result is a claim about drugs yet.
 
 ```
-prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► trainset ──► (folds, audit, train: later)
-   (+ workbook for NTT)                     one row per fish        what every column is      features, labels, dates
+prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► trainset ──► folds ──► (audit, train: later)
+   (+ workbook for NTT)                     one row per fish        what every column is      features,    scheme A / B
+                                                                                               labels, dates
 ```
 
 ## Setup
@@ -242,6 +243,7 @@ not silently skipped.
 | U4 Workbook | `dcs.workbook.read_ntt(path, videos)` (inside `featurize`) | Reads the 8 NTT columns per fish from the workbook (`<Sex>_<Subject:04d>`). `has_ntt = 1` when all 8 are filled. A `-` in a half's cell means the fish never entered that half: distance 0, speed empty. Stops if the workbook disagrees with the gold set on compound or date, or has two different rows for one fish | Set `DCS_DB_PATH`; leave it unset to train without NTT |
 | U5 Featurize | `featurize`, `dcs.featurize.featurize(gold, workbook, settings.training)` | Builds the training table (next section) | `python -m dcs featurize` |
 | U6 Training set | `dcs.trainset.load_table(path)`, `build_trainset(table, schema, settings.training, stage)` | Cleans the labels, drops small classes, rare-state, constant and switched-off features, refuses forbidden columns; returns what one stage trains on and lists everything dropped ([The training set](#the-training-set)) | No command of its own: `audit` and `train` will call it. Call it from Python to see what a setting change does |
+| U7 Folds | `dcs.folds.make_folds(y, groups, ids, settings.training)` | Splits a training set into scheme A (whole dates held out) and scheme B (random) folds, `repeats` times, and pins classes seen on one date to training in scheme A ([The folds](#the-folds)) | No command of its own: `train` will call it once and give the same folds to every model |
 
 ## The training table
 
@@ -319,6 +321,45 @@ result.dropped_classes, result.dropped_states           # what is left out, and 
 On the real unreviewed set (143 fish, default settings): compound stage keeps every fish; Listing/LORR, Surface Breach
 and Dead are shown by too few fish, so their 36 features go; the dose stage keeps 104 fish in 12 classes.
 
+## The folds
+
+`make_folds` takes a training set's `y`, `groups` (date) and `ids` and the training settings. It changes no file and
+never stops a run; what it could not do goes into `notes`. Two schemes, both repeated `training.repeats` times
+(default 5) with `training.folds` folds (default 5):
+
+- **Scheme A, date held out** (the main score). All fish of one date sit in the same fold, so every test fish comes
+  from a day the model never saw. Classes stay as balanced across folds as whole dates allow. A class on two dates
+  gets its dates in two different folds, so it is never missing from the training side.
+- **Scheme B, random** (the reference). Fish are split at random, keeping class shares equal in every fold. Same-date
+  fish land on both sides, so B is expected to score higher than A; the gap shows how much the date helps.
+
+Rules, each with a note in `notes` when it applies:
+
+| Situation | What happens |
+|---|---|
+| A class seen on **one date only** | Cannot be held out. In scheme A its fish get fold `-1` (always training, never scored) and the class is listed in `date_confounded`. Scheme B scores it as usual |
+| Fewer dates than folds (pinned classes' dates not counted) | Scheme A uses one fold per date (`k["A"]` says how many) |
+| Fewer than 2 dates left to hold out | Scheme A is skipped (`k["A"] = 0`, no A rows). This is normal for the **dose** stage: doses of one compound never share a date, so every dose class is pinned |
+| A class's dates all land in one scheme-A fold | Possible only when dates are too entangled to split; the note names the repeat and the class, and that fold trains without it |
+| The largest class has fewer fish than folds | Scheme B uses fewer folds |
+
+The result (`Folds`) holds `table` (one row per fish, scheme and repeat: `video_id`, `label`, `date`, `scheme`,
+`repeat`, `fold`; this is what `train` will save as `folds.csv`), `k` (folds per scheme), `date_confounded` and
+`notes`. The same `training.seed` always gives the same folds. To look at them:
+
+```python
+from dcs.folds import make_folds
+folds = make_folds(result.y, result.groups, result.ids, settings.training)   # result from build_trainset above
+folds.k, folds.date_confounded, folds.notes
+folds.table.query("scheme == 'A' and repeat == 0").groupby("fold")["label"].value_counts()   # who is tested where
+```
+
+sklearn may print `The least populated class in y has only N members, which is less than n_splits`: a class smaller
+than the number of folds is simply absent from some test folds. It is a warning, not an error.
+
+On the real unreviewed set (default settings): the compound stage gets 5 folds in both schemes with no notes; the dose
+stage pins all 12 dose classes (each on one date), so only scheme B runs there.
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -342,7 +383,7 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 ## Tests
 
 ```bash
-pytest tests/dcs -q        # about 17 s, synthetic data only; run after every change
+pytest tests/dcs -q        # about 25 s on an idle machine, synthetic data only; run after every change
 pytest tests/ -q           # everything, before a commit
 ```
 
@@ -355,6 +396,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand) |
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
 | `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
+| `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
 ## Keeping this section current
 
