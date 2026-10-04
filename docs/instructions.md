@@ -6,6 +6,9 @@ labeled dataset a later, separate drug-classification project will train on. Ful
 specification: [`PRD.md`](PRD.md). Build status/progress:
 [`progress.md`](progress.md).
 
+That later project lives in the same repository: see
+[Classifier (`dcs`)](#classifier-dcs-compound-and-dose-from-behavior) at the end of this file.
+
 ## Setup
 
 ```bash
@@ -148,3 +151,159 @@ added, not assumed.
 
 Implementation is tracked task-by-task in [`progress.md`](progress.md),
 mirroring the PRD §12 phase breakdown (Phase 0-15).
+
+---
+
+# Classifier (`dcs`): compound and dose from behavior
+
+`dcs` reads what `prepds` wrote (labels per frame and per segment, one folder per fish) and will learn to tell
+which compound, and later which dose, a fish received from its behavior. Specification:
+[`classifier_PRD.md`](classifier_PRD.md); plan: [`plans/classifier_plan.md`](plans/classifier_plan.md); status and
+decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
+
+**Where it stands.** The tools that exist today (units U1-U5) build the **training table**, one row per fish.
+Auditing it (U8) and training models (U9 and later) come next. Every unit is tested on synthetic data. Until
+reviewers Accept videos, the real input is the **unreviewed** prepds output, so no result is a claim about drugs yet.
+
+```
+prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► (dcs audit, dcs train: later)
+   (+ workbook for NTT)                     one row per fish        what every column is
+```
+
+## Setup
+
+Same virtual environment as `prepds` (see [Setup](#setup)). Add the `DCS_*` lines to `.env` (copy them from
+`.env.example`); `dcs` ignores the `PDS_*` variables.
+
+| Variable | What it points at | Needed by |
+|---|---|---|
+| `DCS_PROCESSED_DIR` | prepds output folder (`trials_catalog.parquet` + `processed/<video_id>/`), e.g. `outputs` | `featurize` while `training.gold_source` is `processed` (the default for now) |
+| `DCS_ACCEPTED_DIR` | gold folder (`accepted_index.parquet` + one folder per Accepted fish) | `featurize` when `gold_source` is `accepted` |
+| `DCS_DB_PATH` | the trial workbook (same file as `PDS_DB_PATH`) | `featurize`, for the 8 NTT columns; unset → NTT left empty, `has_ntt = 0` |
+| `DCS_OUTPUT_DIR` | where `dcs` writes (default `outputs/dcs`, git-ignored) | everything |
+| `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; audit/train will read it |
+| `DCS_CONFIG` | a YAML file overriding `config/default_training.yaml` | optional |
+
+Settings come from the environment first, then `.env`, then the defaults. Check them before touching data:
+
+```bash
+python -m dcs check-config      # every path with [ok] / [MISSING] / [not set], then every training setting; exit 1 if a path you set is missing
+```
+
+**Changing a setting.** Write only the keys you change into a YAML file and pass it with `--config` (before the
+command) or `DCS_CONFIG`. A misspelled key or a wrong type is an error, never silently ignored.
+
+```yaml
+# my_training.yaml
+training:
+  gold_source: accepted          # read the reviewed gold folder instead of the unreviewed output
+  duration_range_s: [590, 610]   # flag recordings outside this length (default: no check)
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `python -m dcs check-config` | Shows the paths and settings `dcs` would use. Reads no data. |
+| `python -m dcs synth --out <new folder> [--seed N]` | Writes a **synthetic** gold dataset: `<out>/accepted/` (index + one folder per fish) and `<out>/synthetic_db.xlsx` (workbook). Placeholder names only (`COMPOUND_A`, `F_0001`). Use it to try `dcs` without real data. Refuses a folder that already has files. |
+| `python -m dcs featurize [--profile <version>]` | Reads the gold source, computes the per-fish features and writes `training_table.parquet` and `training_table_schema.json` to `DCS_OUTPUT_DIR`. Prints how many fish were kept and dropped. `--profile` keeps one calibration profile when the set mixes several. |
+
+Global options go **before** the command: `python -m dcs --config my.yaml featurize`, `--env-file other.env`.
+
+### Try it on synthetic data (about 10 seconds)
+
+```bash
+python -m dcs synth --out /tmp/dcs_try
+printf 'training:\n  gold_source: accepted\n' > /tmp/dcs_try/accepted.yaml     # synth writes the accepted layout
+DCS_ACCEPTED_DIR=/tmp/dcs_try/accepted DCS_DB_PATH=/tmp/dcs_try/synthetic_db.xlsx DCS_OUTPUT_DIR=/tmp/dcs_try/out \
+  python -m dcs --config /tmp/dcs_try/accepted.yaml featurize
+# Featurized 48 fish (reviewed, profile cal-synthetic), 0 dropped
+```
+
+### Run it on the real data
+
+```bash
+# .env: DCS_PROCESSED_DIR=outputs  and  DCS_DB_PATH=<same file as PDS_DB_PATH>
+python -m dcs check-config
+python -m dcs featurize          # Featurized <n> fish (UNREVIEWED, profile cal-...), <m> dropped
+```
+
+Fish that the catalog matched to a video but `prepds run` never processed are listed as dropped (`missing_file`),
+not silently skipped.
+
+## What each part does
+
+| Unit | Tool | What it does | How to use it |
+|---|---|---|---|
+| U1 Config | `check-config`, `config/default_training.yaml`, `dcs.config.load_settings()` | Loads paths and training settings with the precedence above; rejects unknown keys, wrong types and out-of-range values with a message naming the key | Run `check-config` after editing `.env` or an override YAML |
+| U2 Synthetic data | `synth`, `dcs.synthetic.make_gold_dataset(out, SynthConfig(...))` | Writes fish that follow the real prepds file formats, with a planted compound signal and a date effect. `SynthConfig` has one switch per edge case (e.g. `low_detected_fish=2`, `undetermined=True`, `missing_file="frames"`), and `result.targets` names the fish each switch hit | CLI for trying the tools; the Python form for tests |
+| U3 Gold reader | `dcs.gold.read_gold(settings)` (inside `featurize`) | Reads either source and checks the prepds file contract. **Drops** a fish (listed with a reason) when a file is missing or unreadable, or its status is REJECTED / NOT_PROCESSED. **Stops** with one clear message when the data breaks the contract: mixed calibration profiles, a fish without a date, a duplicated fish, `Undetermined` in an Accepted video, a missing column or wrong type, tracker evidence that disagrees with the profile | Nothing to call by hand; its messages tell you what to fix (table below) |
+| U4 Workbook | `dcs.workbook.read_ntt(path, videos)` (inside `featurize`) | Reads the 8 NTT columns per fish from the workbook (`<Sex>_<Subject:04d>`). `has_ntt = 1` when all 8 are filled. A `-` in a half's cell means the fish never entered that half: distance 0, speed empty. Stops if the workbook disagrees with the gold set on compound or date, or has two different rows for one fish | Set `DCS_DB_PATH`; leave it unset to train without NTT |
+| U5 Featurize | `featurize`, `dcs.featurize.featurize(gold, workbook, settings.training)` | Builds the training table (next section) | `python -m dcs featurize` |
+
+## The training table
+
+One row per fish, in the gold set's order. Columns, by group:
+
+| Group | Columns | From | Notes |
+|---|---|---|---|
+| Identity, labels, folds | `video_id`, `subject_id`; `compound`, `concentration_mM`; `date` | gold set | Labels are as written; cleaning them is U6. `date` only groups the folds |
+| States | per state: `state_<s>_share`, `_bouts`, `_mean_bout_s`, `_latency_s` (6 states) | `segments.csv` | Share of the **known** time. A state never shown: 0 bouts, mean bout 0, latency = recording length |
+| Transitions | `trans_<a>_to_<b>` (30 ordered pairs) | `segments.csv` | Counts of a state directly followed by another |
+| Kinematics | `velocity_mean`, `_median`, `_cv`, `abs_acceleration_mean`, `abs_angular_velocity_mean`, `meander_mean`, `immobile_share`, `detected_share` | `frames.parquet` | Detected frames only. Pixels and seconds |
+| Depth | `depth_mean`, `depth_min`, `depth_p01` … `depth_p99` | `frames.parquet` | Pixel row from the frame top; **off for training by default** (camera framing can differ by date) |
+| NTT | `tdm_*`, `velocity_*`, `time_top_s`, `time_bottom_s`, `has_ntt` | workbook | Empty when absent; filled per fold later (U9) |
+| Demographics | `sex`, `strain`, `age` | gold set | Off by default; an ablation only |
+| Meta (never features) | `undetermined_share`, `manual_share`, `flag_low_detected`, `flag_odd_duration`, `recording_s`, review fields, fps, profile | both | For the audit. Flags mark a fish, never drop it |
+
+**`Undetermined`** (time the tracker could not label; every unreviewed video has some) is treated as unknown time,
+not as a behavior: it gets no features, state shares are computed over the remaining time, and a transition across
+it is not counted. Its amount is kept as `undetermined_share`.
+
+**Dropped fish** (listed in the schema file with a reason, never silent): files missing or unreadable, review status,
+other calibration profile, no detected frame at all (`no_detected_frames`), or no known state time
+(`no_known_state_time`).
+
+`training_table_schema.json` describes every column: `role` (`feature`, `label`, `group`, `id`, `meta`), `source`,
+`kind` (`count` and `duration` get `log1p` later), `feature_group` and, for state features, `states`. It also records
+the source, profile, tracker, frame-rate check and every dropped fish, so these two files are all that has to be
+copied to the training machine. To look at them:
+
+```python
+import json, pandas as pd
+table = pd.read_parquet("outputs/dcs/training_table.parquet")
+schema = json.load(open("outputs/dcs/training_table_schema.json"))
+features = [c["name"] for c in schema["columns"] if c["role"] == "feature"]
+pd.DataFrame(schema["dropped"]).groupby("reason").size()      # why fish were left out
+```
+
+## When `dcs` stops: what to do
+
+Errors print one line starting with `Configuration error:` (exit code 2).
+
+| Message contains | Fix |
+|---|---|
+| `DCS_PROCESSED_DIR is not set` | Add `DCS_PROCESSED_DIR=outputs` to `.env`, or set `training.gold_source: accepted` |
+| `No trials_catalog.parquet` / `No processed/ folder` | Run `prepds catalog` and `prepds run`, or fix `DCS_PROCESSED_DIR` |
+| `No accepted_index.parquet` | Run `prepds export-index`, or fix `DCS_ACCEPTED_DIR` |
+| `The set mixes calibration profiles` | Choose one: `featurize --profile <version>` |
+| `fish have no date` | Run `prepds catalog`, then `prepds export-index` |
+| `Undetermined found in an Accepted video` | Review that video again in `prepds review` |
+| `column(s) ... missing` / `has dtype` | prepds output from a different version: re-run `prepds run` for those videos |
+| `workbook compound ... disagrees` / `different rows for the same fish` | Correct the workbook row named in the message |
+
+## Tests
+
+```bash
+pytest tests/dcs -q        # about 16 s, synthetic data only; run after every change
+pytest tests/ -q           # everything, before a commit
+```
+
+| File | Checks |
+|---|---|
+| `test_dcs_config.py`, `test_dcs_config_params.py` | Settings precedence, override YAML, rejected keys and values, `check-config` |
+| `test_dcs_synthetic*.py` | Synthetic files match the prepds formats, same seed gives the same data, each edge-case switch does what it says |
+| `test_dcs_gold.py`, `_gold_files.py`, `_gold_processed.py` | What the gold reader drops and what stops it, for both sources |
+| `test_dcs_workbook.py` | NTT columns: header cleanup, `-` rule, duplicates, disagreements, missing fish |
+| `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand) |
+| `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |

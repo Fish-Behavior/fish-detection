@@ -98,7 +98,6 @@ VIDEO_COLUMNS = (
 )
 DROPPED_COLUMNS = ("video_id", "reason", "detail")
 INDEX_FIELDS = tuple(name for name in VIDEO_COLUMNS if name in schema.INDEX_COLUMNS)
-CATALOG_FIELDS = ("date", "strain", "age", "agent_exposure_min")
 CHECKED_LABELS = ("compound", "concentration_mM")  # must read the same in the manifest and the index/catalog
 NO_DATE_HINTS = {
     SOURCE_ACCEPTED: "Run `prepds catalog`, then `prepds export-index`, so the index gets the workbook fields.",
@@ -264,8 +263,8 @@ def read_processed(output_dir: Path, options: ReadOptions | None = None) -> Gold
         if isinstance(files, FileProblem):
             dropped.append((video_id, files.reason, files.detail))
             continue
-        row = {name: manifest.get(name) for name in INDEX_FIELDS if name not in CATALOG_FIELDS}
-        row.update({name: trial.get(name) for name in CATALOG_FIELDS})
+        row = {name: manifest.get(name) for name in INDEX_FIELDS if name not in schema.WORKBOOK_INDEX_FIELDS}
+        row.update({name: trial.get(name) for name in schema.WORKBOOK_INDEX_FIELDS})
         row.update(video_id=video_id, **_review_fields(manifest, video_id), undetermined_share=files.undetermined_share)
         rows.append(row)
     run = {folder.name for folder in folders}

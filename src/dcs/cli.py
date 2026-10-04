@@ -3,8 +3,9 @@
 Each step registers one sub-command here in its own unit (synth, featurize,
 audit, train, predict: classifier plan §3.1). So far: `check-config`,
 which shows what `dcs` will read so a new `.env` or override YAML can be
-verified before any data is touched, and `synth`, which writes a synthetic
-gold dataset for trying the other commands without real data.
+verified before any data is touched; `synth`, which writes a synthetic
+gold dataset for trying the other commands without real data; and
+`featurize`, which turns the gold set into the training table.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from typing import Any, Mapping, Sequence
 
 from dcs import __version__
 from dcs.config import PATH_VARIABLES, ConfigError, Settings, load_settings
+from dcs.featurize import featurize, write_outputs
+from dcs.gold import SOURCE_ACCEPTED, read_gold
 from dcs.synthetic import SynthConfig, make_gold_dataset
 
 # Folders dcs creates itself, so their absence is never a problem.
@@ -50,6 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     synth.add_argument("--out", required=True, help="new or empty folder to write into")
     synth.add_argument("--seed", type=int, default=0, help="random seed, 0 or more (default: 0)")
     synth.set_defaults(handler=run_synth, needs_settings=False)  # works even with a broken .env
+
+    feat = commands.add_parser("featurize", help="gold set (+ workbook NTT) -> training_table.parquet and its schema json")
+    feat.add_argument("--profile", help="calibration profile to keep when the set mixes several (EC-21)")
+    feat.set_defaults(handler=run_featurize)
     return parser
 
 
@@ -88,6 +95,18 @@ def run_synth(settings: Settings | None, args: argparse.Namespace) -> int:
     print(f"Wrote a synthetic gold dataset ({len(result.truth)} fish, placeholder names only) to {out}")
     print(f"  accepted folder: {result.accepted_dir}   (DCS_ACCEPTED_DIR)")
     print(f"  workbook:        {result.workbook_path}   (DCS_DB_PATH)")
+    return 0
+
+
+def run_featurize(settings: Settings, args: argparse.Namespace) -> int:
+    """Read the gold source chosen in the settings, featurize every kept fish, write the table and schema."""
+    gold = read_gold(settings, profile=args.profile)
+    result = featurize(gold, settings.paths.db_path, settings.training)
+    table_path, json_path = write_outputs(result, settings.paths.table)
+    reviewed = "reviewed" if gold.source == SOURCE_ACCEPTED else "UNREVIEWED"
+    print(f"Featurized {len(result.table)} fish ({reviewed}, profile {gold.profile}), {len(result.schema['dropped'])} dropped")
+    print(f"  table:  {table_path}")
+    print(f"  schema: {json_path}")
     return 0
 
 

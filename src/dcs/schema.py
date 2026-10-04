@@ -115,7 +115,8 @@ INDEX_COLUMNS = (
     "strip_path",
     "manifest_path",
 )
-# Index fields that stay null until `prepds export-index` runs with a catalog (PRD change C4, EC-27).
+# Workbook fields: null in the index until `prepds export-index` runs with a catalog (C4, EC-27);
+# the unreviewed source takes them from the catalog.
 WORKBOOK_INDEX_FIELDS = ("strain", "age", "date", "agent_exposure_min")
 
 # --- unreviewed prepds output (D-033): <PDS_OUTPUT_DIR>/{trials_catalog.parquet, processed/<video_id>/} ---
