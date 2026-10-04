@@ -13,7 +13,7 @@ from prepds.pipeline import Outcome, RunConfig, process_trial, run_batch, video_
 from prepds.review_store import load_manifest, save_edit
 from prepds.models import BehaviorState as B
 
-FIXTURE_VIDEO = Path(__file__).parent / "fixtures" / "synth_tiny.mp4"
+FIXTURE_VIDEO = Path(__file__).parent.parent / "fixtures" / "synth_tiny.mp4"
 NOW = dt.datetime(2026, 9, 23, tzinfo=dt.timezone.utc)
 THRESHOLDS = {
     "freeze_speed_floor_px_per_s": 22.67,

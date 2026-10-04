@@ -42,7 +42,7 @@ from prepds.calibration.digitize_reference import (
 from prepds.models import BehaviorState
 from prepds.palette import PALETTE_RGB, classify_pixel
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 SWATCH_ORDER = [
     BehaviorState.CONTROLLED_SWIM,

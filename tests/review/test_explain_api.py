@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from prepds.calibration.profile import write_calibration_profile
 from prepds.webapp.app import create_app
-from tests.test_webapp_api import _make
+from tests.review.test_webapp_api import _make
 
 VERSION = "cal-2026-09-23-r2"
 THRESHOLDS = {"freeze_speed_floor_px_per_s": 6.0, "min_freeze_bout_s": 1.0, "erratic_speed_threshold_px_per_s": 40.0,

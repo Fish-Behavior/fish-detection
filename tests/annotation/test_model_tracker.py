@@ -14,7 +14,7 @@ from prepds.model_tracker import ModelTracker  # noqa: E402
 from prepds.video_io import probe  # noqa: E402
 from PIL import Image  # noqa: E402
 
-FIXTURE_VIDEO = Path(__file__).parent / "fixtures" / "synth_tiny.mp4"
+FIXTURE_VIDEO = Path(__file__).parent.parent / "fixtures" / "synth_tiny.mp4"
 
 
 @pytest.fixture(scope="module")

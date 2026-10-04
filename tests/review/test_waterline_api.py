@@ -10,8 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from prepds.webapp.app import create_app
-from tests.test_overlay_api import _detections
-from tests.test_webapp_api import _make
+from tests.review.test_overlay_api import _detections
+from tests.review.test_webapp_api import _make
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def env(tmp_path: Path):
     processed, sources = tmp_path / "processed", tmp_path / "videos"
     processed.mkdir(), sources.mkdir()
     video_id = _make(processed, sources)
-    shutil.copy(Path(__file__).parent / "fixtures" / "synth_tiny.mp4", sources / "synth_tiny.mp4")
+    shutil.copy(Path(__file__).parent.parent / "fixtures" / "synth_tiny.mp4", sources / "synth_tiny.mp4")
     app = create_app(processed, tmp_path / "accepted", video_dir=sources, allowed_hosts=("testserver",))
     return TestClient(app), processed / video_id, video_id
 
