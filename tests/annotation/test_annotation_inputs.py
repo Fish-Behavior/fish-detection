@@ -13,7 +13,7 @@ from prepds.annotation.inputs import extract_frame, load_video_infos
 from prepds.models import MatchStatus, Trial
 from prepds.pipeline import RunConfig, process_trial
 
-FIXTURE_VIDEO = Path(__file__).parent / "fixtures" / "synth_tiny.mp4"
+FIXTURE_VIDEO = Path(__file__).parent.parent / "fixtures" / "synth_tiny.mp4"
 THRESHOLDS = {"freeze_speed_floor_px_per_s": 22.67, "min_freeze_bout_s": 0.03, "erratic_speed_threshold_px_per_s": 41.2,
               "surface_breach_depth_threshold_px": 20.0, "min_dead_bout_s": 60.0, "speed_lag_s": 1.0,
               "listing_orientation_deviation_deg": None}
