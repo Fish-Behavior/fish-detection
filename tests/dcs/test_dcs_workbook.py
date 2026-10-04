@@ -143,7 +143,7 @@ def test_processed_source_dates_match_too(small: SynthResult, clean: pd.DataFram
 
 def test_header_whitespace_is_ignored(small: SynthResult, clean: pd.DataFrame, tmp_path: Path) -> None:
     def pad(table: pd.DataFrame) -> pd.DataFrame:
-        return table.rename(columns=lambda header: f"  {header.replace(' ', ' \n ')}\t")
+        return table.rename(columns=lambda header: "  " + header.replace(" ", " \n ") + "\t")  # no \ in an f-string field: CI runs 3.11
 
     pd.testing.assert_frame_equal(read_ntt(rewritten(small, tmp_path, pad), read_accepted(small.accepted_dir).videos), clean)
 

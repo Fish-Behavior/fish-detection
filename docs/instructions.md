@@ -161,13 +161,14 @@ which compound, and later which dose, a fish received from its behavior. Specifi
 [`classifier_PRD.md`](classifier_PRD.md); plan: [`plans/classifier_plan.md`](plans/classifier_plan.md); status and
 decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
 
-**Where it stands.** The tools that exist today (units U1-U5) build the **training table**, one row per fish.
-Auditing it (U8) and training models (U9 and later) come next. Every unit is tested on synthetic data. Until
+**Where it stands.** The tools that exist today (units U1-U6) build the **training table**, one row per fish, and
+turn it into the **training set** one stage learns from. Folds (U7), auditing (U8) and training models (U9 and later)
+come next. Every unit is tested on synthetic data. Until
 reviewers Accept videos, the real input is the **unreviewed** prepds output, so no result is a claim about drugs yet.
 
 ```
-prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► (dcs audit, dcs train: later)
-   (+ workbook for NTT)                     one row per fish        what every column is
+prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► trainset ──► (folds, audit, train: later)
+   (+ workbook for NTT)                     one row per fish        what every column is      features, labels, dates
 ```
 
 ## Setup
@@ -240,6 +241,7 @@ not silently skipped.
 | U3 Gold reader | `dcs.gold.read_gold(settings)` (inside `featurize`) | Reads either source and checks the prepds file contract. **Drops** a fish (listed with a reason) when a file is missing or unreadable, or its status is REJECTED / NOT_PROCESSED. **Stops** with one clear message when the data breaks the contract: mixed calibration profiles, a fish without a date, a duplicated fish, `Undetermined` in an Accepted video, a missing column or wrong type, tracker evidence that disagrees with the profile | Nothing to call by hand; its messages tell you what to fix (table below) |
 | U4 Workbook | `dcs.workbook.read_ntt(path, videos)` (inside `featurize`) | Reads the 8 NTT columns per fish from the workbook (`<Sex>_<Subject:04d>`). `has_ntt = 1` when all 8 are filled. A `-` in a half's cell means the fish never entered that half: distance 0, speed empty. Stops if the workbook disagrees with the gold set on compound or date, or has two different rows for one fish | Set `DCS_DB_PATH`; leave it unset to train without NTT |
 | U5 Featurize | `featurize`, `dcs.featurize.featurize(gold, workbook, settings.training)` | Builds the training table (next section) | `python -m dcs featurize` |
+| U6 Training set | `dcs.trainset.load_table(path)`, `build_trainset(table, schema, settings.training, stage)` | Cleans the labels, drops small classes, rare-state, constant and switched-off features, refuses forbidden columns; returns what one stage trains on and lists everything dropped ([The training set](#the-training-set)) | No command of its own: `audit` and `train` will call it. Call it from Python to see what a setting change does |
 
 ## The training table
 
@@ -247,7 +249,7 @@ One row per fish, in the gold set's order. Columns, by group:
 
 | Group | Columns | From | Notes |
 |---|---|---|---|
-| Identity, labels, folds | `video_id`, `subject_id`; `compound`, `concentration_mM`; `date` | gold set | Labels are as written; cleaning them is U6. `date` only groups the folds |
+| Identity, labels, folds | `video_id`, `subject_id`; `compound`, `concentration_mM`; `date` | gold set | Labels are as written; the training set cleans them. `date` only groups the folds |
 | States | per state: `state_<s>_share`, `_bouts`, `_mean_bout_s`, `_latency_s` (6 states) | `segments.csv` | Share of the **known** time. A state never shown: 0 bouts, mean bout 0, latency = recording length |
 | Transitions | `trans_<a>_to_<b>` (30 ordered pairs) | `segments.csv` | Counts of a state directly followed by another |
 | Kinematics | `velocity_mean`, `_median`, `_cv`, `abs_acceleration_mean`, `abs_angular_velocity_mean`, `meander_mean`, `immobile_share`, `detected_share` | `frames.parquet` | Detected frames only. Pixels and seconds |
@@ -277,6 +279,46 @@ features = [c["name"] for c in schema["columns"] if c["role"] == "feature"]
 pd.DataFrame(schema["dropped"]).groupby("reason").size()      # why fish were left out
 ```
 
+## The training set
+
+`build_trainset` takes the two featurize files and one **stage**: `compound` (Stage 1) or `dose` (Stage 2, dose within
+compound). It changes no file. In order:
+
+1. **Labels.** Compound: spaces trimmed and collapsed, upper case, so `compound_a ` and `COMPOUND_A` are one class.
+   Dose: the written text without spaces, so `0.03 + 0.01` and `0.03+0.01` match (combination doses are not numbers).
+   A dose-stage label reads `COMPOUND_A @ 0.1`.
+2. **Class filter.** Classes with fewer than `training.min_class_size` fish (default 6) are dropped. Classes of exactly
+   that size stay but are flagged **very small**. In the dose stage, a compound left with one dose (vehicle always) is
+   dropped too (`single_dose`).
+3. **Feature groups.** States, transitions and kinematics are always used. `depth` only with `use_depth` (off: camera
+   framing), `ntt` only with `use_ntt` (on), `demographics` (`sex`, `strain`, `age`) only with `use_demographics` (off).
+4. **Forbidden columns.** Labels, ids, `date`, paths, review and edit fields, manual-frame share, profile and pipeline
+   versions, protocol fields (`agent_exposure_min`, `ntt_min`, `uv_min`, `h2o_*`, tissue), recording length, fps and
+   resolution never become features. If the schema file marks one as a feature, the run stops.
+5. **Rare states.** A state shown (at least one bout) by fewer than `training.min_state_fish` kept fish (default 10)
+   loses all its features, transitions to or from it included.
+6. **Nothing to learn from.** A feature that is constant or empty over the kept fish is dropped (on the real NTT data
+   `has_ntt` is always 1, so it goes).
+
+Missing values are **not** filled here; that happens per fold (U9). The result (`TrainSet`) holds `X` (features),
+`y` (label), `groups` (date) and `ids` (`video_id`) on the same rows, `kinds` (which features get `log1p` later),
+`classes` (fish per kept class), `very_small`, and the drop lists `dropped_classes` (label, fish, reason),
+`dropped_states` and `dropped_features` (name, reason). To see what a setting does:
+
+```python
+from dcs.config import load_settings
+from dcs.trainset import build_trainset, load_table
+
+settings = load_settings()                              # or load_settings(config_file="my.yaml")
+table, schema = load_table(settings.paths.table)
+result = build_trainset(table, schema, settings.training, "compound")   # or "dose"
+result.classes, result.very_small                       # what is kept
+result.dropped_classes, result.dropped_states           # what is left out, and why
+```
+
+On the real unreviewed set (143 fish, default settings): compound stage keeps every fish; Listing/LORR, Surface Breach
+and Dead are shown by too few fish, so their 36 features go; the dose stage keeps 104 fish in 12 classes.
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -291,11 +333,16 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `Undetermined found in an Accepted video` | Review that video again in `prepds review` |
 | `column(s) ... missing` / `has dtype` | prepds output from a different version: re-run `prepds run` for those videos |
 | `workbook compound ... disagrees` / `different rows for the same fish` | Correct the workbook row named in the message |
+| `class(es) left for the ... stage` | Too few fish per class; the message lists them. Wait for more fish, or lower `training.min_class_size` in an override file. In the dose stage a compound also needs 2 kept doses |
+| `The training table has no fish` | `featurize` kept nobody: look at `dropped` in the schema file |
+| `No schema file ... beside the table` / `schema file ... is damaged` | Copy both featurize files together, or run `python -m dcs featurize` again |
+| `marks forbidden column(s)` / `in the schema but not in the table` | The two files come from different runs or were edited: run `featurize` again |
+| `No feature left` | Every usable feature is constant or of a rare state: switch on a group (`use_ntt`, `use_depth`) or lower `min_state_fish` |
 
 ## Tests
 
 ```bash
-pytest tests/dcs -q        # about 16 s, synthetic data only; run after every change
+pytest tests/dcs -q        # about 17 s, synthetic data only; run after every change
 pytest tests/ -q           # everything, before a commit
 ```
 
@@ -307,6 +354,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_workbook.py` | NTT columns: header cleanup, `-` rule, duplicates, disagreements, missing fish |
 | `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand) |
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
+| `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
 
 ## Keeping this section current
 
