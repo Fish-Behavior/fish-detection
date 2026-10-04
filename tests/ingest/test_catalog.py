@@ -27,7 +27,7 @@ from prepds.catalog import (
 )
 from prepds.models import MatchStatus
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 SYNTH_DB = FIXTURES / "synth_db.xlsx"
 SYNTH_VIDEO = FIXTURES / "synth_tiny.mp4"  # 5.0s real playable video, for duration tests
 

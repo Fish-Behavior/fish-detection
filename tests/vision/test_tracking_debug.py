@@ -7,7 +7,7 @@ from pathlib import Path
 from prepds.tracking import render_debug_overlay, track_video
 from prepds.video_io import probe
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 SYNTH_VIDEO = FIXTURES / "synth_tiny.mp4"
 
 

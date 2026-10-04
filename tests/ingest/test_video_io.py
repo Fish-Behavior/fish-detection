@@ -15,7 +15,7 @@ import pytest
 
 from prepds.video_io import frames, probe
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 def test_probe_reads_actual_fps_and_duration_not_hardcoded() -> None:
