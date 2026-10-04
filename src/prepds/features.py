@@ -4,7 +4,7 @@ Every kinematic field (`velocity`, `acceleration`, `angular_velocity`,
 `meander`) uses the same `0.0`-sentinel-on-not-computable convention as
 `Track.x`/`Track.y` (§3.3 - never fabricate a value from missing data). A
 value is only ever real when enough *consecutive, detected* history exists
-behind it - see `tests/test_features.py`'s module docstring for the exact
+behind it - see `tests/behavior/test_features.py`'s module docstring for the exact
 history-depth rule per field, and `FeatureFrame`'s docstring in models.py for
 why downstream code must gate on `detected`, not on a feature being `0.0`.
 

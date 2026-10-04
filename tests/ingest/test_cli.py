@@ -49,7 +49,7 @@ import pytest
 
 from prepds.models import MatchStatus, Trial
 
-FIXTURE_VIDEO = Path(__file__).parent / "fixtures" / "synth_tiny.mp4"
+FIXTURE_VIDEO = Path(__file__).parent.parent / "fixtures" / "synth_tiny.mp4"
 
 
 def _write_catalog(out_dir: Path, subjects=("0001", "0002")) -> None:

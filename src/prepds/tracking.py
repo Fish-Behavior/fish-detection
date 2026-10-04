@@ -41,7 +41,7 @@ Subject 0057: the KNN model has no prior history on its first few `apply()`
 calls, so **the first 4 frames of every video are structurally never
 detected** (not an occlusion/glare edge case - a fixed warmup property of
 the algorithm, independent of video length or `history=500`, verified on a
-35865-frame real video). `tests/test_tracking.py` asserts this leading
+35865-frame real video). `tests/vision/test_tracking.py` asserts this leading
 window explicitly rather than assuming a single frame 0.
 
 Per T029 (docs/strain_tracking_notes.md §2), the real-video sample is
