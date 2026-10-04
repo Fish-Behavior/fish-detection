@@ -11,7 +11,10 @@ from __future__ import annotations
 import math
 from typing import Any, Callable, Mapping, NamedTuple
 
-# Allowed choices (classifier PRD §6.1-6.3, §7.2).
+# Allowed choices (classifier PRD §6.1-6.3, §7.2; gold sources D-033).
+SOURCE_PROCESSED = "processed"  # unreviewed prepds output (D-033)
+SOURCE_ACCEPTED = "accepted"  # reviewed gold folder
+GOLD_SOURCES = (SOURCE_PROCESSED, SOURCE_ACCEPTED)
 STAGES = ("compound", "dose", "both")
 MODEL_NAMES = ("majority", "date_only", "logreg", "random_forest", "hist_gb", "mlp")
 
@@ -82,6 +85,9 @@ def _is_layer_list(value: Any) -> bool:
 
 # One rule per non-boolean default in config/default_training.yaml (a test keeps the two in step).
 VALUE_RULES: tuple[tuple[str, Rule], ...] = (
+    ("training.gold_source", one_of(GOLD_SOURCES)),
+    ("training.model_profile_marker", Rule(lambda value: isinstance(value, str) and bool(value.strip()), "non-empty text")),
+    ("training.fps_tolerance", number_in(0, 1)),
     ("training.seed", whole_at_least(0)),
     ("training.folds", whole_at_least(MIN_FOLDS)),
     ("training.repeats", whole_at_least(1)),

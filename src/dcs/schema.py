@@ -24,7 +24,13 @@ SOURCE_AUTO = "auto"
 SOURCE_MANUAL = "manual"
 SOURCES = (SOURCE_AUTO, SOURCE_MANUAL)
 
+# Review status in manifest.json (prepds ReviewStatus).
+REVIEW_NOT_PROCESSED = "NOT_PROCESSED"
+REVIEW_PROCESSED_AUTO = "PROCESSED_AUTO"
+REVIEW_EDITED = "EDITED"
 REVIEW_ACCEPTED = "ACCEPTED"
+REVIEW_REJECTED = "REJECTED"
+REVIEW_STATUSES = (REVIEW_NOT_PROCESSED, REVIEW_PROCESSED_AUTO, REVIEW_EDITED, REVIEW_ACCEPTED, REVIEW_REJECTED)
 
 # --- per-video gold folder: <accepted>/<video_id>/ --------------------------------------------
 FRAMES_FILE = "frames.parquet"
@@ -111,6 +117,24 @@ INDEX_COLUMNS = (
 )
 # Index fields that stay null until `prepds export-index` runs with a catalog (PRD change C4, EC-27).
 WORKBOOK_INDEX_FIELDS = ("strain", "age", "date", "agent_exposure_min")
+
+# --- unreviewed prepds output (D-033): <PDS_OUTPUT_DIR>/{trials_catalog.parquet, processed/<video_id>/} ---
+PROCESSED_DIR_NAME = "processed"
+DETECTIONS_FILE = "detections.parquet"  # written beside the frames only by the model tracker (D-003, EC-29)
+CATALOG_FILE = "trials_catalog.parquet"  # written by `prepds catalog`, one row per workbook trial
+CATALOG_COLUMNS = (
+    "subject_id",
+    "sex",
+    "strain",
+    "age",
+    "compound",
+    "concentration_mM",
+    "date",
+    "agent_exposure_min",
+    "video_path",
+    "match_status",
+)
+MATCH_MATCHED = "matched"  # catalog rows with a video; others (e.g. "no_video") have no folder
 
 # --- trial workbook (the input prepds catalogs; dcs reads only the NTT columns, D-004) -----------
 WORKBOOK_SHEET = "Sheet1"

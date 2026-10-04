@@ -4,7 +4,7 @@
 **Privacy:** placeholders only (`COMPOUND_A`, `F_0042`, `<date>`); no data, outputs, real names, dates or paths.
 **Status legend:** `NOT_STARTED` / `IN_PROGRESS` / `DONE` / `BLOCKED: <reason>` / `OWNER`. Updated after every task.
 
-**Last updated:** 2026-10-02. U1 done (branch `feature/dcs-u1-scaffold`, CI green). **U2 done** under the gate (runs 4-6, spec `FISH-PROD-002` v3, three review rounds) on `feature/dcs-u2-synthetic`, stacked on U1. Next: U3 (gold reader). C8 answered: PyTorch (D-027).
+**Last updated:** 2026-10-03. U1 done (branch `feature/dcs-u1-scaffold`, CI green). U2 done under the gate (runs 4-6, spec `FISH-PROD-002` v3, three review rounds) on `feature/dcs-u2-synthetic`, stacked on U1. **U3 (gold reader) done** under the gate (runs 7-9, spec `FISH-PROD-003` v3, three review rounds), not committed yet. Next: U4 (workbook). **Q17 answered:** until videos are Accepted, `dcs` reads the unreviewed pipeline output under `outputs/` (D-033). C8 answered: PyTorch (D-027).
 
 ---
 
@@ -14,8 +14,8 @@
 |---|---|---|
 | 0. Environment | IN_PROGRESS | T0.1 done; T0.2-T0.4 owner |
 | 0b. Upstream readiness | OWNER | No video Accepted yet (Q14) |
-| G1 | BLOCKED: no Accepted videos | Real-data audit with `dcs audit` (D-010) |
-| 1. Featurize, training set, folds | IN_PROGRESS | U1, U2 done; U3-U8 next |
+| G1 | NOT_STARTED | No Accepted videos yet; owner chose the unreviewed output meanwhile (Q17, D-033). Real-data audit with `dcs audit` (D-010) once U8 exists |
+| 1. Featurize, training set, folds | IN_PROGRESS | U1-U3 done; U4-U8 next |
 | 2. Baselines | NOT_STARTED | U9-U12 |
 | G2 | NOT_STARTED | Synthetic baseline report review |
 | 3. MLP and ablations | NOT_STARTED | U13-U14 |
@@ -35,7 +35,7 @@
 | T0.4 Windows PC checks | - | OWNER | | |
 | T1.1-T1.3 scaffold, config | U1 | DONE | FISH-PROD-001 v2 (runs 2, 3) | `src/dcs/{__init__,__main__,cli,config,config_rules}.py`, `config/default_training.yaml`, `pyproject.toml`, `.gitignore`, `.env.example`; tests `tests/dcs/{conftest,test_dcs_config,test_dcs_config_params}.py` (129). Reviews: round 1 code-reviewer APPROVE, python-reviewer no blocker; round 2 code-reviewer APPROVE, python-reviewer APPROVE WITH WARNINGS; accepted findings fixed test-first in run 3 |
 | T1.4-T1.5 synthetic data | U2 | DONE | FISH-PROD-002 v3 (runs 4-6) | `src/dcs/{schema,synthetic,synthetic_config,synthetic_design,synthetic_frames,synthetic_workbook}.py`, `dcs synth --out`; tests `tests/dcs/{test_dcs_synthetic,test_dcs_synthetic_knobs,test_dcs_synthetic_config}.py`, `synth_helpers.py` (213 dcs tests). Three review rounds (code-reviewer, python-reviewer), last one APPROVE; it fed the synthetic tracks into prepds `derive_features` and found 1 coincidental mismatch in 48,000 cells. **U3 note:** the synthetic set has no `strip.png`, so the gold reader must not require it |
-| T1.6-T1.7 gold reader | U3 | NOT_STARTED | | |
+| T1.6-T1.7 gold reader | U3 | DONE | FISH-PROD-003 v3 (runs 7-9) | `src/dcs/{gold,gold_checks,gold_rules}.py`; `schema.py` (catalog, review statuses, detections); `config_rules.py` (gold sources); settings `training.{gold_source,model_profile_marker,fps_tolerance}`; tests `tests/dcs/{test_dcs_gold,test_dcs_gold_files,test_dcs_gold_processed}.py`, `gold_helpers.py` (122 new, 335 dcs tests). Reviews: run 7 code-reviewer APPROVE WITH WARNINGS, python-reviewer BLOCK (3 HIGH); fixed in run 8; round 2 code-reviewer APPROVE, python-reviewer APPROVE WITH WARNINGS (2 MEDIUM), fixed in run 9; round 3 code-reviewer APPROVE. Deferred to U8: report when the tracker could not be cross-checked. Two sources (D-033). Runs on the real unreviewed set: no fish dropped, one profile, classical tracker confirmed for every fish, fps uniform. **U5 note:** every unreviewed video has `Undetermined` time (a sizeable minority more than half the recording), so featurize must treat it as unknown time, not as a behavior state |
 | T1.8-T1.9 workbook | U4 | NOT_STARTED | | |
 | T1.10-T1.11 featurize | U5 | NOT_STARTED | | |
 | T1.12-T1.13 training set | U6 | NOT_STARTED | | |
@@ -86,6 +86,7 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | C1 | Follow the recommendation | D-003; upstream request T5.6 |
 | C3 / C4 | Read the workbook; stop with a hint on a missing date | D-004, D-005 |
 | C8 | PyTorch for now, regardless of the scope doc; switch to TensorFlow only if PyTorch proves less efficient | D-027 |
+| Q17 | (2026-10-03) Review is held up by video issues, but the data was handled carefully before review: treat the pipeline output in `outputs/` as good for now, while remembering it still needs validation | D-033 |
 
 **Blocker for D-001 (closed 2026-10-02):** bare `pytest` was not on the PATH of the Claude Code process. Fixed by launching Claude Code with `.venv` active; `which pytest` now points into `.venv/bin/`.
 
@@ -126,6 +127,10 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | D-029 | 2026-10-02 | Synthetic gold dataset (U2): the design copies the PRD §2.3 *structure*, not its numbers (vehicle on every date; each compound+dose on two dates; doses of one compound never share a date; compound, dose and date speed effects with strength knobs). Every edge case has a knob, and `SynthResult.targets` names the fish it hit. Fixed timestamps (year 2000) and per-fish random streams `[seed, subject]` make the content reproducible (the xlsx container and the absolute paths in the index differ between runs) and keep every knob local to the fish it names; single-fish knob targets are disjoint, group knobs may overlap them. No `strip.png` (dcs never reads it). Index paths point into the synthetic folder | Phases 1-5 run on synthetic data (D-010); later units need known structure and known edge cases to test against |
 | D-030 | 2026-10-02 | The prepds file contract is restated once, in `src/dcs/schema.py` (states, frames dtypes, undetected sentinels, segments, manifest/provenance keys, index columns, workbook headers); the synthetic writer and the later readers both use it | D-013 (no prepds import) with one place to update if prepds changes |
 | D-031 | 2026-10-02 (rev. run 6) | Synthetic frames copy the prepds conventions later units depend on, as the *running* prepds code applies them (labeling.py, features.py): `confidence` null on every frame; velocity and angular velocity 0.0 on the first frame of each detected run, acceleration and meander 0.0 on the first two; `is_immobile` only when the last 30 frames all have a real velocity <= 5 px/s (prepds defaults, calibratable upstream); in the workbook a plain dose is a number cell and a combination dose text; messy labels are case variants only (prepds strips spaces). Simplification kept: undetected frames keep the surrounding auto state (prepds marks them Undetermined until consolidation or review) | Reviews of U2: feature code (U5) must be tested against what prepds really writes. First version followed a stale `StateFrame` docstring for confidence; corrected after the code reviewer checked the running code |
+| D-033 | 2026-10-03 | Gold reader has two sources, chosen by `training.gold_source`: `processed` (default for now) reads the unreviewed prepds output folder (`DCS_PROCESSED_DIR` = the prepds output folder: `trials_catalog.parquet` + `processed/<video_id>/`), labels from the manifest, date and workbook fields from the catalog (they must agree on compound and dose); `accepted` reads the reviewed gold folder as planned. In `processed`, `Undetermined` is allowed and measured per fish (`undetermined_share`), `REJECTED`/`NOT_PROCESSED` fish are dropped with a reason, and `reviewed` is true only for `ACCEPTED`. Switch the default to `accepted` once enough videos are Accepted | Owner answer to Q17: review is held up by video issues; the unreviewed output is used meanwhile, flagged as not validated |
+| D-034 | 2026-10-03 | Frame rates are uniform when `(max - min) / min <= training.fps_tolerance` (default 0.01); the tracker marker is the setting `training.model_profile_marker` (default `-model`, D-003). Tracker evidence: `<prepds output>/processed/<video_id>/detections.parquet` exists exactly for model-tracker runs (prepds deletes it on a classical re-run); fish without such a folder are not checked and `tracker_checked` counts those that were | prepds measures each video's frame rate, so one camera gives values differing in the 4th digit; exact equality would flag every set |
+| D-035 | 2026-10-03 (rev. runs 8-9) | Per fish, the reader reads the manifest first (only `sex`, `subject_id`, `review_status` required), drops by status and selected profile, then checks the remaining manifest keys and the data: the frames from the parquet schema plus the `state` column (both sources), the segments in full. The full frames are read once, by `load_video`, which checks frames and segments again. Missing or unreadable files (including damaged parquet pages and a segments file without rows) drop the fish (EC-1); a file that reads but breaks the contract stops the run (`GoldDataError`, a `ConfigError`, so the CLI prints one line). The mixed-profile error counts kept fish only. Index/catalog columns other than `video_fps` and the key columns are not type-checked | Featurize reads every fish anyway; reading 300+ frame files twice would double the slowest step. Reviews: a dropped fish must never stop the run, and a corrupt page must be found at read time, not mid-training |
+| D-036 | 2026-10-03 | Harness run 8 stays at the `tests` stage: the engine checks only the latest test run, and GREEN was recorded before polling. The gate did record RED (test_runs #23) then GREEN (#24); decision log entry 44 cites them. No failing run was fabricated. From run 9 on, the workflow is polled right after RED | Owner: record the evidence and move on |
 | D-032 | 2026-10-02 | Test helpers shared across test files live in `tests/dcs/synth_helpers.py` and are imported as `tests.dcs.synth_helpers` (works in pytest's default and importlib modes); no `tests/dcs/__init__.py`, which would shadow `src/dcs` | Review r1 of U2 (L1) |
 
 ## 6. Hardware record (Phase 0, owner)
@@ -162,6 +167,13 @@ Edge cases EC-1 to EC-29: all NOT_STARTED; task and test file per row in plan §
 | 2026-10-02 | `pytest tests/ -q`; `--import-mode=importlib`; 3.11 grammar | 745 passed, 4 skipped; 210 passed; ok |
 | 2026-10-02 | U2 run 6, final review fixes: `pytest tests/dcs -q` | Gate: RED (immobility constants missing), GREEN 213 passed in 13.4 s |
 | 2026-10-02 | `pytest tests/ -q`; 3.11 grammar; `prepds` import scan | 748 passed, 4 skipped; ok; none |
+| 2026-10-03 | Gate setup: bare `pytest` was not on the PATH of Claude Code started by VS Code; a user-level wrapper now runs the project's `.venv` pytest | Gate records runs again |
+| 2026-10-03 | U3 run 7: `pytest tests/dcs -q` | Gate: RED (`ModuleNotFoundError: dcs.gold`), GREEN 281 passed in 13.5 s |
+| 2026-10-03 | `pytest tests/ -q`; 3.11 grammar; `prepds` import scan | 816 passed, 4 skipped; ok; none |
+| 2026-10-03 | `read_gold` on the real unreviewed set (aggregates only, nothing written) | No fish dropped; one profile; classical tracker confirmed for every fish; fps uniform; 0.7 s; `load_video` 0.02 s per fish |
+| 2026-10-03 | U3 run 8 (review fixes): `pytest tests/dcs -q` | Gate: RED #23 (ImportError: `ReadOptions`, `dcs.gold_rules`), GREEN #24 330 passed; workflow stuck at `tests` (D-036) |
+| 2026-10-03 | U3 run 9 (round-2 fixes): `pytest tests/dcs -q` | Gate: RED (8 failed), workflow advanced; GREEN 335 passed in 20.7 s |
+| 2026-10-03 | `pytest tests/ -q`; 3.11 grammar; `prepds` import scan; real set again | 870 passed, 4 skipped; ok; none; real set still reads with no fish dropped (1.6 s, the `state` column of every frames file is now read) |
 
 ## 8. External plan review r1 (2026-10-02, another LLM, plan + PRD with placeholders only)
 

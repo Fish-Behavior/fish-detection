@@ -135,6 +135,10 @@ def test_unknown_key_is_rejected_with_its_name(tmp_path: Path, override: dict[st
         ({"min_detected_fraction": True}, "training.min_detected_fraction", "a number"),
         ({"stage": 5}, "training.stage", "text"),
         ({"mlp": {"hidden_sizes": 8}}, "training.mlp.hidden_sizes", "list"),
+        ({"gold_source": 3}, "training.gold_source", "text"),
+        ({"model_profile_marker": None}, "training.model_profile_marker", "text"),
+        ({"fps_tolerance": "tight"}, "training.fps_tolerance", "a number"),
+        ({"fps_tolerance": True}, "training.fps_tolerance", "a number"),
     ],
 )
 def test_wrong_type_is_rejected(tmp_path: Path, training: dict[str, Any], name: str, requirement: str) -> None:
@@ -188,6 +192,12 @@ def test_wrong_type_is_rejected(tmp_path: Path, training: dict[str, Any], name: 
         ({"duration_range_s": [5, 5]}, "training.duration_range_s"),
         ({"duration_range_s": [1, 2, 3]}, "training.duration_range_s"),
         ({"duration_range_s": [True, 5]}, "training.duration_range_s"),
+        ({"gold_source": "reviewed"}, "training.gold_source"),
+        ({"model_profile_marker": ""}, "training.model_profile_marker"),
+        ({"model_profile_marker": "   "}, "training.model_profile_marker"),
+        ({"fps_tolerance": -0.01}, "training.fps_tolerance"),
+        ({"fps_tolerance": 1.5}, "training.fps_tolerance"),
+        ({"fps_tolerance": math.nan}, "training.fps_tolerance"),
     ],
 )
 def test_out_of_range_value_is_rejected(tmp_path: Path, training: dict[str, Any], name: str) -> None:
@@ -212,6 +222,10 @@ def test_out_of_range_value_is_rejected(tmp_path: Path, training: dict[str, Any]
         ({"mlp": {"weight_decay": 0}}, "mlp.weight_decay", 0),
         ({"mlp": {"inner_val_fraction": 0.5}}, "mlp.inner_val_fraction", 0.5),
         ({"mlp": {"hidden_sizes": [8]}}, "mlp.hidden_sizes", (8,)),
+        ({"gold_source": "accepted"}, "gold_source", "accepted"),
+        ({"model_profile_marker": "_yolo"}, "model_profile_marker", "_yolo"),
+        ({"fps_tolerance": 0}, "fps_tolerance", 0),
+        ({"fps_tolerance": 1}, "fps_tolerance", 1),
     ],
 )
 def test_boundary_values_are_accepted(tmp_path: Path, training: dict[str, Any], key: str, stored: Any) -> None:

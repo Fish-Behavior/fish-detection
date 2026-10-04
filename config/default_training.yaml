@@ -8,6 +8,15 @@
 # decided at gate G1 from the `dcs audit` report and set in an override file.
 
 training:
+  # Which prepds output to read (D-033). `processed`: the unreviewed pipeline output under
+  # DCS_PROCESSED_DIR (trials_catalog.parquet + processed/<video_id>/), used until videos are
+  # Accepted; every row is marked unreviewed. `accepted`: the reviewed gold folder (DCS_ACCEPTED_DIR).
+  gold_source: processed
+  # Calibration profiles whose name contains this text come from the model tracker (D-003).
+  model_profile_marker: "-model"
+  # Frame rates count as uniform when (max - min) / min is at most this (EC-26); prepds
+  # measures each video's rate, so equal cameras differ in the 4th digit.
+  fps_tolerance: 0.01
   # One seed controls splits, initialization and shuffling (PRD NFR-1).
   seed: 0
   # Folds per cross-validation repeat, for both schemes (PRD §6.4).
