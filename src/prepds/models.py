@@ -11,7 +11,7 @@ than speculatively here - see docs/progress.md §2 Design Decisions.
 Every dataclass is frozen (immutable) and carries `to_dict()`/`from_dict()`
 for the exact JSON/Parquet-safe round-trip the frames/segments/manifest
 export formats need (paths -> str, dates -> ISO strings, enums -> their
-value), tested in tests/test_models.py.
+value), tested in tests/ingest/test_models.py.
 """
 
 from __future__ import annotations

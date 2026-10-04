@@ -14,7 +14,7 @@ import pytest
 
 from prepds.roi import WATERLINE_EDGE_MARGIN_PX, detect_waterline, estimate_background
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 def test_background_model_from_sparse_sample_removes_moving_dot() -> None:

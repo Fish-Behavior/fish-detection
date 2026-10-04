@@ -28,7 +28,7 @@ import pytest
 from prepds.tracking import track_video, track_video_with_context
 from tests.fixtures.make_synth_video import _dot_position
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 SYNTH_VIDEO = FIXTURES / "synth_tiny.mp4"
 
 

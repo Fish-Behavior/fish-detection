@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from prepds.annotation.store import KEYPOINT_NAMES
 from prepds.webapp.app import create_app
-from tests.test_webapp_api import _make
+from tests.review.test_webapp_api import _make
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def test_the_coded_video_size_is_returned_so_the_page_can_scale_each_axis(env, t
 
     client, _, video_id = env
     source = tmp_path / "videos" / f"{video_id}.mp4"
-    shutil.copy(Path(__file__).parent / "fixtures" / "synth_tiny.mp4", source)
+    shutil.copy(Path(__file__).parent.parent / "fixtures" / "synth_tiny.mp4", source)
     capture = cv2.VideoCapture(str(source))
     expected = (int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     capture.release()

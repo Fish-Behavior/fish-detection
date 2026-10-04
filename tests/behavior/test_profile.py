@@ -67,7 +67,7 @@ def test_packaged_defaults_are_the_frozen_profile_and_classify_video_accepts_the
     assert kwargs["listing_orientation_deviation_deg"] is None  # Listing/LORR is manual
     assert classify_video([], **kwargs) == []
 
-    frozen = yaml.safe_load((Path(__file__).parent.parent / "config/calibration_profiles/cal-2026-09-23-r2.yaml").read_text())
+    frozen = yaml.safe_load((Path(__file__).parents[2] / "config/calibration_profiles/cal-2026-09-23-r2.yaml").read_text())
     assert frozen["labeling"]["freeze_speed_floor_px_per_s"] == kwargs["freeze_speed_floor_px_per_s"]
 
 

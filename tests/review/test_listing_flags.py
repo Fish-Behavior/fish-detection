@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from prepds.listing_flags import ListingFlag, merge_flags, read_listing_flags, write_listing_flags
 from prepds.webapp.app import create_app
-from tests.test_webapp_api import VIDEO_BYTES, _make  # noqa: F401
+from tests.review.test_webapp_api import VIDEO_BYTES, _make  # noqa: F401
 
 
 def test_consecutive_high_scores_merge_into_one_range_padded_by_half_a_step() -> None:
