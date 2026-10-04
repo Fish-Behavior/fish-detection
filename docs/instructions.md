@@ -307,3 +307,12 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_workbook.py` | NTT columns: header cleanup, `-` rule, duplicates, disagreements, missing fish |
 | `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand) |
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
+
+## Keeping this section current
+
+Whoever changes `dcs` (a new unit or a small fix) also does these, in the same branch:
+
+- [ ] **Instructions:** the new or changed tool, command, setting, column or error message is described above (what it does, how to run it, what to do when it stops), and any new test file is in the Tests table.
+- [ ] **Unused code:** nothing left that no one calls or reads (functions, constants, settings, duplicated constants). Search by name in `src/dcs` and `tests/dcs`; delete what is dead.
+- [ ] **Tests:** `pytest tests/dcs -q` is green.
+- [ ] **Progress file:** [`classifier_progress.md`](classifier_progress.md) lists the unit, its decisions (D-nnn) and what was removed.

@@ -129,6 +129,9 @@ The schema JSON gives every column a role (`feature`, `label`, `group`, `id`, `m
 5. **Progress file** updated after every task; every choice the PRD leaves open gets a D-nnn entry.
 6. No commit, push or PR unless the owner asks. No data or real names anywhere in the repo.
 7. Playwright is not used: there is no UI.
+8. **After every change that adds or alters a tool, command, setting, output column or error message** (a unit, or a fix between units), update the `dcs` part of [../instructions.md](../instructions.md) in the same branch: what it does, how to run it, what its tests check, what to do when it stops. A unit is not done while the instructions lag behind the code (D-041).
+9. **After every change, sweep `src/dcs` for unused, legacy or duplicated code** (a function, constant or setting nothing reads; a second copy of a constant that `schema.py` already holds) and delete it in the same branch. Note what was removed in the progress file (D-041).
+10. **One branch per unit**, `feature/dcs-u<n>-<name>`, stacked on the previous one. After a unit the owner verifies; the next unit starts only when the owner says so.
 
 ## 5. Phases and tasks
 
