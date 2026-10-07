@@ -3,8 +3,10 @@
 NTT is in neither the index nor the catalog, so it is read from the workbook itself
 (`DCS_DB_PATH`) and joined on the video id `<Sex>_<Subject:04d>`. Rows are trial rows when they
 name a compound, as in prepds. Exact duplicate rows collapse to one; two different rows for one
-fish, or a row whose compound or date disagrees with the gold set, stop the run (EC-28). A fish
-with no row, or with any NTT value missing, gets `has_ntt = 0` (EC-2); imputation is U9's job.
+fish, or a row whose compound (spelled by the training set's rule) or date disagrees with the gold
+set, stop the run (EC-28). A fish with no row, or with a blank NTT cell, gets `has_ntt = 0` (EC-2).
+A `-` cell is measured, not missing (D-037): the fish never entered that half, so its distance is 0
+and its speed NaN while `has_ntt` stays 1. Imputation is U9's job.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import pandas as pd
 from dcs import schema
 from dcs.config import ENV_DB_PATH, ConfigError
 from dcs.gold_checks import GoldDataError, one_line
-from dcs.gold_rules import blank, ids, same_label
+from dcs.gold_rules import blank, compound_label, ids
 
 NTT_COLUMNS = (
     "tdm_full",
@@ -75,7 +77,7 @@ def _trial_rows(path: Path) -> pd.DataFrame:
     if missing:
         raise GoldDataError(f"Workbook {path.name}: header(s) {', '.join(map(repr, missing))} missing")
 
-    table = table[table[_header(schema.WB_COMPOUND)].notna()].drop_duplicates()
+    table = table[~table[_header(schema.WB_COMPOUND)].map(blank)].drop_duplicates()
     sex, subject = _header(schema.WB_SEX), _header(schema.WB_SUBJECT)
     for name in (sex, subject):
         blank_rows = int(table[name].map(blank).sum())
@@ -105,7 +107,7 @@ def _check_against(rows: pd.DataFrame, videos: pd.DataFrame) -> None:
         if video_id not in rows.index:
             continue
         row = rows.loc[video_id]
-        if not same_label(row["compound"], record["compound"]):
+        if compound_label(row["compound"]) != compound_label(record["compound"]):  # same rule as the training set
             raise GoldDataError(
                 f"{video_id}: workbook compound {row['compound']!r} disagrees with the gold set's {record['compound']!r} (EC-28)"
             )

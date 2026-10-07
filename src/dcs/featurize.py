@@ -13,6 +13,7 @@ missing values (U9).
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import permutations
@@ -170,20 +171,30 @@ def segment_features(segments: pd.DataFrame) -> dict[str, float] | None:
 
 
 def kinematic_features(frames: pd.DataFrame) -> dict[str, float] | None:
-    """Speed, turning, meander, immobility and depth on detected frames; None when none was detected."""
-    seen = frames[frames["detected"].astype(bool)]
-    if seen.empty:
+    """Speed, turning, meander, immobility and depth on detected frames; None when none was detected.
+
+    prepds writes 0.0 where a detected run has too little history (schema.ZERO_ON_FIRST_FRAME,
+    ZERO_ON_FIRST_TWO_FRAMES); those frames are left out, so broken-up tracking does not slow a fish
+    down (D-048). A fish whose runs are all too short gets NaN for those features.
+    """
+    detected = frames["detected"].astype(bool).to_numpy()
+    if not detected.any():
         return None
-    velocity = seen["velocity"].to_numpy(dtype=float)
-    mean = float(velocity.mean())
+    first = detected & ~np.r_[False, detected[:-1]]
+    one_before = detected & ~first  # speed and turn are real here
+    two_before = one_before & ~np.r_[False, first[:-1]]  # acceleration and meander too
+    seen = frames[detected]
+    velocity = frames["velocity"].to_numpy(dtype=float)[one_before]
+    mean = _mean(velocity)
     depth = seen["depth_from_surface"].dropna().to_numpy(dtype=float)
     out = {
         "velocity_mean": mean,
-        "velocity_median": float(np.median(velocity)),
-        "velocity_cv": float(velocity.std()) / mean if mean > 0 else 0.0,  # speeds are >= 0: mean 0 means no motion
-        "abs_acceleration_mean": float(np.abs(seen["acceleration"].to_numpy(dtype=float)).mean()),
-        "abs_angular_velocity_mean": float(np.abs(seen["angular_velocity"].to_numpy(dtype=float)).mean()),
-        "meander_mean": float(seen["meander"].to_numpy(dtype=float).mean()),
+        "velocity_median": float(np.median(velocity)) if len(velocity) else math.nan,
+        # speeds are >= 0: mean 0 means no motion
+        "velocity_cv": float(velocity.std()) / mean if mean > 0 else 0.0 if len(velocity) else math.nan,
+        "abs_acceleration_mean": _mean(np.abs(frames["acceleration"].to_numpy(dtype=float)[two_before])),
+        "abs_angular_velocity_mean": _mean(np.abs(frames["angular_velocity"].to_numpy(dtype=float)[one_before])),
+        "meander_mean": _mean(frames["meander"].to_numpy(dtype=float)[two_before]),
         "immobile_share": float(seen["is_immobile"].astype(bool).mean()),
         "detected_share": len(seen) / len(frames),
         "depth_mean": float(depth.mean()),
@@ -191,6 +202,10 @@ def kinematic_features(frames: pd.DataFrame) -> dict[str, float] | None:
     }
     out.update({f"depth_p{p:02d}": float(np.percentile(depth, p)) for p in DEPTH_PERCENTILES})
     return out
+
+
+def _mean(values: np.ndarray) -> float:
+    return float(values.mean()) if len(values) else math.nan
 
 
 # --- the table -----------------------------------------------------------------------------

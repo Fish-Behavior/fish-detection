@@ -5,7 +5,8 @@ audit, train, predict: classifier plan §3.1). So far: `check-config`,
 which shows what `dcs` will read so a new `.env` or override YAML can be
 verified before any data is touched; `synth`, which writes a synthetic
 gold dataset for trying the other commands without real data; and
-`featurize`, which turns the gold set into the training table.
+`featurize`, which turns the gold set into the training table; and `audit`,
+which reports what that table holds before anything is trained.
 """
 
 from __future__ import annotations
@@ -15,10 +16,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from dcs import __version__
+from dcs.audit import AUDIT_FILE, build_audit, render
 from dcs.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from dcs.featurize import featurize, write_outputs
 from dcs.gold import SOURCE_ACCEPTED, read_gold
 from dcs.synthetic import SynthConfig, make_gold_dataset
+from dcs.trainset import load_table
 
 # Folders dcs creates itself, so their absence is never a problem.
 CREATED_OUTPUTS = ("output_dir",)
@@ -57,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     feat = commands.add_parser("featurize", help="gold set (+ workbook NTT) -> training_table.parquet and its schema json")
     feat.add_argument("--profile", help="calibration profile to keep when the set mixes several (EC-21)")
     feat.set_defaults(handler=run_featurize)
+
+    audit = commands.add_parser("audit", help="training table -> audit.md: counts, drops, confounds, G1 verdict (no training)")
+    audit.set_defaults(handler=run_audit)
     return parser
 
 
@@ -107,6 +113,21 @@ def run_featurize(settings: Settings, args: argparse.Namespace) -> int:
     print(f"Featurized {len(result.table)} fish ({reviewed}, profile {gold.profile}), {len(result.schema['dropped'])} dropped")
     print(f"  table:  {table_path}")
     print(f"  schema: {json_path}")
+    return 0
+
+
+def run_audit(settings: Settings, args: argparse.Namespace) -> int:
+    """Audit the training table and its schema; write audit.md to the output folder and print the verdicts."""
+    table, described = load_table(settings.require("table"))
+    result = build_audit(table, described, settings.training)
+    path = settings.paths.output_dir / AUDIT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render(result), encoding="utf-8")
+    facts = result.facts
+    print(f"Audited {facts['fish in the table']} fish ({facts['source']}): G1 stop rule {facts['G1 stop rule']}")
+    for note in result.notes:
+        print(f"  - {note}")
+    print(f"  report: {path}")
     return 0
 
 

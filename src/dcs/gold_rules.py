@@ -167,6 +167,11 @@ def blank(value: Any) -> bool:
     return bool(pd.isna(value))
 
 
+def compound_label(value: Any) -> str:
+    """Trimmed, inner whitespace collapsed, upper case (EC-8): the one spelling rule for compounds."""
+    return " ".join(str(value).split()).upper()
+
+
 def same_label(left: Any, right: Any) -> bool:
     """Equal labels: both blank, equal numbers (1 == 1.0 == "1"), or equal text after trimming."""
     if blank(left) or blank(right):

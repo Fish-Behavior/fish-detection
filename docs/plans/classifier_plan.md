@@ -22,7 +22,7 @@ Confirmed in `src/prepds` (2026-10-02):
 |---|---|
 | `frames.parquet` | `frame_idx` int32; `t_sec`, `x`, `y`, `orientation_deg`, `depth_from_surface`, `velocity`, `acceleration`, `angular_velocity`, `meander`, `confidence` float32; `detected`, `is_immobile` bool; `state` category (7 values), `source` category (`auto`, `manual`) |
 | State names | `Controlled Swim`, `Erratic Movement`, `Freezing/Drift`, `Listing/LORR`, `Surface Breach`, `Dead`, `Undetermined` |
-| Undetected frames | `x`, `y` and the four kinematic columns hold a `0.0` sentinel; `orientation_deg`, `depth_from_surface` are null. Kinematic features must use `detected == True` rows only. A few detected frames right after a gap also carry the `0.0` sentinel (too little history); this small bias is accepted and noted in the report |
+| Undetected frames | `x`, `y` and the four kinematic columns hold a `0.0` sentinel; `orientation_deg`, `depth_from_surface` are null. Kinematic features must use `detected == True` rows only. A few detected frames right after a gap also carry the `0.0` sentinel (too little history); first accepted as a small bias, then left out of the averages after review (D-048), because the bias grew with patchy tracking |
 | `depth_from_surface` | Pixel row from the **top of the frame**, not from the waterline |
 | `segments.csv` | `start_s, end_s, duration_s, state, source` |
 | Gold folder per video | `<accepted>/<video_id>/` holds `frames.parquet`, `segments.csv`, `strip.png`, `manifest.json`, `provenance.json`. `video_id` = `<sex>_<subject_id>` (e.g. `F_0042`) |

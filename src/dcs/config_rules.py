@@ -83,16 +83,19 @@ def _is_layer_list(value: Any) -> bool:
     return isinstance(value, (list, tuple)) and len(value) > 0 and all(_is_whole(size) and size >= 1 for size in value)
 
 
+NON_EMPTY_TEXT = Rule(lambda value: isinstance(value, str) and bool(value.strip()), "non-empty text")
+
 # One rule per non-boolean default in config/default_training.yaml (a test keeps the two in step).
 VALUE_RULES: tuple[tuple[str, Rule], ...] = (
     ("training.gold_source", one_of(GOLD_SOURCES)),
-    ("training.model_profile_marker", Rule(lambda value: isinstance(value, str) and bool(value.strip()), "non-empty text")),
+    ("training.model_profile_marker", NON_EMPTY_TEXT),
     ("training.fps_tolerance", number_in(0, 1)),
     ("training.seed", whole_at_least(0)),
     ("training.folds", whole_at_least(MIN_FOLDS)),
     ("training.repeats", whole_at_least(1)),
     ("training.min_class_size", whole_at_least(MIN_CLASS_SIZE_FLOOR)),
     ("training.min_state_fish", whole_at_least(1)),
+    ("training.vehicle_compound", NON_EMPTY_TEXT),
     ("training.stage", one_of(STAGES)),
     ("training.models", Rule(_is_model_list, f"a non-empty list without repeats from {', '.join(MODEL_NAMES)}")),
     ("training.duration_range_s", Rule(_is_duration_range, "null or [min, max] seconds with 0 <= min < max")),

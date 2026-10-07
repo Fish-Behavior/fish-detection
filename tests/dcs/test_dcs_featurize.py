@@ -141,33 +141,48 @@ def frames(detected: list[bool], **columns: list[float]) -> pd.DataFrame:
     return table
 
 
+# Two detected runs (frames 0-2 and 4-6). prepds writes 0.0 where a run has too little history:
+# speed and turn on a run's first frame (0, 4), acceleration and meander on its first two (0, 1, 4, 5).
 MIXED = frames(
-    [True, True, False, True, False],
-    velocity=[2.0, 4.0, 99.0, 6.0, 99.0],
-    acceleration=[-2.0, 2.0, 99.0, 5.0, 99.0],
-    angular_velocity=[-3.0, 0.0, 99.0, 3.0, 99.0],
-    meander=[0.0, 0.3, 99.0, 0.6, 99.0],
-    is_immobile=[True, False, True, False, False],
-    depth=[10.0, 20.0, 0.0, 60.0, 0.0],
+    [True, True, True, False, True, True, True],
+    velocity=[0.0, 2.0, 4.0, 99.0, 0.0, 6.0, 8.0],
+    acceleration=[0.0, 0.0, -2.0, 99.0, 0.0, 0.0, 4.0],
+    angular_velocity=[0.0, -3.0, 0.0, 99.0, 0.0, 3.0, 4.0],
+    meander=[0.0, 0.0, 0.3, 99.0, 0.0, 0.0, 0.6],
+    is_immobile=[True, False, False, True, False, False, True],
+    depth=[10.0, 20.0, 30.0, 0.0, 40.0, 50.0, 60.0],
 )
 
 
-def test_kinematics_use_detected_frames_only() -> None:
+def test_kinematics_use_detected_frames_with_enough_history() -> None:
     features = kinematic_features(MIXED)
-    assert features["velocity_mean"] == pytest.approx(4.0)
-    assert features["velocity_median"] == pytest.approx(4.0)
-    assert features["velocity_cv"] == pytest.approx(np.std([2.0, 4.0, 6.0]) / 4.0)
-    assert features["abs_acceleration_mean"] == pytest.approx(3.0)
-    assert features["abs_angular_velocity_mean"] == pytest.approx(2.0)
-    assert features["meander_mean"] == pytest.approx(0.3)
-    assert features["immobile_share"] == pytest.approx(1 / 3)
-    assert features["detected_share"] == pytest.approx(3 / 5)
+    assert features["velocity_mean"] == pytest.approx(5.0)  # 2, 4, 6, 8: the run-start zeros are left out
+    assert features["velocity_median"] == pytest.approx(5.0)
+    assert features["velocity_cv"] == pytest.approx(np.std([2.0, 4.0, 6.0, 8.0]) / 5.0)
+    assert features["abs_acceleration_mean"] == pytest.approx(3.0)  # frames 2 and 6
+    assert features["abs_angular_velocity_mean"] == pytest.approx(2.5)
+    assert features["meander_mean"] == pytest.approx(0.45)
+    assert features["immobile_share"] == pytest.approx(2 / 6)  # every detected frame
+    assert features["detected_share"] == pytest.approx(6 / 7)
+
+
+def test_fragmented_tracking_does_not_slow_the_fish_down() -> None:
+    steady = frames([True] * 6, velocity=[0.0, 5.0, 5.0, 5.0, 5.0, 5.0])
+    broken = frames([True, True, False, True, True, False, True, True], velocity=[0.0, 5.0, 0.0, 0.0, 5.0, 0.0, 0.0, 5.0])
+    assert kinematic_features(broken)["velocity_mean"] == kinematic_features(steady)["velocity_mean"] == pytest.approx(5.0)
+
+
+def test_runs_of_one_frame_leave_speed_unknown() -> None:
+    features = kinematic_features(frames([True, False, True]))
+    assert math.isnan(features["velocity_mean"]) and math.isnan(features["velocity_cv"])
+    assert math.isnan(features["abs_acceleration_mean"]) and math.isnan(features["meander_mean"])
+    assert features["detected_share"] == pytest.approx(2 / 3) and features["depth_mean"] == pytest.approx(10.0)
 
 
 def test_depth_features_ignore_undetected_frames() -> None:
     features = kinematic_features(MIXED)
-    depth = [10.0, 20.0, 60.0]
-    assert features["depth_mean"] == pytest.approx(30.0)
+    depth = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    assert features["depth_mean"] == pytest.approx(35.0)
     assert features["depth_min"] == pytest.approx(10.0)
     for percent in (1, 10, 50, 90, 99):
         assert features[f"depth_p{percent:02d}"] == pytest.approx(np.percentile(depth, percent))

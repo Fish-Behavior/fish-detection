@@ -20,6 +20,7 @@ import pandas as pd
 from dcs import config_rules
 from dcs.config import ConfigError
 from dcs.featurize import BEHAVIOR_STATES, schema_path, slug
+from dcs.gold_rules import compound_label
 
 STAGES = tuple(stage for stage in config_rules.STAGES if stage != "both")  # `both` builds one, then the other
 DOSE_SEPARATOR = " @ "  # dose-stage label: `COMPOUND_A @ 0.1`
@@ -61,11 +62,6 @@ class TrainSet:
     dropped_features: tuple[dict[str, str], ...]  # {name, reason}
 
 
-def compound_label(value: Any) -> str:
-    """Trimmed, inner whitespace collapsed, upper case (EC-8)."""
-    return " ".join(str(value).split()).upper()
-
-
 def dose_label(value: Any) -> str:
     """The written dose without spaces; kept as text because combination doses are not numbers (EC-7)."""
     return "".join(str(value).split())
@@ -96,9 +92,8 @@ def build_trainset(table: pd.DataFrame, described: Mapping[str, Any], training: 
     if table.empty:
         raise ConfigError("The training table has no fish. Run `python -m dcs featurize` and check its dropped list.")
 
-    compound = table["compound"].map(compound_label)
-    labels = compound if stage == "compound" else compound + DOSE_SEPARATOR + table["concentration_mM"].map(dose_label)
-    keep, dropped_classes = _filter_classes(labels, compound, stage, training["min_class_size"])
+    labels = stage_labels(table, stage)
+    keep, dropped_classes = filter_classes(labels, table["compound"].map(compound_label), stage, training["min_class_size"])
     labels_before, labels, rows = labels, labels[keep], table[keep]
     classes = labels.value_counts().sort_index()
     if len(classes) < 2:
@@ -146,6 +141,12 @@ def build_trainset(table: pd.DataFrame, described: Mapping[str, Any], training: 
     )
 
 
+def stage_labels(table: pd.DataFrame, stage: str) -> pd.Series:
+    """The cleaned label of every row: compound, or `<compound> @ <dose>` in the dose stage."""
+    compound = table["compound"].map(compound_label)
+    return compound if stage == "compound" else compound + DOSE_SEPARATOR + table["concentration_mM"].map(dose_label)
+
+
 def _group_on(group: str | None, training: Mapping[str, Any]) -> bool:
     switch = GROUP_SWITCHES.get(group or "")
     return switch is None or bool(training[switch])
@@ -172,7 +173,7 @@ def _drop_features(
     return rare, dropped
 
 
-def _filter_classes(
+def filter_classes(
     labels: pd.Series, compound: pd.Series, stage: str, min_size: int
 ) -> tuple[pd.Series, list[dict[str, Any]]]:
     """Rows to keep, and the dropped classes: small ones first, then (dose stage) compounds left with one dose."""

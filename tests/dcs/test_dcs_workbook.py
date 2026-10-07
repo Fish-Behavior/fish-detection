@@ -184,6 +184,14 @@ def test_rows_without_a_compound_are_not_trials(small: SynthResult, clean: pd.Da
     pd.testing.assert_frame_equal(read_ntt(rewritten(small, tmp_path, add_note), read_accepted(small.accepted_dir).videos), clean)
 
 
+def test_a_blank_compound_cell_is_not_a_trial(small: SynthResult, clean: pd.DataFrame, tmp_path: Path) -> None:
+    def add_spacer(table: pd.DataFrame) -> pd.DataFrame:
+        spacer = pd.DataFrame([{schema.WB_COMPOUND: "   "}], columns=table.columns)
+        return pd.concat([table, spacer], ignore_index=True)
+
+    pd.testing.assert_frame_equal(read_ntt(rewritten(small, tmp_path, add_spacer), read_accepted(small.accepted_dir).videos), clean)
+
+
 @pytest.mark.parametrize("header", [schema.WB_SUBJECT, schema.WB_DATE, schema.NTT_HEADERS[3]])
 def test_missing_header_is_an_error_naming_it(small: SynthResult, tmp_path: Path, header: str) -> None:
     path = rewritten(small, tmp_path, lambda table: table.drop(columns=[header]))
@@ -229,6 +237,18 @@ def test_compound_disagreeing_with_the_index_is_an_error(small: SynthResult, cle
 
     with pytest.raises(GoldDataError, match=f"{fish}.*compound"):
         read_ntt(rewritten(small, tmp_path, rename), read_accepted(small.accepted_dir).videos)
+
+
+def test_compound_spelled_with_other_case_or_spaces_agrees(small: SynthResult, clean: pd.DataFrame, tmp_path: Path) -> None:
+    fish = complete_fish(clean)
+
+    def respell(table: pd.DataFrame) -> pd.DataFrame:  # one class to the training set (EC-8), so no disagreement
+        rows = is_row(table, fish)
+        table.loc[rows, schema.WB_COMPOUND] = " " + table.loc[rows, schema.WB_COMPOUND].str.lower().str.replace(" ", "  ") + " "
+        return table
+
+    respelled = read_ntt(rewritten(small, tmp_path, respell), read_accepted(small.accepted_dir).videos)
+    pd.testing.assert_frame_equal(respelled, clean)
 
 
 def test_date_disagreeing_with_the_index_is_an_error(small: SynthResult, clean: pd.DataFrame, tmp_path: Path) -> None:

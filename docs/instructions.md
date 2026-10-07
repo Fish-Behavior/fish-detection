@@ -161,15 +161,16 @@ which compound, and later which dose, a fish received from its behavior. Specifi
 [`classifier_PRD.md`](classifier_PRD.md); plan: [`plans/classifier_plan.md`](plans/classifier_plan.md); status and
 decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
 
-**Where it stands.** The tools that exist today (units U1-U7) build the **training table**, one row per fish, turn it
-into the **training set** one stage learns from, and split that set into the **folds** every model will share.
-Auditing (U8) and training models (U9 and later) come next. Every unit is tested on synthetic data. Until
+**Where it stands.** The tools that exist today (units U1-U8) build the **training table**, one row per fish, turn it
+into the **training set** one stage learns from, split that set into the **folds** every model will share, and
+**audit** the table before anything is trained. Training models (U9 and later) comes next. Every unit is tested on synthetic data. Until
 reviewers Accept videos, the real input is the **unreviewed** prepds output, so no result is a claim about drugs yet.
 
 ```
-prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► trainset ──► folds ──► (audit, train: later)
+prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► trainset ──► folds ──► (train: later)
    (+ workbook for NTT)                     one row per fish        what every column is      features,    scheme A / B
-                                                                                               labels, dates
+                                                     │                                         labels, dates
+                                                     └──► dcs audit ──► audit.md (counts, drops, confounds, G1 verdict)
 ```
 
 ## Setup
@@ -183,7 +184,7 @@ Same virtual environment as `prepds` (see [Setup](#setup)). Add the `DCS_*` line
 | `DCS_ACCEPTED_DIR` | gold folder (`accepted_index.parquet` + one folder per Accepted fish) | `featurize` when `gold_source` is `accepted` |
 | `DCS_DB_PATH` | the trial workbook (same file as `PDS_DB_PATH`) | `featurize`, for the 8 NTT columns; unset → NTT left empty, `has_ntt = 0` |
 | `DCS_OUTPUT_DIR` | where `dcs` writes (default `outputs/dcs`, git-ignored) | everything |
-| `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; audit/train will read it |
+| `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; `audit` reads it (train will) |
 | `DCS_CONFIG` | a YAML file overriding `config/default_training.yaml` | optional |
 
 Settings come from the environment first, then `.env`, then the defaults. Check them before touching data:
@@ -200,7 +201,11 @@ command) or `DCS_CONFIG`. A misspelled key or a wrong type is an error, never si
 training:
   gold_source: accepted          # read the reviewed gold folder instead of the unreviewed output
   duration_range_s: [590, 610]   # flag recordings outside this length (default: no check)
+  vehicle_compound: CONTROL_X    # the vehicle's name as the workbook writes it (default VEHICLE, the synthetic name)
 ```
+
+Set `vehicle_compound` to your lab's vehicle name before reading an audit of real data: the audit leaves the vehicle
+out of the G1 stop rule and counts vehicle fish per date, and says so in its notes when the name is not in the table.
 
 ## Commands
 
@@ -209,6 +214,7 @@ training:
 | `python -m dcs check-config` | Shows the paths and settings `dcs` would use. Reads no data. |
 | `python -m dcs synth --out <new folder> [--seed N]` | Writes a **synthetic** gold dataset: `<out>/accepted/` (index + one folder per fish) and `<out>/synthetic_db.xlsx` (workbook). Placeholder names only (`COMPOUND_A`, `F_0001`). Use it to try `dcs` without real data. Refuses a folder that already has files. |
 | `python -m dcs featurize [--profile <version>]` | Reads the gold source, computes the per-fish features and writes `training_table.parquet` and `training_table_schema.json` to `DCS_OUTPUT_DIR`. Prints how many fish were kept and dropped. `--profile` keeps one calibration profile when the set mixes several. |
+| `python -m dcs audit` | Reads the two featurize files (nothing else), writes `audit.md` to `DCS_OUTPUT_DIR` and prints the G1 verdict and the notes. Trains nothing and changes no file it reads ([The audit](#the-audit)). |
 
 Global options go **before** the command: `python -m dcs --config my.yaml featurize`, `--env-file other.env`.
 
@@ -220,6 +226,8 @@ printf 'training:\n  gold_source: accepted\n' > /tmp/dcs_try/accepted.yaml     #
 DCS_ACCEPTED_DIR=/tmp/dcs_try/accepted DCS_DB_PATH=/tmp/dcs_try/synthetic_db.xlsx DCS_OUTPUT_DIR=/tmp/dcs_try/out \
   python -m dcs --config /tmp/dcs_try/accepted.yaml featurize
 # Featurized 48 fish (reviewed, profile cal-synthetic), 0 dropped
+DCS_OUTPUT_DIR=/tmp/dcs_try/out python -m dcs --config /tmp/dcs_try/accepted.yaml audit
+# Audited 48 fish (Accepted gold folder): G1 stop rule GO      (report: /tmp/dcs_try/out/audit.md)
 ```
 
 ### Run it on the real data
@@ -228,6 +236,7 @@ DCS_ACCEPTED_DIR=/tmp/dcs_try/accepted DCS_DB_PATH=/tmp/dcs_try/synthetic_db.xls
 # .env: DCS_PROCESSED_DIR=outputs  and  DCS_DB_PATH=<same file as PDS_DB_PATH>
 python -m dcs check-config
 python -m dcs featurize          # Featurized <n> fish (UNREVIEWED, profile cal-...), <m> dropped
+python -m dcs --config my_training.yaml audit     # my_training.yaml sets vehicle_compound; read outputs/dcs/audit.md
 ```
 
 Fish that the catalog matched to a video but `prepds run` never processed are listed as dropped (`missing_file`),
@@ -240,10 +249,11 @@ not silently skipped.
 | U1 Config | `check-config`, `config/default_training.yaml`, `dcs.config.load_settings()` | Loads paths and training settings with the precedence above; rejects unknown keys, wrong types and out-of-range values with a message naming the key | Run `check-config` after editing `.env` or an override YAML |
 | U2 Synthetic data | `synth`, `dcs.synthetic.make_gold_dataset(out, SynthConfig(...))` | Writes fish that follow the real prepds file formats, with a planted compound signal and a date effect. `SynthConfig` has one switch per edge case (e.g. `low_detected_fish=2`, `undetermined=True`, `missing_file="frames"`), and `result.targets` names the fish each switch hit | CLI for trying the tools; the Python form for tests |
 | U3 Gold reader | `dcs.gold.read_gold(settings)` (inside `featurize`) | Reads either source and checks the prepds file contract. **Drops** a fish (listed with a reason) when a file is missing or unreadable, or its status is REJECTED / NOT_PROCESSED. **Stops** with one clear message when the data breaks the contract: mixed calibration profiles, a fish without a date, a duplicated fish, `Undetermined` in an Accepted video, a missing column or wrong type, tracker evidence that disagrees with the profile | Nothing to call by hand; its messages tell you what to fix (table below) |
-| U4 Workbook | `dcs.workbook.read_ntt(path, videos)` (inside `featurize`) | Reads the 8 NTT columns per fish from the workbook (`<Sex>_<Subject:04d>`). `has_ntt = 1` when all 8 are filled. A `-` in a half's cell means the fish never entered that half: distance 0, speed empty. Stops if the workbook disagrees with the gold set on compound or date, or has two different rows for one fish | Set `DCS_DB_PATH`; leave it unset to train without NTT |
+| U4 Workbook | `dcs.workbook.read_ntt(path, videos)` (inside `featurize`) | Reads the 8 NTT columns per fish from the workbook (`<Sex>_<Subject:04d>`). `has_ntt = 1` when all 8 are filled. A `-` in a half's cell means the fish never entered that half: distance 0, speed empty (still `has_ntt = 1`). Compounds are compared with the gold set after trimming, collapsing spaces and ignoring case. Stops if the workbook disagrees with the gold set on compound or date, or has two different rows for one fish | Set `DCS_DB_PATH`; leave it unset to train without NTT |
 | U5 Featurize | `featurize`, `dcs.featurize.featurize(gold, workbook, settings.training)` | Builds the training table (next section) | `python -m dcs featurize` |
 | U6 Training set | `dcs.trainset.load_table(path)`, `build_trainset(table, schema, settings.training, stage)` | Cleans the labels, drops small classes, rare-state, constant and switched-off features, refuses forbidden columns; returns what one stage trains on and lists everything dropped ([The training set](#the-training-set)) | No command of its own: `audit` and `train` will call it. Call it from Python to see what a setting change does |
 | U7 Folds | `dcs.folds.make_folds(y, groups, ids, settings.training)` | Splits a training set into scheme A (whole dates held out) and scheme B (random) folds, `repeats` times, and pins classes seen on one date to training in scheme A ([The folds](#the-folds)) | No command of its own: `train` will call it once and give the same folds to every model |
+| U8 Audit | `audit`, `dcs.audit.build_audit(table, schema, settings.training)`, `render(result)` | Runs the class filter, training set and folds of both stages as `train` will, and reports what the data holds, what was dropped and why, and what could let a model recognize the day, the labeling or the camera instead of the compound ([The audit](#the-audit)) | `python -m dcs audit` after every `featurize`; read `audit.md` at gate G1 |
 
 ## The training table
 
@@ -254,7 +264,7 @@ One row per fish, in the gold set's order. Columns, by group:
 | Identity, labels, folds | `video_id`, `subject_id`; `compound`, `concentration_mM`; `date` | gold set | Labels are as written; the training set cleans them. `date` only groups the folds |
 | States | per state: `state_<s>_share`, `_bouts`, `_mean_bout_s`, `_latency_s` (6 states) | `segments.csv` | Share of the **known** time. A state never shown: 0 bouts, mean bout 0, latency = recording length |
 | Transitions | `trans_<a>_to_<b>` (30 ordered pairs) | `segments.csv` | Counts of a state directly followed by another |
-| Kinematics | `velocity_mean`, `_median`, `_cv`, `abs_acceleration_mean`, `abs_angular_velocity_mean`, `meander_mean`, `immobile_share`, `detected_share` | `frames.parquet` | Detected frames only. Pixels and seconds |
+| Kinematics | `velocity_mean`, `_median`, `_cv`, `abs_acceleration_mean`, `abs_angular_velocity_mean`, `meander_mean`, `immobile_share`, `detected_share` | `frames.parquet` | Detected frames only, minus the first frame of each detected run (speed, turning) or first two (acceleration, meander), where prepds writes 0 for lack of history; so patchy tracking does not slow a fish down. Pixels and seconds |
 | Depth | `depth_mean`, `depth_min`, `depth_p01` … `depth_p99` | `frames.parquet` | Pixel row from the frame top; **off for training by default** (camera framing can differ by date) |
 | NTT | `tdm_*`, `velocity_*`, `time_top_s`, `time_bottom_s`, `has_ntt` | workbook | Empty when absent; filled per fold later (U9) |
 | Demographics | `sex`, `strain`, `age` | gold set | Off by default; an ablation only |
@@ -318,7 +328,7 @@ result.classes, result.very_small                       # what is kept
 result.dropped_classes, result.dropped_states           # what is left out, and why
 ```
 
-On the real unreviewed set (143 fish, default settings): compound stage keeps every fish; Listing/LORR, Surface Breach
+On the real unreviewed set (143 fish when this unit was written; default settings): compound stage keeps every fish; Listing/LORR, Surface Breach
 and Dead are shown by too few fish, so their 36 features go; the dose stage keeps 104 fish in 12 classes.
 
 ## The folds
@@ -360,6 +370,39 @@ than the number of folds is simply absent from some test folds. It is a warning,
 On the real unreviewed set (default settings): the compound stage gets 5 folds in both schemes with no notes; the dose
 stage pins all 12 dose classes (each on one date), so only scheme B runs there.
 
+## The audit
+
+`python -m dcs audit` reads only `training_table.parquet` and its schema file, so it also runs on the training machine.
+It writes `<DCS_OUTPUT_DIR>/audit.md` and prints the G1 verdict and the notes. It never stops because the data is thin:
+a stage that cannot be built (for example, too few classes) becomes a note.
+
+`audit.md` starts with the **facts**, then the **notes** (things to act on), then one table per section:
+
+| Section | What it shows | What to look for |
+|---|---|---|
+| Facts: source, profile, tracker | Accepted or UNREVIEWED; calibration profile; tracker and how many fish its evidence was checked for; frame-rate range; resolution (prepds does not record it) | UNREVIEWED means no result is a drug claim; fps not uniform (EC-26) means pixel features are not comparable |
+| Facts: PRD §2.3 statistics | Fish, Accepted fish, dates, fish per date, compounds, vehicle fish and dates, compound+dose classes (on one date, below `min_class_size`), compounds on one date, dates where one compound has 2+ doses, fish with NTT, video length range, EC-11 flag counts | Dose classes on one date and "2+ doses" = 0 mean dose is confounded with date (PRD §6.5) |
+| Facts: per stage | Classes kept, folds per scheme, date-confounded classes, share of fish on dates holding 2+ classes (D-016: the within-date permutation test only learns from those) | A low share weakens the permutation test |
+| Facts: G1 stop rule | **GO** when at least 3 compounds besides vehicle have `min_class_size` (6) Accepted fish spread over 2+ dates, else **WAIT** (PRD §10). On unreviewed data it also gives the verdict counting every fish (Q17) | The go / wait decision at G1 |
+| Facts: framing | Whether camera framing differs between dates (EC-31), how many framing setups, dates without depth data | See Camera framing |
+| Filter steps | Fish dropped before the table (by reason), in the table, then per stage: dropped by the class filter (by reason), kept, scored in scheme A | Where fish are lost |
+| Compounds | Per compound: fish, Accepted fish, dates, Accepted dates (a compound with 0 Accepted fish or one date shows here, EC-24), doses, mean manual-frame and Undetermined share, flag counts, `agent_exposure_min` values | Manual share differing by compound = labeling effort differs (reported, never a feature); exposure differing by compound = protocol tracks the label |
+| Classes: compound / dose | Per class: fish, Accepted, dates, status (`kept`, `very small`, or the drop reason), scheme A (`scored`, `pinned` = one date only, `skipped`) | Which classes the main score can say anything about |
+| Dates, Compound by date | Fish, Accepted, compounds and vehicle fish per date; the compound × date count table | Compounds concentrated on few dates |
+| Missing values | Columns with empty cells and how many | NTT gaps are expected (filled per fold later); anything else is a surprise |
+| Flagged fish | Fish with a low detected share or an odd recording length (kept, EC-11) | Many flags on one compound or date |
+| States | Fish showing each state; in which stage its features were dropped (`min_state_fish`) | Rare states |
+| Camera framing | Per date: where the typical fish's top and bottom sit in the frame (median of each fish's 1st and 99th depth percentile), the height between them, its `setup`, and the extremes (`top_min`, `bottom_max`). Dates whose top, bottom and height agree within 10 % of the median height, directly or through other dates, share a setup. A date without depth data is listed with 0 fish and no setup, and a note says it was not checked | Framing differs when any two dates are further apart than that (several setups, or one setup that drifts). Medians, so one fish at the surface cannot move a date. Then keep `use_depth` off, and treat pixel speeds as date-dependent |
+
+On the real unreviewed set (328 fish, 41 dates, `vehicle_compound` set): G1 stop rule WAIT on Accepted fish (none yet),
+GO when unreviewed fish count; frame rates uniform; tracker checked for every fish; **framing differs between dates**:
+the recordings fall into three camera epochs (fish vertical range about 71 px for the early 2024 dates, about 31 px for
+late 2024 to early Feb 2025, about 34 px after; 18 framing setups, none spanning two epochs, one stable setup from
+2025-02-18), and most compounds were recorded in one epoch only. Depth stays off, and
+pixel speeds, state shares and `has_ntt` track the epoch (about 93 / 71 / 39 % NTT coverage), so scheme A cannot rule out
+that a model recognizes the camera instead of the compound. Handle this before models are designed (per-epoch
+normalization, FR-9).
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -379,6 +422,10 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `No schema file ... beside the table` / `schema file ... is damaged` | Copy both featurize files together, or run `python -m dcs featurize` again |
 | `marks forbidden column(s)` / `in the schema but not in the table` | The two files come from different runs or were edited: run `featurize` again |
 | `No feature left` | Every usable feature is constant or of a rare state: switch on a group (`use_ntt`, `use_depth`) or lower `min_state_fish` |
+| `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
+
+The audit's **notes** are not errors: it always writes `audit.md`. A note such as `vehicle ... is not in the table`
+means set `training.vehicle_compound`; `... stage cannot be built: ...` carries the same message the table above explains.
 
 ## Tests
 
@@ -392,10 +439,11 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_config.py`, `test_dcs_config_params.py` | Settings precedence, override YAML, rejected keys and values, `check-config` |
 | `test_dcs_synthetic*.py` | Synthetic files match the prepds formats, same seed gives the same data, each edge-case switch does what it says |
 | `test_dcs_gold.py`, `_gold_files.py`, `_gold_processed.py` | What the gold reader drops and what stops it, for both sources |
-| `test_dcs_workbook.py` | NTT columns: header cleanup, `-` rule, duplicates, disagreements, missing fish |
-| `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand) |
+| `test_dcs_workbook.py` | NTT columns: header cleanup, `-` rule, duplicates, disagreements (compound compared by the training set's spelling rule), blank-compound rows ignored, missing fish |
+| `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand), including run-start frames left out of the kinematics |
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
 | `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
+| `test_dcs_audit.py` | Each audit table and fact on small hand-built tables: filter steps, class status and scheme A, per-date and compound × date counts, missing values, manual share and flags per compound, §2.3 statistics, a compound with no Accepted fish, the D-016 share, the G1 stop rule (vehicle, one-date and unaccepted compounds never count; the unreviewed count), vehicle name from the settings, fps and tracker notes, framing setups (a shift, a zoom, two equally common setups, slow drift, one fish at the surface, a date without depth data), dose spelling variants counted once, a stage that cannot be built; `dcs audit` end to end on synthetic data and without a table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
 ## Keeping this section current
