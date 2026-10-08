@@ -57,6 +57,7 @@ Confirmed in `src/prepds` (2026-10-02):
 | C21 | FR-8 `predict` input | `featurize` needs the whole index, so a new fish cannot be featurized alone (R6) | D-018: `featurize --videos <dir>` builds the table from per-video folders without an index; labels optional |
 | C22 | §8.3 / Appendix B step 6: copy only the training table to the GB10 | Copying onto the box may be blocked (least privileges, owner 2026-10-08) | D-057: the box clones the repository, re-runs `prepds` on the raw videos and trains on that output as temporarily accepted (`gold_source: processed`); runbook in instructions.md |
 | C23 | §7.3 `normalize_by_date_vehicle`; FR-9 fallback to the global vehicle median | The setting has nothing to switch (FR-9 is always reported as the D-008 pair); on the real set a per-date reference leaks the date | D-061: setting removed; reference chain date -> framing setup -> all vehicle fish, or camera epochs (`training.camera_epochs`) |
+| C24 | §3.2 out of scope: anything beyond the classifier | Owner (2026-10-08): researchers need to ask questions about behavior, single fish and model results | D-071, D-073: research chat on deterministic query tools and a local open-weights model (no training); units U19-U20 below |
 
 New edge cases proposed for §9.2: **EC-27** index row without `date` (C4); **EC-28** workbook row for a fish missing, duplicated or disagreeing with the index; **EC-29** tracker evidence disagrees (profile name vs `detections.parquet`); **EC-30** sequences of different lengths (C20, Phase 6); **EC-31** camera framing differs between dates (C16).
 
@@ -192,6 +193,10 @@ Owner reviews the synthetic baseline report (layout, wording, caveats). Q9 revis
 
 ### Gate G4 `[O]`
 First real-data run review with the owner and advisor (needs Accepted videos): stop, improve, or add FR-10.
+
+### Research chat (owner addition 2026-10-08, C24)
+- **U19 Query tools.** `chat_tools.py`: compounds, feature glossary, compound vs same-date vehicle (effect size, Mann-Whitney, FDR), ranked differences, one fish's profile and timeline, model results, class scores, ablations, audit facts; `train` writes `decisions.csv`. Tests `test_dcs_chat_tools.py`.
+- **U20 Engine and interfaces.** `chat.py` (OpenAI-compatible client, tool loop, remote guard), `chat_server.py` (loopback JSON API), `dcs ask`, `dcs serve-chat`, settings `chat:`. Tests `test_dcs_chat.py`.
 
 ### Phase 6. Optional 1D-CNN (FR-10, only after G4)
 `featurize --sequences`, CNN with time-shuffled control, same folds; kept only if it beats the best tabular model on scheme A. EC-30: sequences padded to the longest recording with a mask, masked global pooling.

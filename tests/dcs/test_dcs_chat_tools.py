@@ -170,3 +170,10 @@ def test_research_data_from_settings_finds_the_latest_run(tiny_table: Path, run_
     loaded = ResearchData.from_settings(load_settings(env_file=tmp_path / "empty.env", environ=environ))
     assert loaded.run == run_folder and len(loaded.table) == 24
     assert np.isfinite(loaded.table["velocity_mean"]).all()
+
+
+def test_feature_by_compound_compares_every_drug_with_vehicle(data: ResearchData) -> None:
+    result = call(data, "feature_by_compound", feature="velocity_mean")
+    rows = {row["compound"]: row for row in result["compounds"]}
+    assert set(rows) == {"COMPOUND_A", "COMPOUND_B", "VEHICLE"} and rows["COMPOUND_A"]["n"] == 8
+    assert "hedges_g_vs_all_vehicle" in rows["COMPOUND_A"] and "hedges_g_vs_all_vehicle" not in rows["VEHICLE"]

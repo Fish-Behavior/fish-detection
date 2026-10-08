@@ -156,21 +156,24 @@ mirroring the PRD §12 phase breakdown (Phase 0-15).
 
 # Classifier (`dcs`): compound and dose from behavior
 
-`dcs` reads what `prepds` wrote (labels per frame and per segment, one folder per fish) and will learn to tell
-which compound, and later which dose, a fish received from its behavior. Specification:
+`dcs` reads what `prepds` wrote (labels per frame and per segment, one folder per fish) and learns to tell
+which compound, and which dose, a fish received from its behavior; a research chat answers questions about it. Specification:
 [`classifier_PRD.md`](classifier_PRD.md); plan: [`plans/classifier_plan.md`](plans/classifier_plan.md); status and
 decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
 
-**Where it stands.** The tools that exist today (units U1-U8) build the **training table**, one row per fish, turn it
-into the **training set** one stage learns from, split that set into the **folds** every model will share, and
-**audit** the table before anything is trained. Training models (U9 and later) comes next. Every unit is tested on synthetic data. Until
-reviewers Accept videos, the real input is the **unreviewed** prepds output, so no result is a claim about drugs yet.
+**Where it stands.** Everything in the plan except the optional 1D-CNN is built (U1-U20): the **training table**
+(one row per fish), the **audit**, the **training set** and shared **folds**, per-fold **preprocessing**, five
+**baselines** and the **MLP**, the **evaluation** with its leakage checks, **ablations** and vehicle normalization,
+**per-compound dose models**, the **report**, the **saved model**, **predict**, and the **research chat**. Every unit
+is tested on synthetic data. Until reviewers Accept videos, the real input is the **unreviewed** prepds output
+(temporarily accepted), so no result is a claim about drugs yet.
 
 ```
-prepds output ──► dcs featurize ──► training_table.parquet + training_table_schema.json ──► trainset ──► folds ──► (train: later)
-   (+ workbook for NTT)                     one row per fish        what every column is      features,    scheme A / B
-                                                     │                                         labels, dates
-                                                     └──► dcs audit ──► audit.md (counts, drops, confounds, G1 verdict)
+prepds output ──► dcs featurize ──► training_table.parquet + schema ──► dcs train ──► <run>/report.md, metrics, predictions
+   (+ workbook for NTT)                  │                              │   trainset -> folds -> preprocess per fold
+                                         │                              │   -> models -> evaluation, ablations, dose models
+                                         ├──► dcs audit ──► audit.md    └──► <run>/model/ ──► dcs predict (new fish)
+                                         └──► dcs ask / serve-chat (research chat, local language model + query tools)
 ```
 
 ## Setup
@@ -184,8 +187,9 @@ Same virtual environment as `prepds` (see [Setup](#setup)). Add the `DCS_*` line
 | `DCS_ACCEPTED_DIR` | gold folder (`accepted_index.parquet` + one folder per Accepted fish) | `featurize` when `gold_source` is `accepted` |
 | `DCS_DB_PATH` | the trial workbook (same file as `PDS_DB_PATH`) | `featurize`, for the 8 NTT columns; unset → NTT left empty, `has_ntt = 0` |
 | `DCS_OUTPUT_DIR` | where `dcs` writes (default `outputs/dcs`, git-ignored) | everything |
-| `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; `audit` reads it (train will) |
+| `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; `audit`, `train` and the chat read it |
 | `DCS_CONFIG` | a YAML file overriding `config/default_training.yaml` | optional |
+| `DCS_CHAT_API_KEY` | key for a hosted chat server (environment only; never in a file in the repository) | `ask`, `serve-chat`, only for a hosted server |
 
 Settings come from the environment first, then `.env`, then the defaults. Check them before touching data:
 
@@ -215,6 +219,11 @@ out of the G1 stop rule and counts vehicle fish per date, and says so in its not
 | `python -m dcs synth --out <new folder> [--seed N]` | Writes a **synthetic** gold dataset: `<out>/accepted/` (index + one folder per fish) and `<out>/synthetic_db.xlsx` (workbook). Placeholder names only (`COMPOUND_A`, `F_0001`). Use it to try `dcs` without real data. Refuses a folder that already has files. |
 | `python -m dcs featurize [--profile <version>]` | Reads the gold source, computes the per-fish features and writes `training_table.parquet` and `training_table_schema.json` to `DCS_OUTPUT_DIR`. Prints how many fish were kept and dropped. `--profile` keeps one calibration profile when the set mixes several. |
 | `python -m dcs audit` | Reads the two featurize files (nothing else), writes `audit.md` to `DCS_OUTPUT_DIR` and prints the G1 verdict and the notes. Trains nothing and changes no file it reads ([The audit](#the-audit)). |
+| `python -m dcs featurize --videos <dir> [--out <table>]` | Rows for fish read from their folders alone (no index or catalog), for `predict` ([Predicting new fish](#predicting-new-fish-dcs-predict)) |
+| `python -m dcs train [--stage] [--models] [--seed] [--repeats] [--device] [--no-ablations]` | Every model on shared folds, ablations, dose models, the report and the saved model in a new run folder ([Training](#training-dcs-train)) |
+| `python -m dcs predict --model <run> --input <table> [--out] [--device]` | Class probabilities per fish from a saved model; checks the reference predictions |
+| `python -m dcs ask ["question"] [--run] [--show-tools]` | The research chat in the terminal ([Research chat](#research-chat-dcs-ask-dcs-serve-chat)) |
+| `python -m dcs serve-chat [--host 127.0.0.1] [--port 8010] [--run]` | The research chat as a loopback JSON API for a web frontend |
 
 Global options go **before** the command: `python -m dcs --config my.yaml featurize`, `--env-file other.env`.
 
@@ -225,9 +234,11 @@ python -m dcs synth --out /tmp/dcs_try
 printf 'training:\n  gold_source: accepted\n' > /tmp/dcs_try/accepted.yaml     # synth writes the accepted layout
 DCS_ACCEPTED_DIR=/tmp/dcs_try/accepted DCS_DB_PATH=/tmp/dcs_try/synthetic_db.xlsx DCS_OUTPUT_DIR=/tmp/dcs_try/out \
   python -m dcs --config /tmp/dcs_try/accepted.yaml featurize
-# Featurized 48 fish (reviewed, profile cal-synthetic), 0 dropped
+# Featurized 48 fish (48 Accepted, the rest UNREVIEWED; profile cal-synthetic), 0 dropped
 DCS_OUTPUT_DIR=/tmp/dcs_try/out python -m dcs --config /tmp/dcs_try/accepted.yaml audit
 # Audited 48 fish (Accepted gold folder): G1 stop rule GO      (report: /tmp/dcs_try/out/audit.md)
+DCS_OUTPUT_DIR=/tmp/dcs_try/out python -m dcs --config /tmp/dcs_try/accepted.yaml train --models logreg --no-ablations
+# Run folder: /tmp/dcs_try/out/training/<run_id>         (about 10 s; all models and ablations: a few minutes)
 ```
 
 ### Run it on the real data
