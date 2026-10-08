@@ -1,4 +1,4 @@
-# Default settings for the compound/dose classifier (`dcs`, docs/classifier_PRD.md §7.3).
+# Default settings for the compound/dose classifier (`dcs`, docs/PRD.md Part II §7.3).
 #
 # Override any value with your own YAML (DCS_CONFIG or `python -m dcs --config my.yaml`);
 # only the keys you list are changed, nested sections merge key by key. A key that does

@@ -32,7 +32,7 @@ ocr = ["pytesseract>=0.3"]
 # Phase 15 (fine-tuned tracker/pose model). Not in the core dependencies: ~2 GB with CUDA wheels. Install the CUDA
 # build of torch first: uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 ml = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.45"]
-# Compound/dose classifier MLP (docs/classifier_PRD.md §7.5). Everything else in `dcs` runs without it.
+# Compound/dose classifier MLP (docs/PRD.md Part II §7.5). Everything else in `dcs` runs without it.
 # On a GPU machine install the CUDA build of torch first (classifier PRD Appendix B).
 train = ["torch>=2.4"]
 

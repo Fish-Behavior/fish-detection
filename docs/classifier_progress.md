@@ -1,6 +1,6 @@
 # Classifier (`dcs`): progress and decisions
 
-**PRD:** [classifier_PRD.md](classifier_PRD.md) v0.3 · **Plan:** [plans/classifier_plan.md](plans/classifier_plan.md)
+**PRD:** [PRD.md](PRD.md), Part II (merged 2026-10-08 from the former `classifier_PRD.md` v0.3; section numbers cited below as "PRD §n" are Part II's, `II.n`) · **Plan:** the former `plans/classifier_plan.md` was removed after the build (its change list C1-C24 is applied in Part II; use `git log -- docs/plans/classifier_plan.md` to read it). Open items: [PRD.md](PRD.md), Part III
 **Privacy:** placeholders only (`COMPOUND_A`, `F_0042`, `<date>`); no data, outputs, real names, dates or paths.
 **Status legend:** `NOT_STARTED` / `IN_PROGRESS` / `DONE` / `BLOCKED: <reason>` / `OWNER`. Updated after every task.
 
@@ -23,7 +23,7 @@
 | 5. Save/load, runbook | DONE (owner steps pending) | U16-U18 done, T5.6 drafted; T5.7 (AC-9 across machines, AC-10 runbook walkthrough) is the owner's |
 | G4 | BLOCKED: needs real data | |
 | 6. Optional 1D-CNN | NOT_STARTED | Only after G4 |
-| 7. Wrap-up | DONE | Plan, progress, instructions and README reflect what was built (AC-11); last sweep: nothing unused; research chat added as U19-U20 (C24) |
+| 7. Wrap-up | DONE | Plan, progress, instructions and README reflect what was built (AC-11); last sweep: nothing unused; research chat added as U19-U20 (C24); 2026-10-08 `classifier_PRD.md` merged into [PRD.md](PRD.md) Part II and `plans/classifier_plan.md` removed (both in git history), watch list and model roadmap in Part III; no code changed beyond one docstring pointer |
 
 ## 2. Tasks
 
@@ -77,7 +77,7 @@
 | AC-8 no restricted data in git | DONE | U18; `test_dcs_privacy.py` |
 | AC-3 … AC-11 (others) | see the task rows | AC-3, AC-5 on synthetic data (U11, U12); AC-4, AC-6, AC-7 on synthetic data (U13, U14); AC-9 locally (U16, U17); AC-10 owner |
 
-Edge cases: task and test file per row in plan §6; the task rows above say which each unit covered (U6: EC-4, EC-7, EC-8, EC-12, EC-17 training-set part, EC-20, EC-23; U7: EC-5, EC-6, EC-13, EC-14 folds part; U8: EC-11 audit part, EC-24, EC-26 fps part, EC-31).
+Edge cases: test file per case in the Tests table of [instructions.md](instructions.md); the task rows above say which each unit covered (U6: EC-4, EC-7, EC-8, EC-12, EC-17 training-set part, EC-20, EC-23; U7: EC-5, EC-6, EC-13, EC-14 folds part; U8: EC-11 audit part, EC-24, EC-26 fps part, EC-31).
 
 ## 4. Answers to the open questions (owner, 2026-10-02)
 
@@ -96,7 +96,7 @@ Edge cases: task and test file per row in plan §6; the task rows above say whic
 
 **Blocker for D-001 (closed 2026-10-02):** bare `pytest` was not on the PATH of the Claude Code process. Fixed by launching Claude Code with `.venv` active; `which pytest` now points into `.venv/bin/`.
 
-**Open for the owner:** approve the PRD change list (plan §2, now C1-C24) and decide whether it becomes PRD v0.4; confirm D-008 at G2; file the upstream request ([upstream_request_prepds.md](upstream_request_prepds.md), T5.6).
+**Open for the owner:** confirm D-008 at G2; file the upstream request ([upstream_request_prepds.md](upstream_request_prepds.md), T5.6). The PRD change list (C1-C24) is applied in [PRD.md](PRD.md) Part II (2026-10-08); everything still open is in Part III there.
 
 **Next steps (owner), in order:**
 1. GB10: clone, install (torch CUDA build first), `pytest tests/dcs -q`; record the hardware in §6 (T0.2, T0.3).

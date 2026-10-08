@@ -1,6 +1,6 @@
 # Request to `prepds`: record tracker, resolution and camera setup per video
 
-**From:** the classifier (`dcs`, [classifier_PRD.md](classifier_PRD.md)) · **Plan task:** T5.6 · **Status:** draft for the owner to file
+**From:** the classifier (`dcs`, [PRD.md](PRD.md), Part II) · **Plan task:** T5.6 · **Status:** draft for the owner to file
 **Privacy:** placeholders only; no data, names, dates or paths.
 
 ## What we ask

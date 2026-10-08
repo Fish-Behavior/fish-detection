@@ -158,7 +158,7 @@ mirroring the PRD §12 phase breakdown (Phase 0-15).
 
 `dcs` reads what `prepds` wrote (labels per frame and per segment, one folder per fish) and learns to tell
 which compound, and which dose, a fish received from its behavior; a research chat answers questions about it. Specification:
-[`classifier_PRD.md`](classifier_PRD.md); plan: [`plans/classifier_plan.md`](plans/classifier_plan.md); status and
+[`PRD.md`](PRD.md), Part II (cited in the code as "PRD §n" = `II.n`); open items and roadmap: Part III; status and
 decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
 
 **Where it stands.** Everything in the plan except the optional 1D-CNN is built (U1-U20): the **training table**

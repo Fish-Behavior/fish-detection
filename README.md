@@ -32,8 +32,12 @@ plus Undetermined and Dead. Full scope:
 | **Compound/dose classifier** (`dcs`): training table, audit, baselines and MLP with date-held-out validation, ablations, dose models, saved model, `predict`, research chat (`dcs ask`) | Built and tested on synthetic data. On the unreviewed real output no model yet names the compound better than the recording date does; behavior does separate vehicle from drug. Status and decisions: [docs/classifier_progress.md](docs/classifier_progress.md). |
 | Anomaly detection, reporting, live (Phase 2) camera | Not started. |
 
-Details and the task-by-task log: [docs/progress.md](docs/progress.md). Requirements:
-[docs/PRD.md](docs/PRD.md).
+Model strategy: a **lightweight, pre-trained, local language model** does the reasoning and wording for the research
+chat (nothing is trained; every number comes from deterministic query tools), and a **better vision model** is planned
+once more reviewed data exists (more labeled frames for the detector, then a clip-level behavior model).
+
+Details and the task-by-task log: [docs/progress.md](docs/progress.md). Requirements, watch list and roadmap, all in one
+file: [docs/PRD.md](docs/PRD.md) (Part I preprocessing, Part II classifier and chat, Part III open items).
 
 ## Quick Start
 
