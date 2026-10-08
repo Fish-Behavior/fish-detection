@@ -496,6 +496,84 @@ unreviewed set (compound stage, default settings, dry run with nothing written) 
 (see Camera framing), not a final result. Runtime there: about 2 min per stage on a 10-core laptop, most of it the
 forest and boosting in scheme B and `B_permuted`.
 
+## Training (`dcs train`)
+
+```bash
+python -m dcs train                                   # both stages, every model in training.models
+python -m dcs train --stage compound                  # Stage 1 only (compound, dose or both)
+python -m dcs train --models logreg,random_forest     # subset; majority and date_only are always added
+python -m dcs train --seed 1 --repeats 10             # other seed / more repeats for this run only
+```
+
+It reads only `DCS_TABLE` (the training table and its schema file, both from `featurize`) and, per stage, builds the
+training set, the shared folds and the evaluation above. It prints one line per scheme and repeat, so a long run shows
+progress (`tee train.log` keeps it). The command-line values are checked by the same rules as the settings file; they
+apply to this run only and are saved in `config_used.yaml`. `mlp` is skipped with a message until U13.
+
+When `stage` is `both` and one stage cannot be built (for example the dose stage with too few fish per dose), the
+other still runs and the report says why the first is missing. When no stage can be built, nothing is written and
+the command stops with the reason (exit code 2).
+
+Each run gets its own folder `<DCS_OUTPUT_DIR>/training/<run_id>/` (`run_id` = UTC start time + short git commit,
+`-2`, `-3` ... when two runs start in the same second). Nothing in it is ever overwritten:
+
+| File | What it holds |
+|---|---|
+| `report.md` | **Read this first.** Source (Accepted, or UNREVIEWED = temporarily accepted), caveats, how to read the scores, then per stage: classes kept and dropped, folds, the score table (every model on one row with `majority`, `date_only`, `B permuted` and the date effect B − A beside it), the decision and its reason, vehicle against drug, per-class scores and the confusion matrix of the best model |
+| `metrics.csv` | One row per stage, model, scheme (`A`, `B`, `B_permuted`) and repeat: `fish`, `balanced_accuracy`, `macro_f1`, `log_loss`, `top3_accuracy` |
+| `predictions.csv` | Out-of-fold predictions: stage, model, scheme, repeat, fold, `video_id`, date, label, predicted, `p:<class>` per class |
+| `folds.csv` | The folds every model used (stage, `video_id`, label, date, scheme, repeat, fold; `-1` = pinned) |
+| `confusion_<stage>.png` | Best model (highest scheme-A balanced accuracy), share of each true class predicted as each class, all repeats |
+| `audit.md` | `dcs audit` of the same table |
+| `config_used.yaml` | Every `training:` setting of this run, command-line values included |
+| `run_info.json` | Run id, git commit and whether tracked files had uncommitted changes, command, seed, folds, repeats, stages, models (and skipped ones), source, table path, versions (Python, scikit-learn, numpy, pandas, torch), hardware, start time, seconds |
+
+The trained model itself (`model/`) is saved from U16 on; until then a run is an evaluation, not a model to reuse.
+Runtime on the real unreviewed set: about 4 to 5 min for both stages and the five baselines on a 10-core laptop.
+
+## Training on the GB10 (temporarily accepted data)
+
+Copying files onto the GB10 (WinSCP, `pscp`) may not be allowed for this account. The box therefore builds everything
+itself from a clone: it re-runs `prepds` on the raw videos and trains on that output, read as **temporarily accepted**.
+This is `training.gold_source: processed`, the default (D-033). Every fish counts as data, every report says
+UNREVIEWED, and `reviewed` stays false. Once enough videos are Accepted and the results justify it, the accepted
+folder is moved to the box and `gold_source: accepted` is switched on (D-057).
+
+What the box needs that git does not carry (NFR-2): the **raw videos** (`PDS_VIDEO_DIR`) and the **trial workbook**
+(`PDS_DB_PATH`, also `DCS_DB_PATH` for the NTT columns), readable from the box. The calibration profiles are in git, so
+a clone re-runs with the same profile as the PC (`dcs audit` prints it; it must match the PC's run).
+
+```bash
+# 1. once: code and environment (Python 3.11 or newer)
+git clone <repository url> fish-detection && cd fish-detection
+git checkout <branch to run>
+python3 -m venv .venv && source .venv/bin/activate
+pip install -U pip && pip install -e ".[dev]"      # torch is not needed before the MLP (U13)
+pytest tests/dcs -q                                # synthetic data only; must pass on aarch64 (EC-19)
+
+# 2. once: paths on the box (.env is git-ignored)
+cp .env.example .env    # set PDS_VIDEO_DIR, PDS_DB_PATH, DCS_DB_PATH; keep PDS_OUTPUT_DIR=outputs, DCS_PROCESSED_DIR=outputs
+printf 'training:\n  vehicle_compound: <vehicle name as the workbook writes it>\n' > my_training.yaml
+echo 'DCS_CONFIG=my_training.yaml' >> .env
+python -m prepds check-config && python -m dcs check-config
+
+# 3. preprocessing, then training; inside tmux so a dropped SSH session does not stop it
+tmux new -s fish                                    # detach: Ctrl-b d   reattach: tmux attach -t fish
+python -m prepds catalog
+python -m prepds run --workers <cores - 2>         # resumable; videos already done are skipped
+python -m dcs featurize
+python -m dcs audit
+python -m dcs train 2>&1 | tee train.log
+```
+
+Read the result on the box: `less outputs/dcs/training/<run_id>/report.md` (the last lines of `train.log` name the
+folder). Nothing has to leave the machine to read the verdict. If a file must come back and copying is blocked, the
+report is plain text: open it in the SSH window and copy the table. **Never put real names, dates or results into
+git** (NFR-2).
+
+After a `git pull` with new `dcs` code: run `python -m dcs featurize` again if `featurize` changed (the progress file
+says so), then `dcs train`. `prepds run` only needs repeating when `prepds` or the calibration profile changed.
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -515,6 +593,8 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `No schema file ... beside the table` / `schema file ... is damaged` | Copy both featurize files together, or run `python -m dcs featurize` again |
 | `marks forbidden column(s)` / `in the schema but not in the table` | The two files come from different runs or were edited: run `featurize` again |
 | `No feature left` | Every usable feature is constant or of a rare state: switch on a group (`use_ntt`, `use_depth`) or lower `min_state_fish` |
+| `--models must be` / `--stage must be` / `--seed must be` / `--repeats must be` (train) | Fix the command-line value; the message lists what is allowed |
+| `<stage> stage cannot be built: ...` (train) | No stage could be built; the rest of the message is one of the training-set errors above |
 | `are categories, which are not encoded yet` | `use_demographics: true` is not supported before U14: set it back to `false` |
 | `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
 
@@ -541,6 +621,8 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features stop with a hint |
 | `test_dcs_models.py` | Every baseline has the same interface and probabilities that sum to 1; majority gives the class shares; date-only: same date, nearest date, tie to the earlier date, non-date text; logreg, forest and boosting find a planted signal and weight classes; same seed, same probabilities; `mlp` and unknown names are errors |
 | `test_dcs_evaluate.py` | Every model sees the same folds; majority and date-only always run; preprocessing is fitted without the test fold (EC-9, by spying on every fit); metrics equal scikit-learn's on the pooled predictions of a repeat, no plain accuracy (D-017); per-class scores pool the repeats; spread = standard deviation across repeats; the permutation stays inside each date; a planted signal is judged useful; **leakage canary** (label depends only on the date: scheme B perfect, scheme A below chance, permuted = real, not useful); pinned fish never scored in scheme A; no scheme A means undecided; vehicle vs drug; same seed, same metrics (EC-14) |
+| `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
+| `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
 ## Keeping this section current

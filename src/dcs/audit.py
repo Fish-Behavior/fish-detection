@@ -155,7 +155,7 @@ def render(audit: Audit) -> str:
     lines = ["# Data audit", "", *(f"- {key}: {_text(value)}" for key, value in audit.facts.items())]
     lines += ["", "## Notes", "", *(f"- {note}" for note in audit.notes or ("none",))]
     for title, name in SECTIONS:
-        lines += ["", f"## {title}", "", _markdown(audit.tables[name])]
+        lines += ["", f"## {title}", "", markdown_table(audit.tables[name])]
     return "\n".join(lines) + "\n"
 
 
@@ -324,7 +324,8 @@ def _setups(measured: pd.DataFrame, tolerance: float) -> pd.Series:
     return pd.Series([number[group] for group in groups], index=measured.index, dtype="Int64")
 
 
-def _markdown(frame: pd.DataFrame) -> str:
+def markdown_table(frame: pd.DataFrame) -> str:
+    """A data frame as a markdown table (index kept unless it is a plain range); also used by the training report."""
     if frame.empty:
         return "none"
     if not isinstance(frame.index, pd.RangeIndex):

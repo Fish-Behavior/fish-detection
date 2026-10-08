@@ -55,6 +55,7 @@ Confirmed in `src/prepds` (2026-10-02):
 | C19 | §6.4 / §6.7: how fold scores combine | Unstated (R4) | D-017: metrics are computed on the pooled out-of-fold predictions of each repeat; the spread is across repeats |
 | C20 | §6.11 1D-CNN input | Recording lengths differ (including the shorter-exposure videos) (R5) | EC-30 in Phase 6: pad to the longest recording with a mask; masked global pooling |
 | C21 | FR-8 `predict` input | `featurize` needs the whole index, so a new fish cannot be featurized alone (R6) | D-018: `featurize --videos <dir>` builds the table from per-video folders without an index; labels optional |
+| C22 | §8.3 / Appendix B step 6: copy only the training table to the GB10 | Copying onto the box may be blocked (least privileges, owner 2026-10-08) | D-057: the box clones the repository, re-runs `prepds` on the raw videos and trains on that output as temporarily accepted (`gold_source: processed`); runbook in instructions.md |
 
 New edge cases proposed for §9.2: **EC-27** index row without `date` (C4); **EC-28** workbook row for a fish missing, duplicated or disagreeing with the index; **EC-29** tracker evidence disagrees (profile name vs `detections.parquet`); **EC-30** sequences of different lengths (C20, Phase 6); **EC-31** camera framing differs between dates (C16).
 

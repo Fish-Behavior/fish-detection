@@ -5,22 +5,27 @@ audit, train, predict: classifier plan §3.1). So far: `check-config`,
 which shows what `dcs` will read so a new `.env` or override YAML can be
 verified before any data is touched; `synth`, which writes a synthetic
 gold dataset for trying the other commands without real data; and
-`featurize`, which turns the gold set into the training table; and `audit`,
-which reports what that table holds before anything is trained.
+`featurize`, which turns the gold set into the training table; `audit`,
+which reports what that table holds before anything is trained; and `train`,
+which evaluates every model on shared folds and writes a run folder with the report.
 """
 
 from __future__ import annotations
 
 import argparse
+import shlex
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from dcs import __version__
 from dcs.audit import AUDIT_FILE, build_audit, render
 from dcs.config import PATH_VARIABLES, ConfigError, Settings, load_settings
+from dcs.config_rules import STAGES, VALUE_RULES
 from dcs.featurize import featurize, write_outputs
 from dcs.gold import SOURCE_ACCEPTED, read_gold
 from dcs.synthetic import SynthConfig, make_gold_dataset
+from dcs.train import run_training
 from dcs.trainset import load_table
 
 # Folders dcs creates itself, so their absence is never a problem.
@@ -63,6 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit = commands.add_parser("audit", help="training table -> audit.md: counts, drops, confounds, G1 verdict (no training)")
     audit.set_defaults(handler=run_audit)
+
+    train = commands.add_parser(
+        "train", help="training table -> run folder: every model on shared folds, report.md, metrics, predictions"
+    )
+    train.add_argument("--stage", help=f"{', '.join(STAGES)} (default: training.stage)")
+    train.add_argument("--models", help="comma-separated model names, e.g. logreg,random_forest (default: training.models)")
+    train.add_argument("--seed", type=int, help="seed for folds, models and permutation (default: training.seed)")
+    train.add_argument("--repeats", type=int, help="cross-validation repeats (default: training.repeats)")
+    train.set_defaults(handler=run_train)
     return parser
 
 
@@ -131,9 +145,19 @@ def run_audit(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def run_train(settings: Settings, args: argparse.Namespace) -> int:
+    """Evaluate every model on the training table and write one run folder; print where the report is."""
+    training = _with_overrides(settings.training, args)
+    run = run_training(settings, training, command=shlex.join(["python", "-m", "dcs", *args.argv]))
+    print(f"Run folder: {run}")
+    print(f"  report: {run / 'report.md'}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse arguments, load settings once (unless the command needs none), and dispatch to it."""
     args = build_parser().parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)  # recorded in run_info.json
     try:
         needs_settings = getattr(args, "needs_settings", True)
         settings = load_settings(env_file=args.env_file, config_file=args.config) if needs_settings else None
@@ -159,6 +183,21 @@ def _path_status(name: str, value: Path | None, explicit: bool) -> str:
     if explicit:
         return "MISSING"
     return PRODUCED_INPUTS.get(name, "MISSING")  # only defaulted paths reach here
+
+
+def _with_overrides(training: Mapping[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """The training settings with the command-line values, each checked by its settings rule (D-023)."""
+    rules = dict(VALUE_RULES)
+    models = None if args.models is None else tuple(name.strip() for name in args.models.split(","))
+    merged = dict(training)
+    for key, value in (("stage", args.stage), ("models", models), ("seed", args.seed), ("repeats", args.repeats)):
+        if value is None:
+            continue
+        rule = rules[f"training.{key}"]
+        if not rule.check(value):
+            raise ConfigError(f"--{key} must be {rule.requirement}, got {value!r}")
+        merged[key] = value
+    return merged
 
 
 def _flatten(params: Mapping[str, Any], prefix: str = "") -> list[tuple[str, Any]]:
