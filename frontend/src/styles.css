@@ -187,10 +187,11 @@ svg {
 .sidebar nav button {
   border: 0;
   justify-content: flex-start;
-  padding: 12px;
+  padding: 12px 10px;
   min-height: 46px;
   font-size: 13px;
   color: #64758a;
+  white-space: nowrap;
 }
 .sidebar nav button.active {
   background: #edf4fc;
@@ -500,6 +501,15 @@ h1 {
 }
 .notice-slot:empty {
   display: none;
+}
+.notice-slot {
+  position: sticky;
+  top: 12px;
+  z-index: 6;
+}
+.notice,
+.inline-error {
+  box-shadow: 0 4px 14px rgb(23 45 76 / 12%);
 }
 .notice,
 .inline-error {
@@ -1204,10 +1214,23 @@ tbody tr:hover {
   overflow: hidden;
   flex: none;
 }
+.chat-form {
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chat-form:focus-within {
+  border-color: #558fc7;
+  box-shadow: 0 0 0 3px rgb(85 143 199 / 22%);
+}
 .chat-form input {
   border: 0 !important;
   border-radius: 0 !important;
   font-size: 12px;
+}
+.chat-form input:focus-visible {
+  outline: none;
+}
+.chat-form input::placeholder {
+  color: #8a9bb0;
 }
 .chat-form button {
   margin: 4px;
@@ -1333,6 +1356,7 @@ tbody tr:hover {
     font-size: 12px;
     min-height: 42px;
     padding: 9px;
+    white-space: normal;
   }
   .sidebar-session {
     margin: 0;

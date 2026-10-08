@@ -67,9 +67,10 @@ export default function Chat({
                 will use the DCS chat API later.
               </p>
               <button
-                onClick={() =>
+                onClick={() => {
                   setQuestion('What happens when I correct a tracking point?')
-                }
+                  input.current?.focus()
+                }}
               >
                 What happens after a correction?
               </button>
