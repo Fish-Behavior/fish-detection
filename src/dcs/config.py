@@ -103,6 +103,11 @@ class Settings:
         """The `training:` section (classifier PRD §7.3)."""
         return self.params["training"]
 
+    @property
+    def chat(self) -> ReadOnlyMapping:
+        """The `chat:` section (research chat, D-073)."""
+        return self.params["chat"]
+
     def require(self, name: str) -> Path:
         """Return a configured path that must exist, or fail with a clear "how to fix" message."""
         if name not in PATH_VARIABLES:

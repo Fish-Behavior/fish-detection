@@ -55,6 +55,7 @@ def run_training(
     """Evaluate every stage and model in `training` on the table in the settings; return the new run folder.
     `device` (auto, cpu, cuda) is for the MLP only; `ablations=False` skips the compound-stage ablations."""
     started, clock = datetime.now(timezone.utc), time.monotonic()
+    commit, dirty = _git()  # the code this run starts with, even if the checkout changes while it runs
     table_path = settings.require("table")
     table, described = load_table(table_path)
     runnable = set(BASELINES) | ({"mlp"} if torch_available() else set())
@@ -100,7 +101,6 @@ def run_training(
     if not results:
         raise ConfigError(" ".join(notes))
 
-    commit, dirty = _git()
     run = _new_folder(settings.paths.output_dir / RUNS_FOLDER, f"{started:%Y%m%dT%H%M%SZ}-{commit}")
     info = {
         "run_id": run.name,

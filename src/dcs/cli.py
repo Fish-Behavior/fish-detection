@@ -8,7 +8,8 @@ gold dataset for trying the other commands without real data; and
 `featurize`, which turns the gold set into the training table; `audit`,
 which reports what that table holds before anything is trained; `train`,
 which evaluates every model on shared folds and writes a run folder with the report and the saved model; and
-`predict`, which scores a table with a saved model.
+`predict`, which scores a table with a saved model; `ask` and `serve-chat`, the research chat in the terminal
+and as a loopback JSON API.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ LABEL_WIDTH = 19
 VIDEOS_TABLE = "videos_table.parquet"  # featurize --videos default, never the training table
 MATCH_TOLERANCE = 1e-9  # predict vs reference_predictions.csv (CSV round trip)
 DEVICES = ("auto", "cpu", "cuda")  # PRD §7.2
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")  # the chat API has no authentication (as prepds review)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +101,18 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--out", help="CSV to write (default: <DCS_OUTPUT_DIR>/<input name>_predictions.csv)")
     predict.add_argument("--device", choices=DEVICES, default="cpu", help="for an MLP: cpu (default), cuda or auto")
     predict.set_defaults(handler=run_predict)
+
+    ask = commands.add_parser("ask", help="research chat in the terminal: one question, or a session without one")
+    ask.add_argument("question", nargs="?", help="the question (omit for an interactive session)")
+    ask.add_argument("--run", help="run folder to talk about (default: the latest under <DCS_OUTPUT_DIR>/training)")
+    ask.add_argument("--show-tools", action="store_true", help="print each tool call the model made")
+    ask.set_defaults(handler=run_ask)
+
+    serve = commands.add_parser("serve-chat", help="research chat as a JSON API on this machine, for a web frontend")
+    serve.add_argument("--host", default="127.0.0.1", help="loopback address only (default 127.0.0.1)")
+    serve.add_argument("--port", type=int, default=8010, help="port (default 8010)")
+    serve.add_argument("--run", help="run folder to talk about (default: the latest)")
+    serve.set_defaults(handler=run_serve_chat)
     return parser
 
 
@@ -208,6 +222,37 @@ def run_predict(settings: Settings, args: argparse.Namespace) -> int:
         gap = float((shared[columns] - reference.loc[shared.index, columns]).abs().to_numpy().max())
         verdict = "matches" if gap <= MATCH_TOLERANCE else f"DIFFERS (largest gap {gap:.3g}) from"
         print(f"  {verdict} the saved reference predictions for {len(shared)} fish")
+    return 0
+
+
+def run_ask(settings: Settings, args: argparse.Namespace) -> int:
+    """One answer, or an interactive session, from the research chat."""
+    from dcs import chat
+    from dcs.chat_tools import ResearchData
+
+    chat.check_engine(settings.chat)
+    data = ResearchData.from_settings(settings, run=Path(args.run).expanduser() if args.run else None)
+    if args.question:
+        chat.print_answer(chat.ask(data, args.question, chat=settings.chat), args.show_tools)
+    else:
+        chat.session(data, settings.chat, args.show_tools)
+    return 0
+
+
+def run_serve_chat(settings: Settings, args: argparse.Namespace) -> int:
+    """Serve the chat API on a loopback address (it has no authentication)."""
+    if args.host not in LOOPBACK_HOSTS:
+        raise ConfigError(f"the chat API has no authentication: --host must be a loopback address {LOOPBACK_HOSTS}.")
+    import uvicorn
+
+    from dcs.chat import check_engine
+    from dcs.chat_server import create_app
+    from dcs.chat_tools import ResearchData
+
+    check_engine(settings.chat)
+    data = ResearchData.from_settings(settings, run=Path(args.run).expanduser() if args.run else None)
+    print(f"Research chat API: http://{args.host}:{args.port}/api  (model {settings.chat['model']}, run {data.run.name if data.run else 'none'})")
+    uvicorn.run(create_app(data, settings.chat), host=args.host, port=args.port, log_level="warning")
     return 0
 
 

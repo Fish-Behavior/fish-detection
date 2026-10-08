@@ -85,6 +85,14 @@ def _is_epoch_list(value: Any) -> bool:
     return all(a < b for a, b in zip(days, days[1:]))
 
 
+def _is_optional_text(value: Any) -> bool:
+    return value is None or NON_EMPTY_TEXT.check(value)
+
+
+def _is_http_url(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith(("http://", "https://")) and len(value) > len("https://")
+
+
 def _is_model_list(value: Any) -> bool:
     if not isinstance(value, (list, tuple)) or not value:
         return False
@@ -124,6 +132,11 @@ VALUE_RULES: tuple[tuple[str, Rule], ...] = (
     ("training.mlp.patience", whole_at_least(1)),
     ("training.mlp.inner_val_fraction", number_in(0, 1, low_open=True, high_open=True)),
     ("training.mlp.seeds", whole_at_least(1)),
+    ("chat.base_url", Rule(_is_http_url, "an http:// or https:// address")),
+    ("chat.model", Rule(_is_optional_text, "null or the model's name")),
+    ("chat.temperature", number_in(0, 2)),
+    ("chat.max_tool_rounds", whole_at_least(1)),
+    ("chat.timeout_s", number_in(0, low_open=True)),
 )
 
 

@@ -65,3 +65,20 @@ training:
     inner_val_fraction: 0.2
     # Number of initialization seeds per fold; the report shows their mean and spread.
     seeds: 5
+
+# Research chat (`python -m dcs ask`, `python -m dcs serve-chat`; D-073). Any OpenAI-compatible chat server with tool
+# calling: Ollama (`ollama serve`; http://127.0.0.1:11434/v1), a llama.cpp server, vLLM, or a host the lab chooses.
+# The model only picks query tools and writes the answer; every number comes from the tools (D-071).
+chat:
+  base_url: "http://127.0.0.1:11434/v1"
+  # The model's name as the server lists it (an instruct model that supports tool calling). Set it in your override file.
+  model: null
+  # Low = steadier, more literal answers.
+  temperature: 0.1
+  # Tool calls the model may make for one question before it must answer.
+  max_tool_rounds: 8
+  # Seconds to wait for one reply from the server (a large local model can be slow).
+  timeout_s: 300
+  # A base_url that is not this machine sends data summaries off the box. Only allowed when true; check your data
+  # agreement first. An API key for a hosted server goes in the environment variable DCS_CHAT_API_KEY, never here.
+  allow_remote: false
