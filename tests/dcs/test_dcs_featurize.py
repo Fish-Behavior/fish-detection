@@ -179,6 +179,15 @@ def test_runs_of_one_frame_leave_speed_unknown() -> None:
     assert features["detected_share"] == pytest.approx(2 / 3) and features["depth_mean"] == pytest.approx(10.0)
 
 
+def test_detected_fish_without_depth_values_gets_nan_depth() -> None:
+    """Depth is off by default, so a missing depth column must not stop the fish being featurized."""
+    table = frames([True, True, True])
+    table["depth_from_surface"] = np.nan
+    features = kinematic_features(table)
+    assert all(math.isnan(v) for k, v in features.items() if k.startswith("depth_"))
+    assert features["velocity_mean"] == pytest.approx(1.0)
+
+
 def test_depth_features_ignore_undetected_frames() -> None:
     features = kinematic_features(MIXED)
     depth = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]

@@ -175,7 +175,7 @@ def kinematic_features(frames: pd.DataFrame) -> dict[str, float] | None:
 
     prepds writes 0.0 where a detected run has too little history (schema.ZERO_ON_FIRST_FRAME,
     ZERO_ON_FIRST_TWO_FRAMES); those frames are left out, so broken-up tracking does not slow a fish
-    down (D-048). A fish whose runs are all too short gets NaN for those features.
+    down (D-048). A fish whose runs are all too short gets NaN for those features, and one with no depth values NaN for depth.
     """
     detected = frames["detected"].astype(bool).to_numpy()
     if not detected.any():
@@ -197,10 +197,10 @@ def kinematic_features(frames: pd.DataFrame) -> dict[str, float] | None:
         "meander_mean": _mean(frames["meander"].to_numpy(dtype=float)[two_before]),
         "immobile_share": float(seen["is_immobile"].astype(bool).mean()),
         "detected_share": len(seen) / len(frames),
-        "depth_mean": float(depth.mean()),
-        "depth_min": float(depth.min()),
+        "depth_mean": _mean(depth),
+        "depth_min": float(depth.min()) if len(depth) else math.nan,
     }
-    out.update({f"depth_p{p:02d}": float(np.percentile(depth, p)) for p in DEPTH_PERCENTILES})
+    out.update({f"depth_p{p:02d}": float(np.percentile(depth, p)) if len(depth) else math.nan for p in DEPTH_PERCENTILES})
     return out
 
 

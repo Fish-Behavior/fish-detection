@@ -1,8 +1,9 @@
 """Ablations of the compound stage (plan U14, T3.4; PRD §6.8, FR-9; D-008, D-061).
 
 Each switch ablation (NTT, demographics, depth) flips one feature group and re-runs every model on the main run's
-folds. The FR-9 pair runs the same models on the same non-vehicle fish and folds twice: raw, and vehicle-normalized
-(each feature minus the median of reference vehicle fish, D-008). The keep rule says whether NTT earns its place.
+folds (new folds, and the row says so, when the switch changes which fish are kept). The FR-9 pair runs the same
+models on the same non-vehicle fish and folds twice: raw, and vehicle-normalized (each feature minus the median of
+reference vehicle fish, D-008). The keep rule says whether NTT earns its place.
 """
 
 from __future__ import annotations
@@ -62,7 +63,10 @@ def run_ablations(
         except ConfigError as error:
             out.append(Ablation(name, what, None, str(error)))
             continue
-        folds = main.folds if ts.ids.equals(main.trainset.ids) else make_folds(ts.y, ts.groups, ts.ids, training)
+        if ts.ids.equals(main.trainset.ids):
+            folds = main.folds
+        else:  # the switch changed which fish or classes are kept, so the main folds no longer fit
+            folds, what = make_folds(ts.y, ts.groups, ts.ids, training), f"{what} (different fish: new folds)"
         log(f"ablation {name}")
         out.append(Ablation(name, what, StageResult(ts, folds, evaluate(ts, folds, models, training, log, device))))
 
@@ -181,7 +185,7 @@ def render_ablations(ablations: Sequence[Ablation], main: StageResult, training:
             )
     lines = [
         "",
-        "## Ablations (compound stage, same folds; PRD §6.8)",
+        "## Ablations (compound stage, the main run's folds unless the row says new folds; PRD §6.8)",
         "",
         "One change per row. `delta A` = scheme-A balanced accuracy minus the main run's; for the vehicle-normalized run, "
         "minus the raw non-vehicle run (same classes and folds, D-008). A change matters only when `delta A` is larger "

@@ -36,7 +36,8 @@ training:
   # Models to train; majority and date_only are the baselines every result is shown next to.
   models: [majority, date_only, logreg, random_forest, hist_gb, mlp]
   # Feature-group switches (each is also reported as an ablation, PRD §6.8).
-  use_ntt: true
+  # NTT is off until its keep rule passes (D-076): it failed that rule, and `has_ntt` follows the camera epoch (EC-31).
+  use_ntt: false
   use_demographics: false
   # Depth from the frame top encodes camera framing; off until the G1 framing check (D-015).
   use_depth: false

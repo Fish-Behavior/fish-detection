@@ -22,7 +22,7 @@ from sklearn.metrics import confusion_matrix
 from dcs.audit import Audit, markdown_table
 from dcs.config_rules import SOURCE_PROCESSED
 from dcs.featurize import slug
-from dcs.evaluate import PERMUTED, REFERENCE, Evaluation
+from dcs.evaluate import PERMUTED, REFERENCE, Evaluation, date_effects
 from dcs.folds import SCHEME_A, SCHEME_B, Folds
 from dcs.trainset import TrainSet
 
@@ -66,8 +66,7 @@ def scores_table(ev: Evaluation) -> pd.DataFrame:
     def cell(model: str, scheme: str, metric: str = "balanced_accuracy") -> str:
         return score_cell(summary, model, scheme, metric)
 
-    def mean(model: str, scheme: str) -> float:
-        return float(summary.loc[(model, scheme), ("balanced_accuracy", "mean")])
+    effect = date_effects(ev.predictions)
 
     verdicts = ev.decision.set_index("model")["verdict"]
     rows = []
@@ -79,7 +78,7 @@ def scores_table(ev: Evaluation) -> pd.DataFrame:
                 "scheme A": cell(model, SCHEME_A),
                 "scheme B": cell(model, SCHEME_B),
                 "B permuted": cell(model, PERMUTED),
-                "date effect (B - A)": f"{mean(model, SCHEME_B) - mean(model, SCHEME_A):+.3f}" if held_out else "-",
+                "date effect (B - A)": f"{effect[model]:+.3f}" if held_out else "-",
                 "A macro-F1": cell(model, SCHEME_A, "macro_f1"),
                 "A log-loss": cell(model, SCHEME_A, "log_loss"),
                 "A top-3": cell(model, SCHEME_A, "top3_accuracy"),

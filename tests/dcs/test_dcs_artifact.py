@@ -97,3 +97,21 @@ def test_missing_feature_column_is_an_error_naming_it(tiny_table: Path, tmp_path
 def test_no_model_folder_is_an_error_with_a_hint(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="model"):
         load_model(tmp_path)
+
+
+def test_a_changed_model_file_is_refused_before_it_is_unpickled(tiny_table: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = trained(tiny_table, tmp_path, monkeypatch, "logreg")
+    with (run / MODEL_DIR / "sklearn.joblib").open("ab") as file:
+        file.write(b"x")
+    with pytest.raises(ConfigError, match="checksum"):
+        load_model(run)
+
+
+def test_a_model_saved_without_a_checksum_is_refused(tiny_table: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = trained(tiny_table, tmp_path, monkeypatch, "logreg")
+    info_path = run / MODEL_DIR / "model_info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    del info["sha256"]
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    with pytest.raises(ConfigError, match="no checksum"):
+        load_model(run)

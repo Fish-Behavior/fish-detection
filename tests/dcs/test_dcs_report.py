@@ -6,11 +6,12 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from dcs.audit import Audit
 from dcs.config import load_settings
-from dcs.evaluate import evaluate
+from dcs.evaluate import date_effects, evaluate
 from dcs.folds import make_folds
 from dcs.report import StageResult, best_model, render_report, save_confusion, scores_table
 from dcs.trainset import TrainSet
@@ -59,9 +60,19 @@ def test_baselines_are_shown_next_to_every_model(compound: StageResult) -> None:
 
 
 def test_date_effect_is_scheme_b_minus_scheme_a(compound: StageResult) -> None:
+    """With no date-confounded class both schemes score the same fish, so the effect is the plain difference."""
     summary = compound.evaluation.summary["balanced_accuracy"]["mean"]
     row = scores_table(compound.evaluation).set_index("model").loc["logreg"]
     assert row["date effect (B - A)"] == f"{summary[('logreg', 'B')] - summary[('logreg', 'A')]:+.3f}"
+
+
+def test_date_effect_leaves_out_fish_that_scheme_a_does_not_score() -> None:
+    """A pinned (date-confounded) class is scored in B only; its fish must not move the B - A gap."""
+    rows = [("A", "f1", "X", "X"), ("A", "f2", "Y", "X"), ("B", "f1", "X", "X"), ("B", "f2", "Y", "Y"), ("B", "f3", "Z", "X")]
+    predictions = pd.DataFrame(
+        [{"model": "m", "repeat": 0, "scheme": s, "video_id": v, "label": t, "predicted": p} for s, v, t, p in rows]
+    )
+    assert date_effects(predictions)["m"] == pytest.approx(0.5)  # B on f1, f2 = 1.0; A = 0.5; naive B - A would be 0.0
 
 
 def test_no_plain_accuracy_is_reported(compound: StageResult) -> None:

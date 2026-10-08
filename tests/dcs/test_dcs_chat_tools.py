@@ -166,7 +166,7 @@ def test_class_scores_and_confusions(data: ResearchData) -> None:
 
 def test_ablations_from_the_run(data: ResearchData) -> None:
     result = call(data, "ablation_results")
-    assert "use_ntt=false" in {row["ablation"] for row in result["ablations"]}
+    assert "use_ntt=true" in {row["ablation"] for row in result["ablations"]}
 
 
 def test_audit_facts_and_notes(data: ResearchData) -> None:

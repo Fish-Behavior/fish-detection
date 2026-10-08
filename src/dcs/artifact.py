@@ -4,11 +4,15 @@
 model folder. Its expected performance is the cross-validation estimate in the report, never a score on these
 fish (PRD §6.9). `reference_predictions.csv` holds the final model's probabilities for its own training fish: a
 reloaded model must reproduce it (AC-9, D-006). `load_model` reads the folder back; a different scikit-learn or
-torch version is a warning, not an error.
+torch version is a warning, not an error. The model file's SHA-256 is recorded in `model_info.json` and checked
+on load, so a damaged or swapped file is refused before joblib/torch unpickles it (a model folder is copied between
+machines, US-3). It guards against corruption and a swapped model file, not against someone who can rewrite the
+whole folder: load only folders you trust.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 from collections.abc import Mapping
@@ -64,10 +68,11 @@ def save_model(run: Path, ts: TrainSet, name: str, training: Mapping[str, Any], 
     preprocess = fit_preprocess(ts.X, ts.kinds)
     X, dates = preprocess.transform(ts.X), ts.groups.to_numpy(dtype=object)
     model = make_model(name, training["seed"], training["mlp"], device).fit(X, ts.y.to_numpy(dtype=object), dates)
+    file = MLP_FILE if name == "mlp" else SKLEARN_FILE
     if name == "mlp":
-        model.save(folder / MLP_FILE)
+        model.save(folder / file)
     else:
-        joblib.dump(model, folder / SKLEARN_FILE)  # majority, logreg, forest, boosting, or date-only
+        joblib.dump(model, folder / file)  # majority, logreg, forest, boosting, or date-only
     classes = [str(label) for label in model.classes_]
     info = {
         "model": name,
@@ -77,6 +82,7 @@ def save_model(run: Path, ts: TrainSet, name: str, training: Mapping[str, Any], 
         "features": len(preprocess.features),
         "seed": training["seed"],
         "device": device,
+        "sha256": {file: file_sha256(folder / file)},
         "versions": {"python": platform.python_version(), **{p: package_version(p) for p in CHECKED_PACKAGES}},
     }
     _write_json(folder / PREPROCESS_FILE, preprocess.as_json())
@@ -93,6 +99,12 @@ def load_model(run: Path, device: str = "cpu") -> Loaded:
     if not (folder / INFO_FILE).is_file():
         raise ConfigError(f"No saved model in {folder}. Point --model at a run folder written by `python -m dcs train`.")
     info = json.loads((folder / INFO_FILE).read_text(encoding="utf-8"))
+    file = MLP_FILE if info["model"] == "mlp" else SKLEARN_FILE
+    expected = info.get("sha256", {}).get(file)
+    if expected is None:
+        raise ConfigError(f"{folder / INFO_FILE} has no checksum for {file}: this model was saved by an older dcs. Re-run `python -m dcs train`.")
+    if file_sha256(folder / file) != expected:
+        raise ConfigError(f"{folder / file} does not match the checksum saved with the model: the file is damaged or was replaced. Copy the folder again or re-run `python -m dcs train`.")
     if info["model"] == "mlp":
         from dcs.mlp import MLP, resolve_device  # torch only for an MLP
 
@@ -117,6 +129,10 @@ def _frame(ids: pd.Series, classes: Any, proba: np.ndarray) -> pd.DataFrame:
     names = np.asarray(list(classes), dtype=object)
     out = pd.DataFrame({"video_id": np.asarray(ids), "predicted": names[proba.argmax(axis=1)]})
     return pd.concat([out, pd.DataFrame(proba, columns=[f"p:{c}" for c in names])], axis=1)
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def package_version(package: str) -> str | None:

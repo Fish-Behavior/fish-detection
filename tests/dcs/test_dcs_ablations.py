@@ -101,7 +101,7 @@ def main_and_ablations(tiny_table: Any, training: dict[str, Any]) -> tuple[Stage
 def test_every_ablation_is_reported(main_and_ablations: tuple[StageResult, list[Any]]) -> None:
     _, ablations = main_and_ablations
     assert [a.name for a in ablations] == [
-        "use_ntt=false", "use_demographics=true", "use_depth=true", FR9_RAW, FR9_NORMALIZED,
+        "use_ntt=true", "use_demographics=true", "use_depth=true", FR9_RAW, FR9_NORMALIZED,
     ]  # fmt: skip
     assert all(a.result is not None or a.note for a in ablations)
 
@@ -160,3 +160,20 @@ def test_camera_epochs_setting_switches_the_fr9_reference(tiny_table: Any, train
     main = StageResult(ts, folds, evaluate(ts, folds, ["majority"], epochs))
     fr9 = run_ablations(table, described, epochs, main, ["majority"], "cpu", {}, lambda message: None)[-1]
     assert fr9.name == FR9_NORMALIZED and "camera epoch for" in fr9.what
+
+
+def test_a_switch_that_changes_the_fish_gets_new_folds_and_says_so(
+    tiny_table: Any, training: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table, described = load_table(tiny_table)
+    ts = build_trainset(table, described, training, "compound")
+    folds = make_folds(ts.y, ts.groups, ts.ids, training)
+    main = StageResult(ts, folds, evaluate(ts, folds, FAST, training))
+    real = build_trainset
+    monkeypatch.setattr(  # demographics "drops" one fish, as a missing sex/strain/age value would
+        "dcs.ablations.build_trainset",
+        lambda *args: real(*args).take(np.arange(len(ts.y)) != 0) if args[2]["use_demographics"] != training["use_demographics"] else real(*args),
+    )
+    by_name = {a.name: a for a in run_ablations(table, described, training, main, FAST, "cpu", {}, lambda message: None)}
+    assert "new folds" in by_name["use_demographics=true"].what and by_name["use_demographics=true"].result.folds is not main.folds
+    assert "new folds" not in by_name["use_depth=true"].what and by_name["use_depth=true"].result.folds is main.folds

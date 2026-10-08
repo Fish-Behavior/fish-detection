@@ -133,11 +133,11 @@ def test_ablations_land_in_metrics_and_the_report(setup: dict[str, Path]) -> Non
     assert train(setup, "--models", "logreg", ablations=True) == 0
     run = only_run(setup)
     ablations = set(pd.read_csv(run / "metrics.csv")["ablation"])
-    assert {"main", "use_ntt=false", "use_depth=true", "non-vehicle, raw", "non-vehicle, vehicle-normalized"} <= ablations
+    assert {"main", "use_ntt=true", "use_depth=true", "non-vehicle, raw", "non-vehicle, vehicle-normalized"} <= ablations
     report = (run / "report.md").read_text(encoding="utf-8")
     assert "## Ablations" in report and "NTT" in report
     info = json.loads((run / "run_info.json").read_text(encoding="utf-8"))
-    assert "use_ntt=false" in info["ablations"]
+    assert "use_ntt=true" in info["ablations"]
 
 
 def test_no_ablations_skips_them(setup: dict[str, Path]) -> None:

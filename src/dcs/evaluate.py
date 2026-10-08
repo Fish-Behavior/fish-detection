@@ -167,6 +167,23 @@ def _metrics(predictions: pd.DataFrame, classes: tuple[str, ...]) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
+def date_effects(predictions: pd.DataFrame) -> pd.Series:
+    """Per model: scheme-B balanced accuracy minus scheme-A's, with B limited to the fish scheme A scores. A
+    date-confounded class is pinned (never scored) in A but scored in B, so comparing the two summaries would mix
+    different classes. Empty when scheme A did not run."""
+    a = predictions[predictions["scheme"] == SCHEME_A]
+    b = predictions[(predictions["scheme"] == SCHEME_B) & predictions["video_id"].isin(a["video_id"])]
+
+    def score(part: pd.DataFrame) -> pd.Series:
+        by_repeat = part.groupby(["model", "repeat"], sort=False).apply(
+            lambda g: recall_score(g["label"], g["predicted"], labels=sorted(set(g["label"])), average="macro", zero_division=0),
+            include_groups=False,
+        )
+        return by_repeat.groupby("model", sort=False).mean()
+
+    return (score(b) - score(a)).dropna() if len(a) else pd.Series(dtype=float)
+
+
 def _top_k(truth: np.ndarray, proba: np.ndarray, classes: tuple[str, ...]) -> float:
     column = {label: i for i, label in enumerate(classes)}
     top = np.argsort(-proba, axis=1, kind="stable")[:, : min(TOP_K, len(classes))]

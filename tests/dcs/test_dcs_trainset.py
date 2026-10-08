@@ -210,7 +210,7 @@ def test_no_featurize_feature_is_forbidden_when_its_group_is_on(name: str) -> No
     assert not is_forbidden(name, use_demographics=True)
 
 
-@pytest.mark.parametrize("switches", [{}, {"use_depth": True, "use_demographics": True}, {"use_ntt": False}])
+@pytest.mark.parametrize("switches", [{}, {"use_depth": True, "use_demographics": True, "use_ntt": True}])
 def test_feature_matrix_holds_only_allowed_feature_columns(defaults: dict[str, Any], switches: dict[str, bool]) -> None:
     training = {**defaults, **switches}
     result = build(table(("A", "0.1", 6), ("B", "0.1", 6)), training)
@@ -237,7 +237,7 @@ def test_meta_columns_never_reach_the_matrix(defaults: dict[str, Any]) -> None:
 
 @pytest.mark.parametrize(
     ("group", "switch", "default_on"),
-    [("depth", "use_depth", False), ("demographics", "use_demographics", False), ("ntt", "use_ntt", True)],
+    [("depth", "use_depth", False), ("demographics", "use_demographics", False), ("ntt", "use_ntt", False)],
 )
 def test_feature_groups_follow_their_switch(defaults: dict[str, Any], group: str, switch: str, default_on: bool) -> None:
     frame = table(("A", "0.1", 6), ("B", "0.1", 6))

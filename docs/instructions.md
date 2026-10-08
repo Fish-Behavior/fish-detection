@@ -315,7 +315,7 @@ compound). It changes no file. In order:
    that size stay but are flagged **very small**. In the dose stage, a compound left with one dose (vehicle always) is
    dropped too (`single_dose`).
 3. **Feature groups.** States, transitions and kinematics are always used. `depth` only with `use_depth` (off: camera
-   framing), `ntt` only with `use_ntt` (on), `demographics` (`sex`, `strain`, `age`) only with `use_demographics` (off).
+   framing), `ntt` only with `use_ntt` (off by default: it failed its keep rule and follows the camera epoch, D-076), `demographics` (`sex`, `strain`, `age`) only with `use_demographics` (off).
 4. **Forbidden columns.** Labels, ids, `date`, paths, review and edit fields, manual-frame share, profile and pipeline
    versions, protocol fields (`agent_exposure_min`, `ntt_min`, `uv_min`, `h2o_*`, tissue), recording length, fps and
    resolution never become features. If the schema file marks one as a feature, the run stops.
@@ -534,12 +534,12 @@ forest and boosting in scheme B and `B_permuted`.
 
 ## Ablations (compound stage)
 
-After the compound stage, `dcs train` re-runs every model with one change at a time, on **the same folds** (PRD §6.8;
+After the compound stage, `dcs train` re-runs every model with one change at a time, on **the main run's folds** (PRD §6.8; a switch that changes which fish are kept gets new folds, and its row in the report says so;
 `--no-ablations` skips them, about 5 times faster):
 
 | Ablation | Change | Question it answers |
 |---|---|---|
-| `use_ntt=false` | NTT features off (or on, when your settings have them off) | Does the novel-tank test add anything? The **NTT keep rule** in the report: keep NTT only if scheme A is better with it by more than the spread |
+| `use_ntt=true` | NTT features on (or off, when your settings have them on) | Does the novel-tank test add anything? The **NTT keep rule** in the report: keep NTT only if scheme A is better with it by more than the spread |
 | `use_demographics=true` | `sex`, `strain`, `age` on | Do fish characteristics help, or do they track the date (strains bought per campaign)? |
 | `use_depth=true` | Depth features on | Depth in pixels follows the camera framing (D-015, EC-31): a gain in B but not in A means the model reads the camera |
 | `non-vehicle, raw` | Vehicle fish left out | The baseline of the FR-9 pair |
@@ -636,10 +636,10 @@ saves it in `<run>/model/` (PRD §6.9, §7.4). The dose models are exploratory a
 
 | File | What it holds |
 |---|---|
-| `model_info.json` | Model name, stage, the decision-rule verdict it earned in cross-validation, fish, features, seed, device, versions (Python, scikit-learn, numpy, pandas, torch) |
+| `model_info.json` | Model name, stage, the decision-rule verdict it earned in cross-validation, fish, features, seed, device, versions (Python, scikit-learn, numpy, pandas, torch), and the SHA-256 of the model file |
 | `preprocess.json` | Feature order, `log1p` list, fill values, means and spreads, category values |
 | `classes.json` | Class names in the order of the probability columns |
-| `sklearn.joblib` / `mlp.pt` | The model: a scikit-learn model (joblib), or the MLP's settings and weights (`torch.save`, read back with `weights_only`, so the file cannot run code) |
+| `sklearn.joblib` / `mlp.pt` | The model: a scikit-learn model (joblib), or the MLP's settings and weights (`torch.save`, read back with `weights_only`, so the file cannot run code). Loading checks the file against the SHA-256 in `model_info.json` first, so a damaged or swapped file is refused; it does not protect against someone who can rewrite the whole folder, so load only folders you trust |
 | `reference_predictions.csv` | The final model's probabilities for its own training fish (`video_id`, `predicted`, `p:<class>`); a reloaded copy must give exactly these (AC-9, D-006) |
 
 The model's expected performance is the cross-validation estimate in `report.md`, never its score on the fish it was
@@ -682,7 +682,7 @@ the training table. Such a table is for `predict` only; `train` needs dates.
 
 ## Research query tools (what the chat looks things up with)
 
-`dcs.chat_tools` holds the functions the research chat calls; every number in a chat answer comes from one of them.
+`dcs.chat_tools` (data) and `dcs.chat_results` (training-run results) hold the functions the research chat calls, `dcs.chat_core` the registry they share; every number in a chat answer comes from one of them.
 They read the training table and its schema, the per-video folders (frames and segments, from the gold source in the
 settings) and a run folder (`ResearchData.from_settings(settings)` takes the latest one). They change nothing.
 
@@ -858,6 +858,7 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `the chat API has no authentication: --host must be a loopback address` | Keep `serve-chat` on 127.0.0.1 and reach it through an SSH tunnel |
 | `--input ... does not exist` (predict) | Point `--input` at a table from `dcs featurize` |
 | `--videos ... is not a folder` | Point it at the folder holding one `<video_id>/` folder per fish |
+| `... does not match the checksum saved with the model` / `has no checksum for ...` | The model file changed after training (bad copy, edit) or the folder is from an older `dcs`: copy it again or re-run `python -m dcs train` |
 | `No saved model in ...` | `--model` must be a run folder written by `dcs train` (it holds `model/model_info.json`) |
 | `The input lacks ... feature column(s) the model needs` | Build the input with `python -m dcs featurize` from the same `dcs` version as the model |
 | `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
@@ -878,7 +879,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_synthetic*.py` | Synthetic files match the prepds formats, same seed gives the same data, each edge-case switch does what it says |
 | `test_dcs_gold.py`, `_gold_files.py`, `_gold_processed.py` | What the gold reader drops and what stops it, for both sources |
 | `test_dcs_workbook.py` | NTT columns: header cleanup, `-` rule, duplicates, disagreements (compound compared by the training set's spelling rule), blank-compound rows ignored, missing fish |
-| `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand), including run-start frames left out of the kinematics |
+| `test_dcs_featurize.py` | Each feature on small hand-built segments and frames (the expected numbers can be checked by hand), including run-start frames left out of the kinematics; a detected fish with no depth values gets NaN depth features |
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
 | `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
 | `test_dcs_audit.py` | Each audit table and fact on small hand-built tables: filter steps, class status and scheme A, per-date and compound × date counts, missing values, manual share and flags per compound, §2.3 statistics, a compound with no Accepted fish, the D-016 share, the G1 stop rule (vehicle, one-date and unaccepted compounds never count; the unreviewed count), vehicle name from the settings, fps and tracker notes, framing setups (a shift, a zoom, two equally common setups, slow drift, one fish at the surface, a date without depth data), dose spelling variants counted once, a stage that cannot be built; `dcs audit` end to end on synthetic data and without a table |
@@ -887,14 +888,14 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_evaluate.py` | Every model sees the same folds; majority and date-only always run; preprocessing is fitted without the test fold (EC-9, by spying on every fit); metrics equal scikit-learn's on the pooled predictions of a repeat, no plain accuracy (D-017); per-class scores pool the repeats; spread = standard deviation across repeats; the permutation stays inside each date; a planted signal is judged useful; **leakage canary** (label depends only on the date: scheme B perfect, scheme A below chance, permuted = real, not useful); pinned fish never scored in scheme A; no scheme A means undecided; vehicle vs drug; same seed, same metrics (EC-14) |
 | `test_dcs_mlp.py` | (runs only where torch is installed) Interface and a planted signal; built from the settings; layer sizes, ReLU and dropout from the config; one network per seed; early stopping on noise; balanced loss weights; same seed same CPU probabilities, other seed different (EC-14); a one-fish class still trains; `--device` rules (EC-15) |
 | `test_dcs_no_torch.py` | With torch hidden: `torch_available()` is false and `dcs train --models logreg,mlp --device cuda` runs the baselines and skips the MLP with a message (EC-16) |
-| `test_dcs_ablations.py` | Vehicle normalization: vehicle fish removed, counts logged once; date reference with 2+ vehicle fish; fallback to the framing setup, then all vehicle fish; camera-epoch reference skips the date level; `epoch_of`; the NTT keep rule (gain vs spread, undecided without scheme A); every ablation reported; switch ablations reuse the main folds; the FR-9 pair shares classes and folds; FR-9 is a note when the vehicle is not a kept class; `camera_epochs` switches the reference |
+| `test_dcs_ablations.py` | Vehicle normalization: vehicle fish removed, counts logged once; date reference with 2+ vehicle fish; fallback to the framing setup, then all vehicle fish; camera-epoch reference skips the date level; `epoch_of`; the NTT keep rule (gain vs spread, undecided without scheme A); every ablation reported; switch ablations reuse the main folds, or say `new folds` when the switch changes the fish; the FR-9 pair shares classes and folds; FR-9 is a note when the vehicle is not a kept class; `camera_epochs` switches the reference |
 | `test_dcs_stage2.py` | One dose model per compound with two doses, never the vehicle; a compound left with one dose gets none; date-only and the permuted score beside every dose model; the FR-9 variant on the same folds; without the vehicle it is a note; no dose class left is a note, not a stop; `dcs train` writes one section, metrics rows and confusion PNG per compound |
-| `test_dcs_artifact.py` | `model/` holds the files of PRD §7.4 plus the reference predictions, classes in probability order, model named in the report and `run_info.json`; reload in a **fresh process** reproduces the reference (EC-18) for logistic regression and (with torch) the MLP; a version mismatch is a warning; a missing feature column is an error naming it; no model folder is an error |
+| `test_dcs_artifact.py` | `model/` holds the files of PRD §7.4 plus the reference predictions, classes in probability order, model named in the report and `run_info.json`; reload in a **fresh process** reproduces the reference (EC-18) for logistic regression and (with torch) the MLP; a version mismatch is a warning; a missing feature column is an error naming it; no model folder is an error; a changed model file or a missing checksum is refused |
 | `test_dcs_predict.py` | `dcs predict` on the training table reproduces `reference_predictions.csv` and says so (AC-9); default output file and CSV input; missing columns stop with their names; version warnings printed; `featurize --videos` needs no index, marks unreviewed fish, leaves the date empty and the training table untouched; with the workbook the NTT values are kept; folders -> `featurize --videos` -> `predict` gives the same predictions as the reference (D-018) |
 | `test_dcs_privacy.py` | `git ls-files` holds no `.parquet`, `.csv`, `.xlsx`, `.pt`, `.joblib`, pickle, video or `.env` file outside the two named synthetic fixtures (AC-8); the outputs of `dcs` and `prepds` and the restricted inputs are git-ignored; the pattern itself catches what it should. Skipped outside a git checkout |
 | `test_dcs_chat_tools.py` | Tool schemas valid and unique; compounds and vehicle; feature search; `compare_to_vehicle` equals hand-computed n, mean, Hedges' g and Mann-Whitney p with the same-date control; fallback to all vehicle fish with a caveat; bad arguments return errors naming the choices; `top_differences` ordered with q >= p; fish profile percentiles and out-of-fold predictions; timeline bins cover the recording and shares sum to 1; model results, class scores, ablations and audit facts read from a real `dcs train` run; no run -> a hint; the latest run found from the settings; `fish_timeline` refuses a zero, negative, NaN, infinite, boolean, text or too-small `bin_s` with an error; a tool that crashes comes back as `{"error"}` instead of ending the chat |
 | `test_dcs_chat.py` | The answer is built from a tool result (scripted engine); the system prompt sets the rules and names the data; history carries earlier turns; dict arguments and tool errors go back to the model; too many tool rounds force an answer without tools; local servers allowed, a remote one only with `allow_remote`; no model name stops; the client speaks the OpenAI protocol to a local stub server (path, body, API key header); an unreachable server says how to start one; `dcs ask` one question; the terminal session keeps history; `serve-chat` refuses a public address; the API (`health`, `tools`, `ask`, `tool`) and a 503 on engine failure; the server address and key come only from `DCS_CHAT_BASE_URL` and `DCS_CHAT_API_KEY` (environment over `.env`; a non-http(s) address and a `chat.base_url` or `chat.api_key` in a YAML file are refused; no address stops with a hint; the key prints as `***` in `check-config`); a foreign `Host` (DNS rebinding) and a foreign `Origin` are refused; `/api/ask` refuses `system`/`tool` history turns, an empty or over-long question and too many turns |
-| `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
+| `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A on the fish scheme A scores (a date-confounded class is left out of B for this); no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
