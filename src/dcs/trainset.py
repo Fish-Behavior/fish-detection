@@ -8,6 +8,7 @@ dropped for the audit. It fills no missing value and fits no transform: that is 
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -60,6 +61,20 @@ class TrainSet:
     dropped_classes: tuple[dict[str, Any], ...]  # {label, fish, reason}
     dropped_states: tuple[str, ...]
     dropped_features: tuple[dict[str, str], ...]  # {name, reason}
+
+    def take(self, keep: pd.Series) -> TrainSet:
+        """The same set on the rows where `keep` is true; class counts and the very-small list follow."""
+        y = self.y[keep]
+        counts = y.value_counts().sort_index()
+        return dataclasses.replace(
+            self,
+            X=self.X[keep],
+            y=y,
+            groups=self.groups[keep],
+            ids=self.ids[keep],
+            classes={str(label): int(fish) for label, fish in counts.items()},
+            very_small=tuple(label for label in self.very_small if label in counts.index),
+        )
 
 
 def dose_label(value: Any) -> str:

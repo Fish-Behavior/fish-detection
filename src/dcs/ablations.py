@@ -18,10 +18,10 @@ import pandas as pd
 from dcs.config import ConfigError
 from dcs.audit import markdown_table
 from dcs.evaluate import REFERENCE, evaluate
-from dcs.folds import SCHEME_A, Folds, make_folds
+from dcs.folds import SCHEME_A, SCHEME_B, Folds, make_folds
 from dcs.gold_rules import compound_label
 from dcs.preprocess import CATEGORY, LOG_KINDS
-from dcs.report import SKIPPED, StageResult
+from dcs.report import StageResult, score_cell
 from dcs.trainset import TrainSet, build_trainset
 
 SWITCHES = (
@@ -74,9 +74,7 @@ def run_ablations(
     if len(raw.classes) < 2:
         note = "not run: fewer than 2 classes besides the vehicle"
         return out + [Ablation(FR9_RAW, "vehicle fish left out", None, note), Ablation(FR9_NORMALIZED, "FR-9", None, note)]
-    epochs = training["camera_epochs"]
-    groups = setups if epochs is None else {date: epoch_of(date, epochs) for date in main.trainset.groups.unique()}
-    normalized, levels = vehicle_normalize(main.trainset, vehicle, groups, by_date=epochs is None)
+    normalized, levels = vehicle_normalize(main.trainset, vehicle, *reference_groups(training, main.trainset.groups, setups))
     keep = main.folds.table["label"] != vehicle
     folds = Folds(main.folds.table[keep], main.folds.k, tuple(c for c in main.folds.date_confounded if c != vehicle), main.folds.notes)
     reference = ", ".join(f"{level} for {n} date(s)" for level, n in levels.items() if n)
@@ -91,16 +89,16 @@ def run_ablations(
 
 def without_class(ts: TrainSet, label: str) -> TrainSet:
     """The training set without the fish of one class (the vehicle in the FR-9 pair)."""
-    keep = ts.y != label
-    return dataclasses.replace(
-        ts,
-        X=ts.X[keep],
-        y=ts.y[keep],
-        groups=ts.groups[keep],
-        ids=ts.ids[keep],
-        classes={c: n for c, n in ts.classes.items() if c != label},
-        very_small=tuple(c for c in ts.very_small if c != label),
-    )
+    return ts.take(ts.y != label)
+
+
+def reference_groups(training: Mapping[str, Any], dates: pd.Series, setups: Mapping[str, Any]) -> tuple[dict[Any, Any], bool]:
+    """The FR-9 reference groups and whether the date level comes first: camera epochs when `training.camera_epochs`
+    is set (no date level), else the audit's framing setups after the date (D-061)."""
+    epochs = training["camera_epochs"]
+    if epochs is None:
+        return dict(setups), True
+    return {date: epoch_of(date, epochs) for date in dates.unique()}, False
 
 
 def epoch_of(date: Any, starts: Sequence[Any]) -> str:
@@ -176,9 +174,9 @@ def render_ablations(ablations: Sequence[Ablation], main: StageResult, training:
                     "ablation": a.name,
                     "change": a.what,
                     "model": model,
-                    "scheme A": _cell(summary, model, SCHEME_A),
+                    "scheme A": score_cell(summary, model, SCHEME_A),
                     "delta A": _delta(summary, base, model),
-                    "scheme B": _cell(summary, model, "B"),
+                    "scheme B": score_cell(summary, model, SCHEME_B),
                 }
             )
     lines = [
@@ -206,12 +204,6 @@ def render_ablations(ablations: Sequence[Ablation], main: StageResult, training:
                 lines.append(f"- {model}: {verdict} ({reason})")
     return lines
 
-
-def _cell(summary: pd.DataFrame, model: str, scheme: str) -> str:
-    if (model, scheme) not in summary.index:
-        return SKIPPED
-    row = summary.loc[(model, scheme), "balanced_accuracy"]
-    return f"{row['mean']:.3f} ± {row['std']:.3f}"
 
 
 def _delta(summary: pd.DataFrame, base: pd.DataFrame, model: str) -> str:

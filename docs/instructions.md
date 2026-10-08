@@ -560,6 +560,22 @@ for a in run_ablations(table, schema, settings.training, main, ["logreg"], "cpu"
     print(a.name, a.note or a.result.evaluation.summary.loc[("logreg", "A"), "balanced_accuracy"].to_dict())
 ```
 
+## Stage 2: dose within compound
+
+With `stage: both` or `dose`, `dcs train` builds the dose training set (classes `<compound> @ <dose>`; small doses
+and compounds left with one dose are dropped, which removes vehicle), then trains **one model set per compound** with
+two or more doses (PRD FR-7). Each compound is its own stage in the run folder, named `dose <compound>`: its own
+folds, rows in `folds.csv`, `metrics.csv`, `predictions.csv`, a report section and `confusion_dose_<compound>.png`.
+
+Doses of one compound are rarely recorded on the same date (PRD §6.5), so scheme A is usually skipped and a dose
+model can win scheme B by recognizing the date. Every dose section therefore opens with the **Exploratory** caveat,
+and the report adds a **Stage 2 summary** table: per compound and model, scheme B next to `B permuted`, `date_only`,
+and **B vehicle-normalized**, the same models on the same folds after the vehicle reference is subtracted (FR-9, same
+reference rules as the ablations, `camera_epochs` included). Only that column can say anything about dose: if a model
+still separates doses there, the day's vehicle level does not explain it. In `metrics.csv` those rows have
+`ablation = non-vehicle, vehicle-normalized`. When no compound has two eligible doses, the report says why and the
+compound stage still runs.
+
 ## Training (`dcs train`)
 
 ```bash
@@ -695,6 +711,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_mlp.py` | (runs only where torch is installed) Interface and a planted signal; built from the settings; layer sizes, ReLU and dropout from the config; one network per seed; early stopping on noise; balanced loss weights; same seed same CPU probabilities, other seed different (EC-14); a one-fish class still trains; `--device` rules (EC-15) |
 | `test_dcs_no_torch.py` | With torch hidden: `torch_available()` is false and `dcs train --models logreg,mlp --device cuda` runs the baselines and skips the MLP with a message (EC-16) |
 | `test_dcs_ablations.py` | Vehicle normalization: vehicle fish removed, counts logged once; date reference with 2+ vehicle fish; fallback to the framing setup, then all vehicle fish; camera-epoch reference skips the date level; `epoch_of`; the NTT keep rule (gain vs spread, undecided without scheme A); every ablation reported; switch ablations reuse the main folds; the FR-9 pair shares classes and folds; FR-9 is a note when the vehicle is not a kept class; `camera_epochs` switches the reference |
+| `test_dcs_stage2.py` | One dose model per compound with two doses, never the vehicle; a compound left with one dose gets none; date-only and the permuted score beside every dose model; the FR-9 variant on the same folds; without the vehicle it is a note; no dose class left is a note, not a stop; `dcs train` writes one section, metrics rows and confusion PNG per compound |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |

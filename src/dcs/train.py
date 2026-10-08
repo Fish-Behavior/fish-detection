@@ -25,13 +25,14 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from dcs.ablations import Ablation, render_ablations, run_ablations
+from dcs.ablations import FR9_NORMALIZED, Ablation, render_ablations, run_ablations
 from dcs.audit import build_audit, render
 from dcs.config import ConfigError, Settings
 from dcs.evaluate import REFERENCE, evaluate
 from dcs.folds import make_folds
 from dcs.models import BASELINES, torch_available
-from dcs.report import StageResult, render_report, save_confusion
+from dcs.report import StageResult, confusion_file, render_report, save_confusion
+from dcs.stage2 import DoseModel, render_stage2, run_stage2, stage_key
 from dcs.trainset import STAGES, build_trainset, load_table
 
 RUNS_FOLDER = "training"
@@ -75,8 +76,16 @@ def run_training(
     setups = dict(zip(framing["date"], framing["setup"]))
     results: dict[str, StageResult] = {}
     extra: list[Ablation] = []
+    dose_models: list[DoseModel] = []
     notes = []
     for stage in STAGES if training["stage"] == "both" else (training["stage"],):
+        if stage == "dose":  # one model per compound (U15); each is its own stage in the run folder
+            dose_models, dose_notes = run_stage2(table, described, training, models, device, setups, log)
+            for note in dose_notes:
+                notes.append(note)
+                log(note)
+            results.update({stage_key(m.compound): m.raw for m in dose_models})
+            continue
         try:
             ts = build_trainset(table, described, training, stage)
         except ConfigError as error:
@@ -122,10 +131,21 @@ def run_training(
         pd.concat([frame.assign(stage=stage) for stage, frame in frames.items()]).pipe(_stage_first).to_csv(run / name, index=False)
     metrics = [r.evaluation.metrics.assign(stage=stage, ablation="main") for stage, r in results.items()]
     metrics += [a.result.evaluation.metrics.assign(stage="compound", ablation=a.name) for a in extra if a.result]
+    metrics += [
+        m.normalized.evaluation.metrics.assign(stage=stage_key(m.compound), ablation=FR9_NORMALIZED)
+        for m in dose_models
+        if m.normalized
+    ]
     pd.concat(metrics).pipe(_stage_first).to_csv(run / "metrics.csv", index=False)
     for stage, result in results.items():
-        save_confusion(result, run / f"confusion_{stage}.png")
-    (run / "report.md").write_text(render_report(info, results, audit, notes, render_ablations(extra, results["compound"], training) if extra else ()), encoding="utf-8")
+        save_confusion(result, run / confusion_file(stage))
+    (run / "report.md").write_text(render_report(
+            info,
+            results,
+            audit,
+            notes,
+            [*(render_ablations(extra, results["compound"], training) if extra else ()), *(render_stage2(dose_models) if dose_models else ())],
+        ), encoding="utf-8")
     (run / "run_info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     return run
 

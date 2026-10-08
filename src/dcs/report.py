@@ -20,6 +20,7 @@ from sklearn.metrics import confusion_matrix
 
 from dcs.audit import Audit, markdown_table
 from dcs.config_rules import SOURCE_PROCESSED
+from dcs.featurize import slug
 from dcs.evaluate import PERMUTED, REFERENCE, Evaluation
 from dcs.folds import SCHEME_A, SCHEME_B, Folds
 from dcs.trainset import TrainSet
@@ -49,15 +50,20 @@ class StageResult:
     evaluation: Evaluation
 
 
+def score_cell(summary: pd.DataFrame | None, model: str, scheme: str, metric: str = "balanced_accuracy") -> str:
+    """`mean ± spread` of one metric from an Evaluation summary; `skipped` when that model or scheme did not run."""
+    if summary is None or (model, scheme) not in summary.index:
+        return SKIPPED
+    row = summary.loc[(model, scheme), metric]
+    return f"{row['mean']:.3f} ± {row['std']:.3f}"
+
+
 def scores_table(ev: Evaluation) -> pd.DataFrame:
     """One row per model, baselines first: balanced accuracy per scheme, the date effect, other scheme-A metrics."""
     summary = ev.summary
 
     def cell(model: str, scheme: str, metric: str = "balanced_accuracy") -> str:
-        if (model, scheme) not in summary.index:
-            return SKIPPED
-        row = summary.loc[(model, scheme), metric]
-        return f"{row['mean']:.3f} ± {row['std']:.3f}"
+        return score_cell(summary, model, scheme, metric)
 
     def mean(model: str, scheme: str) -> float:
         return float(summary.loc[(model, scheme), ("balanced_accuracy", "mean")])
@@ -140,6 +146,11 @@ def render_report(
     return "\n".join([*lines, *extra]) + "\n"
 
 
+def confusion_file(stage: str) -> str:
+    """`confusion_compound.png`, `confusion_dose_compound_a.png`: the stage name made safe for a file name."""
+    return f"confusion_{slug(stage)}.png"
+
+
 def save_confusion(result: StageResult, path: Path) -> None:
     """Row-normalized confusion matrix of the best model, pooled over repeats."""
     ev = result.evaluation
@@ -164,7 +175,7 @@ def save_confusion(result: StageResult, path: Path) -> None:
 def _stage_section(stage: str, result: StageResult, audit: Audit) -> list[str]:
     ts, folds, ev = result.trainset, result.folds, result.evaluation
     lines = ["", f"## Stage: {stage}", ""]
-    if stage == "dose":
+    if stage.startswith("dose"):
         lines += [DOSE_CAVEAT, ""]
     dropped = ", ".join(f"{d['label']} ({d['fish']} fish, {d['reason']})" for d in ts.dropped_classes)
     lines += [
@@ -198,6 +209,6 @@ def _stage_section(stage: str, result: StageResult, audit: Audit) -> list[str]:
         "",
         markdown_table(per_class[["label", "support", "precision", "recall", "f1"]].reset_index(drop=True)),
         "",
-        f"![confusion matrix](confusion_{stage}.png)",
+        f"![confusion matrix]({confusion_file(stage)})",
     ]
     return lines
