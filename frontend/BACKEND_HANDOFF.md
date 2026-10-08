@@ -15,7 +15,7 @@ npm ci
 npm start
 ```
 
-Open `http://127.0.0.1:8000/` (host and ports come from `FISHLAB_HOST`, `FISHLAB_PORT`, `FISHLAB_API_PORT` in the root `.env`). `npm start` builds and starts the complete app. `npm run preview` starts the same Python server with the existing build. `npm run dev` starts a private Python API on port 8008, waits for it, and starts Vite on port 8000; `/api`, `/docs` and `/openapi.json` are proxied. All three commands present the same browser address, read `.env` from the repository root, check for occupied ports and stop their owned processes on Ctrl+C. Run only one of them at a time.
+Open `http://<FISHLAB_HOST>:<FISHLAB_PORT>/` (host and ports come only from `FISHLAB_HOST`, `FISHLAB_PORT`, `FISHLAB_API_PORT` in the root `.env`; there are no built-in defaults). `npm start` builds and starts the complete app. `npm run preview` starts the same Python server with the existing build. `npm run dev` starts a private Python API on `FISHLAB_API_PORT`, waits for it, and starts Vite on `FISHLAB_PORT`; `/api`, `/docs` and `/openapi.json` are proxied. All three commands present the same browser address, read `.env` from the repository root, check for occupied ports and stop their owned processes on Ctrl+C. Run only one of them at a time.
 
 The advanced `.venv/bin/python -m prepds review` command still serves `frontend/dist` when present, otherwise the original prepds review page. It can be used independently of the npm launcher. `--frontend-dir` selects another build folder. The launcher accepts the optional `--chat-url`, `--predictions`, `--classifier-root` and `--model-run` review arguments, but fixes its own host, ports and frontend directory.
 
@@ -25,7 +25,7 @@ The sidebar recording list includes processed, unprocessed, unmatched, corrupt, 
 
 ## API
 
-Swagger/OpenAPI: `http://127.0.0.1:8000/docs`.
+Swagger/OpenAPI: `/docs` on the app link.
 
 | Method and path | Contract |
 | --- | --- |
@@ -87,13 +87,13 @@ npm --prefix frontend start -- --classifier-root /path/to/dcs-checkout \
 
 Stop an existing app before starting another. With `--predictions`, matching results appear when a recording loads; reload after regenerating the CSV. New recordings need inference before a result appears. Saved corrections require per-video recalculation/inference so predictions reflect the reviewed data. The backend does not automatically chain analysis into inference.
 
-Start the existing DCS chat service from its checkout with its configured local model, using `python -m dcs serve-chat --port 8010`. Connect it with:
+Start the existing DCS chat service from its checkout with its configured local model, using `python -m dcs serve-chat --port <port>`. Connect it with:
 
 ```sh
-.venv/bin/python -m prepds review --chat-url http://127.0.0.1:8010   # or FISHLAB_CHAT_URL in .env
+.venv/bin/python -m prepds review --chat-url <FISHLAB_CHAT_URL>   # or FISHLAB_CHAT_URL in .env
 ```
 
-`DCS_CHAT_BASE_URL` points DCS at its language-model server (for example Ollama's `/v1` endpoint). `FISHLAB_CHAT_URL` points FishLab at the DCS service on port 8010. They are separate services.
+`DCS_CHAT_BASE_URL` points DCS at its language-model server (for example Ollama's `/v1` endpoint). `FISHLAB_CHAT_URL` points FishLab at the DCS chat service. They are separate services.
 
 Options can be combined. The chat bubble is always available in a session. Without a configured chat service, the panel shows a not-connected message and disables questions; configured services enable sending. Service/model failures remain visible inside chat. The adapter accepts only a loopback HTTP URL and refuses redirects and environment HTTP proxies; remote chat is not enabled by this connection. Questions/history live in the frontend and are not saved in the correction file. The DCS service researches its configured dataset, not unsaved FishLab drafts.
 

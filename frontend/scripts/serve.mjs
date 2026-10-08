@@ -9,15 +9,17 @@ const frontend = fileURLToPath(new URL('..', import.meta.url))
 const root = resolve(frontend, '..')
 const python = resolve(root, '.venv/bin/python')
 if (existsSync(resolve(root, '.env'))) process.loadEnvFile(resolve(root, '.env')) // real env vars win over .env
-const host = process.env.FISHLAB_HOST || '127.0.0.1'
-function portFrom(name, fallback) {
-  const text = process.env[name] || String(fallback), value = Number(text)
+const host = process.env.FISHLAB_HOST
+if (!host) { console.error('FishLab could not start: set FISHLAB_HOST in the repository-root .env.'); process.exit(1) }
+function portFrom(name) {
+  const text = process.env[name] || '', value = Number(text)
+  if (!text) { console.error(`FishLab could not start: set ${name} in the repository-root .env.`); process.exit(1) }
   if (!/^\d+$/.test(text) || value < 1 || value > 65535) { console.error(`FishLab could not start: ${name} must be a port number, got "${text}".`); process.exit(1) }
   return value
 }
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) { console.error('FishLab could not start: FISHLAB_HOST must be a loopback address; the app has no authentication.'); process.exit(1) }
-const port = portFrom('FISHLAB_PORT', 8000)
-const devApiPort = portFrom('FISHLAB_API_PORT', 8008)
+const port = portFrom('FISHLAB_PORT')
+const devApiPort = portFrom('FISHLAB_API_PORT')
 const address = `http://${host}:${port}`
 const instance = randomUUID()
 const children = new Set()

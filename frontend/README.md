@@ -6,6 +6,8 @@ React/TypeScript interface for zebrafish behavior analysis: a **Dashboard** for 
 
 ## Run
 
+To use the whole app, run `./start.sh` (and `./stop.sh`) from the repository root; see the root README. The commands below are for frontend development only.
+
 Requires Node.js 22.18 or newer, npm, and the project's `.venv` with Python dependencies installed. Configure the repository-root `.env` first. From the repository root:
 
 ```sh
@@ -13,22 +15,22 @@ npm --prefix frontend ci       # first-time frontend setup
 npm --prefix frontend start    # build, then start frontend + API together
 ```
 
-Open the address printed on startup (default **http://127.0.0.1:8000**; set `FISHLAB_HOST`/`FISHLAB_PORT` in `.env`). The scrollable sidebar list includes the entire source video inventory, including unprocessed videos; “Needs review” filters individual review decisions, while “With corrections” shows saved edits. Use one launch command at a time; Ctrl+C stops the services it started. The launcher always reads `.env` from the repository root, even when run from `frontend/`.
+Open the address printed on startup (`FISHLAB_HOST`:`FISHLAB_PORT` from `.env`; both are required). The scrollable sidebar list includes the entire source video inventory, including unprocessed videos; “Needs review” filters individual review decisions, while “With corrections” shows saved edits. Use one launch command at a time; Ctrl+C stops the services it started. The launcher always reads `.env` from the repository root, even when run from `frontend/`.
 
 From `frontend/`:
 
 | Command | Behavior |
 | --- | --- |
-| `npm start` | Build and serve the complete app on port 8000 |
-| `npm run dev` | Start the API automatically and serve the same app at port 8000 with live updates |
-| `npm run preview` | Serve the existing `dist/` build plus API at port 8000; requires a successful build |
+| `npm start` | Build and serve the complete app on `FISHLAB_PORT` |
+| `npm run dev` | Start the API automatically and serve the same app at `FISHLAB_PORT` with live updates |
+| `npm run preview` | Serve the existing `dist/` build plus API at `FISHLAB_PORT`; requires a successful build |
 | `npm run build` | Type-check and write static files to `dist/`, without starting a server |
 | `npm test` | Frontend model, API and rendered-component tests |
 | `npm run test:startup` | Launcher startup, port-conflict, failure and shutdown tests using temporary data |
 
-Normal use and preview use one Python server. Development uses an internal API at loopback port 8008; Vite proxies API and documentation requests so the browser still uses only port 8000. Never start `prepds review` separately alongside these npm commands. Occupied ports cause a clear startup error, and unrelated processes are left alone.
+Normal use and preview use one Python server. Development uses an internal API at `FISHLAB_API_PORT`; Vite proxies API and documentation requests so the browser still uses only `FISHLAB_PORT`. Never start `prepds review` separately alongside these npm commands. Occupied ports cause a clear startup error, and unrelated processes are left alone.
 
-Optional backend settings can be forwarded, for example `npm start -- --classifier-root /path/to/dcs --model-run /path/to/run --chat-url http://127.0.0.1:8010` (or set `FISHLAB_CHAT_URL` in `.env`). This points to the DCS research-chat service; DCS's `DCS_CHAT_BASE_URL` points to its language-model server. The npm launcher accepts `--chat-url`, `--predictions`, `--classifier-root`, and `--model-run`; use the Python CLI directly for other server options.
+Optional backend settings can be forwarded, for example `npm start -- --classifier-root /path/to/dcs --model-run /path/to/run --chat-url <FISHLAB_CHAT_URL>` (or set `FISHLAB_CHAT_URL` in `.env`). This points to the DCS research-chat service; DCS's `DCS_CHAT_BASE_URL` points to its language-model server. The npm launcher accepts `--chat-url`, `--predictions`, `--classifier-root`, and `--model-run`; use the Python CLI directly for other server options.
 
 ## Pages
 

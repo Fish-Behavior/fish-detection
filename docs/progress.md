@@ -1394,3 +1394,29 @@ Leftovers outside the repo: git worktree /tmp/theirs (remove with `git worktree 
 ### User manual and README refresh (2026-09-24)
 
 `docs/user-manual.md` added (setup, workflow, review app, output layout, model tracker, hints, what to trust, troubleshooting, command reference); README "Review UI" and status updated for the explain panel, time-per-state, markers, external controls and manual waterline. Uncommitted.
+
+### Docker launcher (2026-10-08)
+
+`./start.sh` builds a locked-dependency Python image with the React frontend, validates
+config and existing artifacts, refreshes the catalog, resumes pending prepds work,
+and runs enabled DCS feature extraction/audit/model/prediction
+steps. Preparation failure blocks the app and records the failed and unfinished steps
+in `<PDS_OUTPUT_DIR>/docker/startup.json`. Containers use the host UID/GID; host data
+persists and edited/accepted work is never force-regenerated. Optional managed DCS chat
+uses an existing model on the Docker host.
+
+Verified on the current dataset: 328 matched videos, 0 pending, DCS predictions for 328
+fish, saved reference predictions reproduced for 323 overlapping fish. The model verdict
+remains **not useful** and G1 remains **WAIT**. The frontend, built assets, API, session
+predictions, Host/Origin guards and API 404 were checked over HTTP at port 8003; port 8000
+was already occupied and its app was left running. Startup tests: 11 passed, including
+an unreadable accepted index being left untouched during startup. Existing
+CLI/review API checks: 83 passed; the optional detector test was excluded because this
+host has torch without torchvision. Live language-model chat and CUDA were not checked.
+
+Startup scope clarified: the accepted index is not checked or exported by the Docker
+launcher. Runtime paths, pipeline command completion and HTTP readiness determine whether
+the app starts; human acceptance and gold-index export remain separate workflows.
+`./stop.sh` stops the app, verifies a private dated archive of saved outputs, accepted
+data and configuration, then removes Compose containers. Raw source data and unsaved
+browser drafts remain outside that archive.
