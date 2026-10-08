@@ -80,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument(
         "--device", choices=DEVICES, default="auto", help="where the MLP trains: auto (GPU if PyTorch sees one), cpu, cuda"
     )
+    train.add_argument("--no-ablations", action="store_true", help="skip the compound-stage ablations (faster)")
     train.set_defaults(handler=run_train)
     return parser
 
@@ -152,7 +153,7 @@ def run_audit(settings: Settings, args: argparse.Namespace) -> int:
 def run_train(settings: Settings, args: argparse.Namespace) -> int:
     """Evaluate every model on the training table and write one run folder; print where the report is."""
     training = _with_overrides(settings.training, args)
-    run = run_training(settings, training, command=shlex.join(["python", "-m", "dcs", *args.argv]), device=args.device)
+    run = run_training(settings, training, command=shlex.join(["python", "-m", "dcs", *args.argv]), device=args.device, ablations=not args.no_ablations)
     print(f"Run folder: {run}")
     print(f"  report: {run / 'report.md'}")
     return 0

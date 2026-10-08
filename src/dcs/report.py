@@ -91,8 +91,15 @@ def best_model(ev: Evaluation) -> tuple[str, str]:
     return max(scores, key=scores.__getitem__), scheme
 
 
-def render_report(info: Mapping[str, Any], results: Mapping[str, StageResult], audit: Audit, notes: Sequence[str]) -> str:
-    """report.md for one run: source, settings, caveats, how to read it, then one section per stage."""
+def render_report(
+    info: Mapping[str, Any],
+    results: Mapping[str, StageResult],
+    audit: Audit,
+    notes: Sequence[str],
+    extra: Sequence[str] = (),
+) -> str:
+    """report.md for one run: source, settings, caveats, how to read it, one section per stage, then `extra`
+    (markdown lines, e.g. the ablations section)."""
     if info["gold_source"] == SOURCE_PROCESSED:
         source = (
             "**Source: UNREVIEWED pipeline output, treated as temporarily accepted (Q17, D-033).** No video has been "
@@ -122,14 +129,15 @@ def render_report(info: Mapping[str, Any], results: Mapping[str, StageResult], a
             "Camera framing differs between dates (EC-31, see `audit.md`): pixel speeds, state shares and NTT "
             "coverage follow the camera setup, so a model can score by recognizing the camera instead of the compound"
         )
-    caveats.append("Features are not vehicle-normalized yet (FR-9 comes with the ablations, U14)")
+    if "non-vehicle, vehicle-normalized" not in info.get("ablations", ()):
+        caveats.append("No vehicle-normalized (FR-9) run: ablations were skipped or the vehicle is not a kept class")
     if info.get("device") == "cuda":
         caveats.append("The MLP ran on a GPU: repeating the run may change its scores in the last digits (NFR-1)")
     lines += ["", "## Caveats", "", *(f"- {text}" for text in [*caveats, *notes])]
     lines += ["", "## How to read this", "", *(f"- {text}" for text in READING)]
     for stage, result in results.items():
         lines += _stage_section(stage, result, audit)
-    return "\n".join(lines) + "\n"
+    return "\n".join([*lines, *extra]) + "\n"
 
 
 def save_confusion(result: StageResult, path: Path) -> None:

@@ -8,6 +8,7 @@ requirement text shown in the error, built from the same bounds it checks.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from typing import Any, Callable, Mapping, NamedTuple
 
@@ -71,6 +72,19 @@ def _is_duration_range(value: Any) -> bool:
     return 0 <= value[0] < value[1]
 
 
+def _is_epoch_list(value: Any) -> bool:
+    """null, or a non-empty list of strictly increasing dates (YAML date or `YYYY-MM-DD` text)."""
+    if value is None:
+        return True
+    if not isinstance(value, (list, tuple)) or not value:
+        return False
+    try:
+        days = [part if isinstance(part, dt.date) else dt.date.fromisoformat(part) for part in value]
+    except (TypeError, ValueError):
+        return False
+    return all(a < b for a, b in zip(days, days[1:]))
+
+
 def _is_model_list(value: Any) -> bool:
     if not isinstance(value, (list, tuple)) or not value:
         return False
@@ -99,6 +113,7 @@ VALUE_RULES: tuple[tuple[str, Rule], ...] = (
     ("training.stage", one_of(STAGES)),
     ("training.models", Rule(_is_model_list, f"a non-empty list without repeats from {', '.join(MODEL_NAMES)}")),
     ("training.duration_range_s", Rule(_is_duration_range, "null or [min, max] seconds with 0 <= min < max")),
+    ("training.camera_epochs", Rule(_is_epoch_list, "null or a list of increasing dates (YYYY-MM-DD)")),
     ("training.min_detected_fraction", number_in(0, 1)),
     ("training.mlp.hidden_sizes", Rule(_is_layer_list, "a non-empty list of whole numbers >= 1")),
     ("training.mlp.dropout", number_in(0, 1, high_open=True)),

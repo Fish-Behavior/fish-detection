@@ -70,6 +70,13 @@ def test_null_default_accepts_a_range_and_an_explicit_null(tmp_path: Path) -> No
     assert _load_with(tmp_path, {"duration_range_s": None}).training["duration_range_s"] is None
 
 
+def test_camera_epochs_accept_yaml_dates_and_text(tmp_path: Path) -> None:
+    """A YAML file reads an unquoted 2000-03-01 as a date; quoted, it is text. Both work (D-061)."""
+    path = tmp_path / "epochs.yaml"
+    path.write_text("training:\n  camera_epochs: [2000-03-01, '2000-06-01']\n", encoding="utf-8")
+    assert len(load_settings(config_file=path).training["camera_epochs"]) == 2
+
+
 def test_int_accepted_for_float_setting(tmp_path: Path) -> None:
     assert _load_with(tmp_path, {"min_detected_fraction": 1}).training["min_detected_fraction"] == 1
 
@@ -192,6 +199,10 @@ def test_wrong_type_is_rejected(tmp_path: Path, training: dict[str, Any], name: 
         ({"duration_range_s": [5, 5]}, "training.duration_range_s"),
         ({"duration_range_s": [1, 2, 3]}, "training.duration_range_s"),
         ({"duration_range_s": [True, 5]}, "training.duration_range_s"),
+        ({"camera_epochs": []}, "training.camera_epochs"),
+        ({"camera_epochs": ["2000-06-01", "2000-03-01"]}, "training.camera_epochs"),
+        ({"camera_epochs": ["March"]}, "training.camera_epochs"),
+        ({"camera_epochs": "2000-03-01"}, "training.camera_epochs"),
         ({"gold_source": "reviewed"}, "training.gold_source"),
         ({"model_profile_marker": ""}, "training.model_profile_marker"),
         ({"model_profile_marker": "   "}, "training.model_profile_marker"),

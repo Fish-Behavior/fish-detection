@@ -30,8 +30,9 @@ def setup(tiny_table: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     return {"config": config, "runs": tmp_path / "out" / "training"}
 
 
-def train(setup: dict[str, Path], *options: str) -> int:
-    return main(["--config", str(setup["config"]), "train", *options])
+def train(setup: dict[str, Path], *options: str, ablations: bool = False) -> int:
+    """`dcs train` with the fast override; ablations off unless a test is about them (keeps tests/dcs fast)."""
+    return main(["--config", str(setup["config"]), "train", *options, *([] if ablations else ["--no-ablations"])])
 
 
 def only_run(setup: dict[str, Path]) -> Path:
@@ -126,3 +127,21 @@ def test_missing_table_is_a_configuration_error(setup: dict[str, Path], tmp_path
     monkeypatch.setenv("DCS_TABLE", str(tmp_path / "absent.parquet"))
     assert train(setup) == 2
 
+
+
+def test_ablations_land_in_metrics_and_the_report(setup: dict[str, Path]) -> None:
+    assert train(setup, "--models", "logreg", ablations=True) == 0
+    run = only_run(setup)
+    ablations = set(pd.read_csv(run / "metrics.csv")["ablation"])
+    assert {"main", "use_ntt=false", "use_depth=true", "non-vehicle, raw", "non-vehicle, vehicle-normalized"} <= ablations
+    report = (run / "report.md").read_text(encoding="utf-8")
+    assert "## Ablations" in report and "NTT" in report
+    info = json.loads((run / "run_info.json").read_text(encoding="utf-8"))
+    assert "use_ntt=false" in info["ablations"]
+
+
+def test_no_ablations_skips_them(setup: dict[str, Path]) -> None:
+    assert train(setup, "--models", "logreg") == 0
+    run = only_run(setup)
+    assert set(pd.read_csv(run / "metrics.csv")["ablation"]) == {"main"}
+    assert json.loads((run / "run_info.json").read_text(encoding="utf-8"))["ablations"] == []

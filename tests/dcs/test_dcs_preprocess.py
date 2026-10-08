@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dcs.config import ConfigError
 from dcs.preprocess import Preprocess, fit_preprocess
 
 KINDS = {"bouts": "count", "latency_s": "duration", "share": "fraction", "speed": "continuous", "ntt_tdm": "continuous"}
@@ -100,7 +99,16 @@ def test_columns_follow_the_fitted_feature_order() -> None:
     assert fitted.features == tuple(train.columns)
 
 
-def test_category_features_stop_with_a_hint() -> None:
+def test_category_features_become_one_hot_columns_fitted_on_the_fold() -> None:
+    """Demographics (U14): one 0/1 column per category seen in training; an unseen or missing category is all 0."""
     train = frame().assign(sex=["F", "M"] * 4)
-    with pytest.raises(ConfigError, match="use_demographics"):
-        fit_preprocess(train, {**KINDS, "sex": "category"})
+    fitted = fit_preprocess(train, {**KINDS, "sex": "category"})
+    assert fitted.categories == {"sex": ["F", "M"]}
+    assert list(fitted.mean)[-2:] == ["sex=F", "sex=M"]
+    test = frame(rows=3, seed=5).assign(sex=["M", "X", None])
+    out = fitted.transform(test)
+    assert out.shape == (3, len(KINDS) + 2)
+    raw = (out[:, -2:] * np.array([fitted.std["sex=F"], fitted.std["sex=M"]])) + np.array([fitted.mean["sex=F"], fitted.mean["sex=M"]])
+    np.testing.assert_allclose(raw, [[0, 1], [0, 0], [0, 0]], atol=1e-12)
+    reloaded = Preprocess.from_json(json.loads(json.dumps(fitted.as_json())))
+    np.testing.assert_array_equal(reloaded.transform(test), out)

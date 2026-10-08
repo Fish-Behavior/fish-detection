@@ -417,8 +417,9 @@ the **training rows of that fold only**, and `transform` applies them to both si
 
 Test rows never move these numbers (EC-9): a fold with extreme test fish is scaled by the training fish's spread.
 The fitted numbers go to JSON and back unchanged (`as_json`, `Preprocess.from_json`); the model folder will store
-them as `preprocess.json` (U16). Category features (`sex`, `strain` with `use_demographics: true`) are not encoded
-yet and stop the run with a hint; that comes with the ablations (U14). To look at one fold:
+them as `preprocess.json` (U16). Category features (`sex`, `strain` with `use_demographics: true`) become one 0/1
+column per value seen in the training fold (`sex=F`, `sex=M`); a value the fold never saw, or a gap, is all 0 (D-062).
+To look at one fold:
 
 ```python
 from dcs.preprocess import fit_preprocess
@@ -519,6 +520,46 @@ unreviewed set (compound stage, default settings, dry run with nothing written) 
 (see Camera framing), not a final result. Runtime there: about 2 min per stage on a 10-core laptop, most of it the
 forest and boosting in scheme B and `B_permuted`.
 
+## Ablations (compound stage)
+
+After the compound stage, `dcs train` re-runs every model with one change at a time, on **the same folds** (PRD §6.8;
+`--no-ablations` skips them, about 5 times faster):
+
+| Ablation | Change | Question it answers |
+|---|---|---|
+| `use_ntt=false` | NTT features off (or on, when your settings have them off) | Does the novel-tank test add anything? The **NTT keep rule** in the report: keep NTT only if scheme A is better with it by more than the spread |
+| `use_demographics=true` | `sex`, `strain`, `age` on | Do fish characteristics help, or do they track the date (strains bought per campaign)? |
+| `use_depth=true` | Depth features on | Depth in pixels follows the camera framing (D-015, EC-31): a gain in B but not in A means the model reads the camera |
+| `non-vehicle, raw` | Vehicle fish left out | The baseline of the FR-9 pair |
+| `non-vehicle, vehicle-normalized` | Vehicle fish left out; every feature (after `log1p`) minus the median of the reference vehicle fish | FR-9: does the model still separate compounds once the day's (or the camera's) vehicle level is removed? Compared with the raw row on the **same classes and folds** (D-008) |
+
+**The vehicle reference (`training.camera_epochs`, D-061).** By default (`null`) a fish's reference is the vehicle fish
+of its own date when that date has 2 or more, else of its camera framing setup (the audit's EC-31 groups), else all
+vehicle fish; the report says how many dates used each. With 1 to 3 vehicle fish per date this reference is noisy,
+and the noise is the same for every fish of the date: it stamps each date with a fingerprint. On the real unreviewed set
+that made things worse (scheme A down, scheme B up to its permuted score: pure date recognition). Setting the camera
+epochs uses the much larger vehicle groups of each epoch instead, which removed part of the camera effect there
+(scheme A up by more than the spread). Read the epoch start dates off `audit.md` ("Camera framing": where the tank top
+and height jump) and put them in your override file:
+
+```yaml
+training:
+  vehicle_compound: <vehicle name>
+  camera_epochs: [<first day of epoch 2>, <first day of epoch 3>]    # YYYY-MM-DD, increasing
+```
+
+The ablation rows go to `metrics.csv` (column `ablation`; `main` for the main run) and to a section of `report.md`
+(scheme A and B per model and ablation, and `delta A`, the change in scheme A). An ablation that cannot be built (for
+example a group whose features are all constant) is listed with the reason. To run them by hand:
+
+```python
+from dcs.ablations import run_ablations
+from dcs.report import StageResult
+main = StageResult(result, folds, ev)                       # compound stage, from the sections above
+for a in run_ablations(table, schema, settings.training, main, ["logreg"], "cpu", {}, print):
+    print(a.name, a.note or a.result.evaluation.summary.loc[("logreg", "A"), "balanced_accuracy"].to_dict())
+```
+
 ## Training (`dcs train`)
 
 ```bash
@@ -527,6 +568,7 @@ python -m dcs train --stage compound                  # Stage 1 only (compound, 
 python -m dcs train --models logreg,random_forest     # subset; majority and date_only are always added
 python -m dcs train --seed 1 --repeats 10             # other seed / more repeats for this run only
 python -m dcs train --device cuda                     # MLP on the GPU (stops if PyTorch sees none)
+python -m dcs train --no-ablations                    # main run only (quick look)
 ```
 
 It reads only `DCS_TABLE` (the training table and its schema file, both from `featurize`) and, per stage, builds the
@@ -582,6 +624,7 @@ pytest tests/dcs -q                                # synthetic data only; must p
 # 2. once: paths on the box (.env is git-ignored)
 cp .env.example .env    # set PDS_VIDEO_DIR, PDS_DB_PATH, DCS_DB_PATH; keep PDS_OUTPUT_DIR=outputs, DCS_PROCESSED_DIR=outputs
 printf 'training:\n  vehicle_compound: <vehicle name as the workbook writes it>\n' > my_training.yaml
+#   after the first `dcs audit`, add camera_epochs: [<YYYY-MM-DD>, ...] from its framing table (see Ablations)
 echo 'DCS_CONFIG=my_training.yaml' >> .env
 python -m prepds check-config && python -m dcs check-config
 
@@ -624,7 +667,6 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `--device cuda, but PyTorch sees no CUDA GPU` (train) | Install the CUDA build of torch (GB10 runbook, step 1), or run with `--device auto` or `cpu` |
 | `--models must be` / `--stage must be` / `--seed must be` / `--repeats must be` (train) | Fix the command-line value; the message lists what is allowed |
 | `<stage> stage cannot be built: ...` (train) | No stage could be built; the rest of the message is one of the training-set errors above |
-| `are categories, which are not encoded yet` | `use_demographics: true` is not supported before U14: set it back to `false` |
 | `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
 
 The audit's **notes** are not errors: it always writes `audit.md`. A note such as `vehicle ... is not in the table`
@@ -647,11 +689,12 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
 | `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
 | `test_dcs_audit.py` | Each audit table and fact on small hand-built tables: filter steps, class status and scheme A, per-date and compound × date counts, missing values, manual share and flags per compound, §2.3 statistics, a compound with no Accepted fish, the D-016 share, the G1 stop rule (vehicle, one-date and unaccepted compounds never count; the unreviewed count), vehicle name from the settings, fps and tracker notes, framing setups (a shift, a zoom, two equally common setups, slow drift, one fish at the surface, a date without depth data), dose spelling variants counted once, a stage that cannot be built; `dcs audit` end to end on synthetic data and without a table |
-| `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features stop with a hint |
+| `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features one-hot, unseen or missing values all 0 |
 | `test_dcs_models.py` | Every baseline has the same interface and probabilities that sum to 1; majority gives the class shares; date-only: same date, nearest date, tie to the earlier date, non-date text; logreg, forest and boosting find a planted signal and weight classes; same seed, same probabilities; `mlp` and unknown names are errors |
 | `test_dcs_evaluate.py` | Every model sees the same folds; majority and date-only always run; preprocessing is fitted without the test fold (EC-9, by spying on every fit); metrics equal scikit-learn's on the pooled predictions of a repeat, no plain accuracy (D-017); per-class scores pool the repeats; spread = standard deviation across repeats; the permutation stays inside each date; a planted signal is judged useful; **leakage canary** (label depends only on the date: scheme B perfect, scheme A below chance, permuted = real, not useful); pinned fish never scored in scheme A; no scheme A means undecided; vehicle vs drug; same seed, same metrics (EC-14) |
 | `test_dcs_mlp.py` | (runs only where torch is installed) Interface and a planted signal; built from the settings; layer sizes, ReLU and dropout from the config; one network per seed; early stopping on noise; balanced loss weights; same seed same CPU probabilities, other seed different (EC-14); a one-fish class still trains; `--device` rules (EC-15) |
 | `test_dcs_no_torch.py` | With torch hidden: `torch_available()` is false and `dcs train --models logreg,mlp --device cuda` runs the baselines and skips the MLP with a message (EC-16) |
+| `test_dcs_ablations.py` | Vehicle normalization: vehicle fish removed, counts logged once; date reference with 2+ vehicle fish; fallback to the framing setup, then all vehicle fish; camera-epoch reference skips the date level; `epoch_of`; the NTT keep rule (gain vs spread, undecided without scheme A); every ablation reported; switch ablations reuse the main folds; the FR-9 pair shares classes and folds; FR-9 is a note when the vehicle is not a kept class; `camera_epochs` switches the reference |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |

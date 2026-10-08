@@ -40,7 +40,11 @@ training:
   use_demographics: false
   # Depth from the frame top encodes camera framing; off until the G1 framing check (D-015).
   use_depth: false
-  normalize_by_date_vehicle: false
+  # Vehicle reference of the FR-9 ablation (D-061). null: the fish's own date when it has 2+ vehicle fish, else its
+  # camera framing setup (audit, EC-31), else all vehicle fish. A list of dates, each the first day of a new camera
+  # epoch (read them off audit.md, "Camera framing"): the reference is the fish's epoch, which holds many more vehicle
+  # fish. Set it in your override file, never here (no data-derived numbers in the defaults).
+  camera_epochs: null
   # Flag (never drop) recordings whose length falls outside [min, max] seconds (EC-11).
   # null = no range check; set it at G1 from the protocol and the audit.
   duration_range_s: null

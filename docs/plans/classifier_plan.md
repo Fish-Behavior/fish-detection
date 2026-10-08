@@ -56,6 +56,7 @@ Confirmed in `src/prepds` (2026-10-02):
 | C20 | §6.11 1D-CNN input | Recording lengths differ (including the shorter-exposure videos) (R5) | EC-30 in Phase 6: pad to the longest recording with a mask; masked global pooling |
 | C21 | FR-8 `predict` input | `featurize` needs the whole index, so a new fish cannot be featurized alone (R6) | D-018: `featurize --videos <dir>` builds the table from per-video folders without an index; labels optional |
 | C22 | §8.3 / Appendix B step 6: copy only the training table to the GB10 | Copying onto the box may be blocked (least privileges, owner 2026-10-08) | D-057: the box clones the repository, re-runs `prepds` on the raw videos and trains on that output as temporarily accepted (`gold_source: processed`); runbook in instructions.md |
+| C23 | §7.3 `normalize_by_date_vehicle`; FR-9 fallback to the global vehicle median | The setting has nothing to switch (FR-9 is always reported as the D-008 pair); on the real set a per-date reference leaks the date | D-061: setting removed; reference chain date -> framing setup -> all vehicle fish, or camera epochs (`training.camera_epochs`) |
 
 New edge cases proposed for §9.2: **EC-27** index row without `date` (C4); **EC-28** workbook row for a fish missing, duplicated or disagreeing with the index; **EC-29** tracker evidence disagrees (profile name vs `detections.parquet`); **EC-30** sequences of different lengths (C20, Phase 6); **EC-31** camera framing differs between dates (C16).
 

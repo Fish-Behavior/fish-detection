@@ -1,36 +1,38 @@
-"""Feature matrix -> model input, fitted on one training fold (plan U9, T2.2; PRD §5.4, §5.5; EC-2, EC-9).
+"""Feature matrix -> model input, fitted on one training fold (plan U9, T2.2; U14; PRD §5.4, §5.5; EC-2, EC-9).
 
-`fit_preprocess` sees only the training rows of a fold: `log1p` on count and duration features, then the
-median of each feature fills its gaps (missing NTT, EC-2; a `-` half's velocity, D-051), then each feature
-is standardized with that fold's mean and spread. The test rows are transformed with those numbers and never
-fitted on (EC-9). `as_json` / `from_json` carry the fitted numbers into the model folder (`preprocess.json`).
+`fit_preprocess` sees only the training rows of a fold: category features (sex, strain with `use_demographics`)
+become one 0/1 column per category seen in the fold (D-062); then `log1p` on count and duration features; then the
+median of each column fills its gaps (missing NTT, EC-2; a `-` half's velocity, D-051); then each column is
+standardized with that fold's mean and spread. The test rows are transformed with those numbers and never fitted
+on (EC-9). `as_json` / `from_json` carry the fitted numbers into the model folder (`preprocess.json`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from dcs.config import ConfigError
-
 LOG_KINDS = ("count", "duration")  # heavy-tailed, never negative (PRD §5.5)
+CATEGORY = "category"
 
 
 @dataclass(frozen=True)
 class Preprocess:
-    features: tuple[str, ...]  # input column order of the model
+    features: tuple[str, ...]  # input columns the model needs
     log1p: tuple[str, ...]
-    fill: dict[str, float]  # training-fold median, after log1p
+    fill: dict[str, float]  # training-fold median, after log1p; keys in model-column order
     mean: dict[str, float]
     std: dict[str, float]  # 1.0 where the fold is constant, so nothing divides by zero
+    categories: dict[str, list[str]] = field(default_factory=dict)  # category feature -> its one-hot values
 
     def transform(self, X: pd.DataFrame) -> np.ndarray:
-        """Rows of `X` (any column order, extra columns ignored) as a float matrix in `features` order."""
-        values = _logged(X[list(self.features)], self.log1p).fillna(self.fill)
+        """Rows of `X` (any column order, extra columns ignored) as a float matrix in model-column order."""
+        values = _logged(_one_hot(X[list(self.features)], self.categories), self.log1p).fillna(self.fill)
+        values = values[list(self.mean)]
         return ((values - pd.Series(self.mean)) / pd.Series(self.std)).to_numpy(dtype=float)
 
     def as_json(self) -> dict[str, Any]:
@@ -44,19 +46,17 @@ class Preprocess:
             fill=dict(data["fill"]),
             mean=dict(data["mean"]),
             std=dict(data["std"]),
+            categories={name: list(values) for name, values in data.get("categories", {}).items()},
         )
 
 
 def fit_preprocess(X: pd.DataFrame, kinds: Mapping[str, str]) -> Preprocess:
     """Fit on the training rows `X`; `kinds` is the TrainSet's feature -> kind map."""
-    categorical = [name for name in X.columns if kinds[name] == "category"]
-    if categorical:
-        raise ConfigError(
-            f"Feature(s) {', '.join(categorical)} are categories, which are not encoded yet (U14). "
-            "Set training.use_demographics: false."
-        )
+    categories = {
+        name: sorted(X[name].dropna().astype(str).unique()) for name in X.columns if kinds[name] == CATEGORY
+    }
     log = tuple(name for name in X.columns if kinds[name] in LOG_KINDS)
-    values = _logged(X, log)
+    values = _logged(_one_hot(X, categories), log)
     fill = values.median().fillna(0.0)  # a column empty in this fold becomes 0, then constant
     filled = values.fillna(fill)
     std = filled.std(ddof=0).replace(0.0, 1.0)
@@ -66,7 +66,18 @@ def fit_preprocess(X: pd.DataFrame, kinds: Mapping[str, str]) -> Preprocess:
         fill={name: float(v) for name, v in fill.items()},
         mean={name: float(v) for name, v in filled.mean().items()},
         std={name: float(v) for name, v in std.items()},
+        categories=categories,
     )
+
+
+def _one_hot(X: pd.DataFrame, categories: Mapping[str, list[str]]) -> pd.DataFrame:
+    """Numeric columns as they are, then `<feature>=<value>` 0/1 columns; unseen or missing values are all 0."""
+    out = X.drop(columns=list(categories))
+    for name, values in categories.items():
+        text = X[name].astype("string")
+        for value in values:
+            out[f"{name}={value}"] = (text == value).fillna(False).astype(float)
+    return out
 
 
 def _logged(X: pd.DataFrame, log: tuple[str, ...]) -> pd.DataFrame:
