@@ -403,6 +403,31 @@ pixel speeds, state shares and `has_ntt` track the epoch (about 93 / 71 / 39 % N
 that a model recognizes the camera instead of the compound. Handle this before models are designed (per-epoch
 normalization, FR-9).
 
+## Preprocessing (per fold)
+
+Models never see the raw feature matrix. Inside every fold, `fit_preprocess(X_train, kinds)` learns three things from
+the **training rows of that fold only**, and `transform` applies them to both sides:
+
+1. **`log1p`** on features of kind `count` or `duration` (bouts, latencies, transitions, NTT times), which are heavy-tailed.
+2. **Fill gaps** with the fold's median (after `log1p`). This is where a fish without NTT gets its values (EC-2,
+   `has_ntt` stays 0 so the model can tell), and where a fish that never entered the NTT top half gets a top-half velocity
+   (its time in that half, 0, already says it never went there; D-051). A column empty in the whole fold becomes 0.
+3. **Standardize** with the fold's mean and standard deviation. A column constant in the fold gets a spread of 1, so
+   nothing divides by zero.
+
+Test rows never move these numbers (EC-9): a fold with extreme test fish is scaled by the training fish's spread.
+The fitted numbers go to JSON and back unchanged (`as_json`, `Preprocess.from_json`); the model folder will store
+them as `preprocess.json` (U16). Category features (`sex`, `strain` with `use_demographics: true`) are not encoded
+yet and stop the run with a hint; that comes with the ablations (U14). To look at one fold:
+
+```python
+from dcs.preprocess import fit_preprocess
+train = result.X.iloc[:100]                              # result from build_trainset above
+fitted = fit_preprocess(train, result.kinds)
+fitted.log1p, fitted.fill["velocity_mean"]               # what was logged; the fill value of one feature
+fitted.transform(result.X.iloc[100:])                    # the other fish, scaled with the training fish's numbers
+```
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -422,6 +447,7 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `No schema file ... beside the table` / `schema file ... is damaged` | Copy both featurize files together, or run `python -m dcs featurize` again |
 | `marks forbidden column(s)` / `in the schema but not in the table` | The two files come from different runs or were edited: run `featurize` again |
 | `No feature left` | Every usable feature is constant or of a rare state: switch on a group (`use_ntt`, `use_depth`) or lower `min_state_fish` |
+| `are categories, which are not encoded yet` | `use_demographics: true` is not supported before U14: set it back to `false` |
 | `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
 
 The audit's **notes** are not errors: it always writes `audit.md`. A note such as `vehicle ... is not in the table`
@@ -444,6 +470,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_featurize_table.py` | The table and schema on a synthetic set, flags, drops, and `dcs featurize` itself |
 | `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
 | `test_dcs_audit.py` | Each audit table and fact on small hand-built tables: filter steps, class status and scheme A, per-date and compound × date counts, missing values, manual share and flags per compound, §2.3 statistics, a compound with no Accepted fish, the D-016 share, the G1 stop rule (vehicle, one-date and unaccepted compounds never count; the unreviewed count), vehicle name from the settings, fps and tracker notes, framing setups (a shift, a zoom, two equally common setups, slow drift, one fish at the surface, a date without depth data), dose spelling variants counted once, a stage that cannot be built; `dcs audit` end to end on synthetic data and without a table |
+| `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features stop with a hint |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
 ## Keeping this section current
