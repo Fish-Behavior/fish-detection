@@ -34,6 +34,7 @@ from dcs.workbook import HAS_NTT
 
 MIN_CONTROL = 3  # same-date vehicle fish needed before falling back to all vehicle fish
 MAX_ROWS = 40  # longest list a tool returns (bouts, features), so answers stay readable
+MAX_BINS = 2_000  # most time bins one timeline returns (bin_s is chosen by the model or an API caller)
 SAME_DATES, ALL_VEHICLE = "same_dates", "all"
 KINEMATICS = {
     "velocity_mean": "mean swimming speed, px/s (detected frames)",
@@ -143,6 +144,8 @@ def call_tool(data: ResearchData, name: str, arguments: str | Mapping[str, Any] 
         return _plain(TOOLS[name].run(data, **args))
     except (ToolError, json.JSONDecodeError, TypeError) as error:
         return {"error": str(error)}
+    except Exception as error:  # noqa: BLE001 (a tool bug must not end `dcs ask` or turn into a 500)
+        return {"error": f"{name} failed: {type(error).__name__}: {error}"}
 
 
 # --- tools ---------------------------------------------------------------------------------------
@@ -297,22 +300,27 @@ def fish_timeline(data: ResearchData, video_id: str, bin_s: float = 60) -> dict[
         segments = pd.read_csv(folder / schema.SEGMENTS_FILE)
     except (OSError, ValueError) as error:
         raise ToolError(f"cannot read the files of {video_id} in {folder}: {error}") from None
-    if bin_s <= 0:
-        raise ToolError("bin_s must be > 0")
     step = float(np.median(np.diff(frames["t_sec"]))) if len(frames) > 1 else 0.0
     duration = float(segments["end_s"].max())
-    frames = frames.assign(bin=(frames["t_sec"] // bin_s).astype(int), state=frames["state"].astype(str))
+    if isinstance(bin_s, bool) or not isinstance(bin_s, (int, float)) or not math.isfinite(bin_s) or bin_s <= 0:
+        raise ToolError(f"bin_s must be a number of seconds > 0, got {bin_s!r}")
+    if math.ceil(duration / bin_s) > MAX_BINS:
+        raise ToolError(f"bin_s {bin_s} gives more than {MAX_BINS} bins for {duration:.0f} s; use at least {duration / MAX_BINS:.3g}")
+    det = frames["detected"].astype(bool)
+    real = det & det.shift(fill_value=False)  # the first frame after a gap carries a 0.0 sentinel velocity
+    frames = frames.assign(bin=(frames["t_sec"] // bin_s).astype(int), state=frames["state"].astype(str),
+                           speed=frames["velocity"].where(real))  # fmt: skip
+    known = frames[frames["state"] != schema.UNDETERMINED]
+    known_frames = known.groupby("bin").size()
+    shares = known.groupby("bin")["state"].value_counts(normalize=True)
+    speeds = frames.groupby("bin")["speed"].mean()
     bins = []
     for number in range(math.ceil(duration / bin_s)):
-        part = frames[frames["bin"] == number]
-        known = part[part["state"] != schema.UNDETERMINED]
-        shares = known["state"].value_counts(normalize=True)
-        det = frames["detected"].astype(bool)
-        real = det & det.shift(fill_value=False)  # the first frame after a gap carries a 0.0 sentinel velocity
-        detected = part[real[part.index]]
-        bins.append({"start_s": number * bin_s, "end_s": min((number + 1) * bin_s, duration), "known_s": len(known) * step,
-                     "state_shares": {k: float(v) for k, v in shares.items()},
-                     "mean_speed_px_s": _num(detected["velocity"].mean())})  # fmt: skip
+        state_shares = shares.loc[number] if number in known_frames.index else pd.Series(dtype=float)
+        bins.append({"start_s": number * bin_s, "end_s": min((number + 1) * bin_s, duration),
+                     "known_s": int(known_frames.get(number, 0)) * step,
+                     "state_shares": {k: float(v) for k, v in state_shares.items()},
+                     "mean_speed_px_s": _num(speeds.get(number))})  # fmt: skip
     first = segments[segments["state"] != schema.UNDETERMINED].groupby("state")["start_s"].min()
     return {
         "video_id": video_id,

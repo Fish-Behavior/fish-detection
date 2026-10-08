@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from pathlib import Path
@@ -129,6 +130,20 @@ def test_timeline_bins_cover_the_recording(data: ResearchData) -> None:
             assert sum(row["state_shares"].values()) == pytest.approx(1)
     assert result["bouts"] and {"start_s", "end_s", "state"} <= set(result["bouts"][0])
     assert "first_bout_s" in result
+
+
+@pytest.mark.parametrize("bin_s", [0, -5, float("nan"), float("inf"), True, "60", 1e-300])
+def test_timeline_refuses_a_bad_bin_length(data: ResearchData, bin_s: Any) -> None:
+    result = call(data, "fish_timeline", video_id=str(data.table["video_id"].iloc[0]), bin_s=bin_s)
+    assert "bin_s" in result["error"]
+
+
+def test_a_failing_tool_is_an_error_not_a_crash(data: ResearchData, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(data: ResearchData) -> dict[str, Any]:
+        raise ValueError("boom")
+
+    monkeypatch.setitem(TOOLS, "list_compounds", dataclasses.replace(TOOLS["list_compounds"], run=broken))
+    assert call(data, "list_compounds")["error"] == "list_compounds failed: ValueError: boom"
 
 
 def test_unknown_fish_is_an_error(data: ResearchData) -> None:

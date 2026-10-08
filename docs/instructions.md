@@ -189,7 +189,8 @@ Same virtual environment as `prepds` (see [Setup](#setup)). Add the `DCS_*` line
 | `DCS_OUTPUT_DIR` | where `dcs` writes (default `outputs/dcs`, git-ignored) | everything |
 | `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; `audit`, `train` and the chat read it |
 | `DCS_CONFIG` | a YAML file overriding `config/default_training.yaml` | optional |
-| `DCS_CHAT_API_KEY` | key for a hosted chat server (environment only; never in a file in the repository) | `ask`, `serve-chat`, only for a hosted server |
+| `DCS_CHAT_BASE_URL` | the chat server's OpenAI-compatible address, e.g. Ollama on this machine (`http://127.0.0.1:11434/v1`); never in a YAML file | `ask`, `serve-chat` |
+| `DCS_CHAT_API_KEY` | key for a hosted chat server; in your own `.env` (git-ignored) or the environment, never in `.env.example` or a YAML file; `check-config` shows it as `***` | `ask`, `serve-chat`, only for a hosted server |
 
 Settings come from the environment first, then `.env`, then the defaults. Check them before touching data:
 
@@ -407,9 +408,9 @@ a stage that cannot be built (for example, too few classes) becomes a note.
 
 On the real unreviewed set (328 fish, 41 dates, `vehicle_compound` set): G1 stop rule WAIT on Accepted fish (none yet),
 GO when unreviewed fish count; frame rates uniform; tracker checked for every fish; **framing differs between dates**:
-the recordings fall into three camera epochs (fish vertical range about 71 px for the early 2024 dates, about 31 px for
-late 2024 to early Feb 2025, about 34 px after; 18 framing setups, none spanning two epochs, one stable setup from
-2025-02-18), and most compounds were recorded in one epoch only. Depth stays off, and
+the recordings fall into three camera epochs (fish vertical range about 71 px in epoch 1, about 31 px in epoch 2,
+about 34 px in epoch 3; 18 framing setups, none spanning two epochs, one stable setup through most of epoch 3), and most
+compounds were recorded in one epoch only. Depth stays off, and
 pixel speeds, state shares and `has_ntt` track the epoch (about 93 / 71 / 39 % NTT coverage), so scheme A cannot rule out
 that a model recognizes the camera instead of the compound. Handle this before models are designed (per-epoch
 normalization, FR-9).
@@ -730,12 +731,18 @@ ollama serve &                      # listens on 127.0.0.1:11434
 ollama pull <model>                 # once; `ollama list` shows the exact name
 ```
 
-**2. Name the model** in your override file (`DCS_CONFIG`), next to the training settings:
+**2. Point `dcs` at the server and name the model.** The server's address is machine-specific, so it goes in `.env`
+(git-ignored), never in a YAML file (a `chat.base_url` there is refused):
+
+```bash
+DCS_CHAT_BASE_URL=http://127.0.0.1:11434/v1   # Ollama on this machine; any http(s) address of an OpenAI-compatible server
+```
+
+The model's name goes in your override file (`DCS_CONFIG`), next to the training settings:
 
 ```yaml
 chat:
   model: <name as `ollama list` shows it>
-  # base_url: http://127.0.0.1:11434/v1      # the default (Ollama on this machine)
 ```
 
 **3. Ask.** `python -m dcs ask "question"` answers one question; `python -m dcs ask` starts a session that keeps the
@@ -745,7 +752,10 @@ conversation (empty line or `exit` ends it); `--show-tools` prints every tool ca
 
 **4. For a web frontend:** `python -m dcs serve-chat` serves a JSON API on `127.0.0.1:8010` (loopback only: it has no
 login, like `prepds review`). From your PC: `ssh -L 8010:127.0.0.1:8010 <user>@<box>`, then the frontend talks to
-`http://127.0.0.1:8010`:
+`http://127.0.0.1:8010`. The API answers only requests whose `Host` is a loopback name (127.0.0.1, localhost, [::1]);
+a POST with an `Origin` from another site gets 403, so a web page you visit cannot reach it through DNS rebinding. A
+dev server on `localhost:<port>` (e.g. Vite) may call it. `/api/ask` accepts only `user` and `assistant` turns in
+`history`, a question of at most 4,000 characters and at most 50 earlier turns:
 
 | Endpoint | Body | Returns |
 |---|---|---|
@@ -754,15 +764,14 @@ login, like `prepds review`). From your PC: `ssh -L 8010:127.0.0.1:8010 <user>@<
 | `POST /api/ask` | `{"question": "...", "history": [...]}` | `{"answer", "tool_calls", "history"}`; send `history` back with the next question |
 | `POST /api/tool` | `{"name": "fish_timeline", "arguments": {"video_id": "F_0042"}}` | the tool's JSON, without the language model (for charts and tables) |
 
-**Where the data goes.** By default only to the chat server on the same machine. A `chat.base_url` on another
-machine is refused unless `chat.allow_remote: true`, because questions and tool results (numbers per compound and per
-fish) would leave the box; set it only if your data agreement allows it. A hosted server's key goes in the environment
-variable `DCS_CHAT_API_KEY`, never in a file in the repository. Where to host the model later is the lab's choice: only
-`chat.base_url` (and maybe the key) changes.
+**Where the data goes.** Only to the chat server in `DCS_CHAT_BASE_URL`. An address on another machine is refused
+unless `chat.allow_remote: true`, because questions and tool results (numbers per compound and per fish) would leave the
+box; set it only if your data agreement allows it. A hosted server's key goes in `DCS_CHAT_API_KEY` in your `.env`
+(git-ignored) or the environment, never in `.env.example`, a YAML file or anything committed; `check-config` prints it as
+`***`. Where to host the model later is the lab's choice: only `DCS_CHAT_BASE_URL` (and maybe the key) changes.
 
 | Setting (`chat:`) | Default | Meaning |
 |---|---|---|
-| `base_url` | `http://127.0.0.1:11434/v1` | The chat server |
 | `model` | `null` (must be set) | Model name on that server |
 | `temperature` | 0.1 | Low = steadier answers |
 | `max_tool_rounds` | 8 | Tool calls per question before the model must answer |
@@ -839,10 +848,13 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `--device cuda, but PyTorch sees no CUDA GPU` (train) | Install the CUDA build of torch (GB10 runbook, step 1), or run with `--device auto` or `cpu` |
 | `--models must be` / `--stage must be` / `--seed must be` / `--repeats must be` (train) | Fix the command-line value; the message lists what is allowed |
 | `<stage> stage cannot be built: ...` (train) | No stage could be built; the rest of the message is one of the training-set errors above |
+| `DCS_CHAT_BASE_URL is not set` | Add `DCS_CHAT_BASE_URL=<server>/v1` to `.env` (see `.env.example`) |
+| `DCS_CHAT_BASE_URL must be an http:// or https:// address` | Fix the address in `.env` or the environment |
+| `chat.base_url` / `chat.api_key in ... is not read from YAML` | Remove it from your override file and set `DCS_CHAT_BASE_URL` / `DCS_CHAT_API_KEY` in `.env` |
 | `chat.model is not set` | Put the model's name in your override file under `chat: model:` |
-| `Cannot reach the chat server at ...` | Start it (`ollama serve`, `ollama pull <model>`) or fix `chat.base_url` |
+| `Cannot reach the chat server at ...` | Start it (`ollama serve`, `ollama pull <model>`) or fix `DCS_CHAT_BASE_URL` |
 | `The chat server at ... answered 4xx/5xx` | Usually a wrong model name (`ollama list`) or a model without tool calling |
-| `chat.base_url ... is not this machine` | Use a local server, or set `chat.allow_remote: true` if your data agreement allows it |
+| `DCS_CHAT_BASE_URL ... is not this machine` | Use a local server, or set `chat.allow_remote: true` if your data agreement allows it |
 | `the chat API has no authentication: --host must be a loopback address` | Keep `serve-chat` on 127.0.0.1 and reach it through an SSH tunnel |
 | `--input ... does not exist` (predict) | Point `--input` at a table from `dcs featurize` |
 | `--videos ... is not a folder` | Point it at the folder holding one `<video_id>/` folder per fish |
@@ -880,8 +892,8 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_artifact.py` | `model/` holds the files of PRD §7.4 plus the reference predictions, classes in probability order, model named in the report and `run_info.json`; reload in a **fresh process** reproduces the reference (EC-18) for logistic regression and (with torch) the MLP; a version mismatch is a warning; a missing feature column is an error naming it; no model folder is an error |
 | `test_dcs_predict.py` | `dcs predict` on the training table reproduces `reference_predictions.csv` and says so (AC-9); default output file and CSV input; missing columns stop with their names; version warnings printed; `featurize --videos` needs no index, marks unreviewed fish, leaves the date empty and the training table untouched; with the workbook the NTT values are kept; folders -> `featurize --videos` -> `predict` gives the same predictions as the reference (D-018) |
 | `test_dcs_privacy.py` | `git ls-files` holds no `.parquet`, `.csv`, `.xlsx`, `.pt`, `.joblib`, pickle, video or `.env` file outside the two named synthetic fixtures (AC-8); the outputs of `dcs` and `prepds` and the restricted inputs are git-ignored; the pattern itself catches what it should. Skipped outside a git checkout |
-| `test_dcs_chat_tools.py` | Tool schemas valid and unique; compounds and vehicle; feature search; `compare_to_vehicle` equals hand-computed n, mean, Hedges' g and Mann-Whitney p with the same-date control; fallback to all vehicle fish with a caveat; bad arguments return errors naming the choices; `top_differences` ordered with q >= p; fish profile percentiles and out-of-fold predictions; timeline bins cover the recording and shares sum to 1; model results, class scores, ablations and audit facts read from a real `dcs train` run; no run -> a hint; the latest run found from the settings |
-| `test_dcs_chat.py` | The answer is built from a tool result (scripted engine); the system prompt sets the rules and names the data; history carries earlier turns; dict arguments and tool errors go back to the model; too many tool rounds force an answer without tools; local servers allowed, a remote one only with `allow_remote`; no model name stops; the client speaks the OpenAI protocol to a local stub server (path, body, API key header); an unreachable server says how to start one; `dcs ask` one question; the terminal session keeps history; `serve-chat` refuses a public address; the API (`health`, `tools`, `ask`, `tool`) and a 503 on engine failure |
+| `test_dcs_chat_tools.py` | Tool schemas valid and unique; compounds and vehicle; feature search; `compare_to_vehicle` equals hand-computed n, mean, Hedges' g and Mann-Whitney p with the same-date control; fallback to all vehicle fish with a caveat; bad arguments return errors naming the choices; `top_differences` ordered with q >= p; fish profile percentiles and out-of-fold predictions; timeline bins cover the recording and shares sum to 1; model results, class scores, ablations and audit facts read from a real `dcs train` run; no run -> a hint; the latest run found from the settings; `fish_timeline` refuses a zero, negative, NaN, infinite, boolean, text or too-small `bin_s` with an error; a tool that crashes comes back as `{"error"}` instead of ending the chat |
+| `test_dcs_chat.py` | The answer is built from a tool result (scripted engine); the system prompt sets the rules and names the data; history carries earlier turns; dict arguments and tool errors go back to the model; too many tool rounds force an answer without tools; local servers allowed, a remote one only with `allow_remote`; no model name stops; the client speaks the OpenAI protocol to a local stub server (path, body, API key header); an unreachable server says how to start one; `dcs ask` one question; the terminal session keeps history; `serve-chat` refuses a public address; the API (`health`, `tools`, `ask`, `tool`) and a 503 on engine failure; the server address and key come only from `DCS_CHAT_BASE_URL` and `DCS_CHAT_API_KEY` (environment over `.env`; a non-http(s) address and a `chat.base_url` or `chat.api_key` in a YAML file are refused; no address stops with a hint; the key prints as `***` in `check-config`); a foreign `Host` (DNS rebinding) and a foreign `Origin` are refused; `/api/ask` refuses `system`/`tool` history turns, an empty or over-long question and too many turns |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |

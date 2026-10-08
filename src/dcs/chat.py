@@ -2,15 +2,14 @@
 
 A local open-weights model (any OpenAI-compatible server with tool calling: Ollama, llama.cpp, vLLM) reads the
 question, calls `chat_tools` for every number, and writes the answer. Nothing is trained. The client is the standard
-library only. A server address that is not this machine is refused unless `chat.allow_remote` is true, so data
-summaries cannot leave the box by accident. `ask` serves both the terminal (`dcs ask`) and the API (`chat_server`).
+library only. The server address comes from DCS_CHAT_BASE_URL (.env, never a committed file); one that is not this
+machine is refused unless `chat.allow_remote` is true, so data summaries cannot leave the box by accident. `ask` serves both the terminal (`dcs ask`) and the API (`chat_server`).
 """
 
 from __future__ import annotations
 
 import ipaddress
 import json
-import os
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
@@ -19,11 +18,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from dcs.chat_tools import ResearchData, call_tool, tool_schemas
-from dcs.config import ConfigError
+from dcs.config import ENV_CHAT_BASE_URL, ConfigError
 from dcs.config_rules import SOURCE_PROCESSED
 from dcs.featurize import BEHAVIOR_STATES
 
-API_KEY_VARIABLE = "DCS_CHAT_API_KEY"
 LOCAL_NAMES = ("localhost",)
 FINAL_NUDGE = "Answer the question now from the tool results above; do not call more tools."
 SYSTEM_PROMPT = f"""You are the research assistant of a zebrafish drug-exposure behavior study. Researchers ask you, in \
@@ -60,7 +58,12 @@ class Answer:
 
 
 def check_engine(chat: Mapping[str, Any]) -> None:
-    """A model name is set, and the server is this machine unless `allow_remote` says otherwise."""
+    """A server address and model name are set, and the server is this machine unless `allow_remote` says otherwise."""
+    if not chat["base_url"]:
+        raise ConfigError(
+            f"{ENV_CHAT_BASE_URL} is not set: put the chat server's address (e.g. Ollama's OpenAI endpoint on this "
+            "machine) in your .env file (see .env.example) or set it as an environment variable."
+        )
     if not chat["model"]:
         raise ConfigError(
             "chat.model is not set: put the model's name (as your chat server lists it, e.g. `ollama list`) in "
@@ -69,7 +72,7 @@ def check_engine(chat: Mapping[str, Any]) -> None:
     host = urlparse(chat["base_url"]).hostname or ""
     if not _is_local(host) and not chat["allow_remote"]:
         raise ConfigError(
-            f"chat.base_url {chat['base_url']} is not this machine, so questions and data summaries would leave "
+            f"{ENV_CHAT_BASE_URL} {chat['base_url']} is not this machine, so questions and data summaries would leave "
             "it. Set chat.allow_remote: true only if your data agreement allows it."
         )
 
@@ -80,9 +83,9 @@ def complete(chat: Mapping[str, Any], messages: list[dict[str, Any]], tools: lis
     if tools:
         body["tools"] = tools
     headers = {"Content-Type": "application/json"}
-    key = os.environ.get(API_KEY_VARIABLE)
+    key = chat.get("api_key")  # a config.Secret from DCS_CHAT_API_KEY (.env or environment), or None
     if key:
-        headers["Authorization"] = f"Bearer {key}"
+        headers["Authorization"] = f"Bearer {key.value}"
     url = chat["base_url"].rstrip("/") + "/chat/completions"
     request = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
     try:
@@ -94,7 +97,7 @@ def complete(chat: Mapping[str, Any], messages: list[dict[str, Any]], tools: lis
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise EngineError(
             f"Cannot reach the chat server at {url} ({getattr(error, 'reason', error)}). Start it (for Ollama: "
-            "`ollama serve`, then `ollama pull <model>`), or fix chat.base_url."
+            f"`ollama serve`, then `ollama pull <model>`), or fix {ENV_CHAT_BASE_URL}."
         ) from None
     try:
         return payload["choices"][0]["message"]

@@ -1383,7 +1383,7 @@ Input: each video's frames resampled to 1 s (about 1200 steps x 8 channels, unde
 `check-config`, `synth`, `featurize [--videos] [--profile]`, `audit`, `train [--stage --models --seed --repeats --device --no-ablations]`, `predict`, `ask`, `serve-chat`. Full table: [instructions.md](instructions.md), "Commands".
 
 ### II.7.3 Configuration
-`training:` (seed, folds, repeats, `min_class_size`, `min_state_fish`, `vehicle_compound`, `camera_epochs`, `use_ntt`/`use_depth`/`use_demographics`, `gold_source`, flags, and `mlp:`) and `chat:` (`base_url`, `model`, `temperature`, `max_tool_rounds`, `timeout_s`, `allow_remote`). Values read from the real data (vehicle name, camera epochs, duration range) go in the owner's override file, never in the defaults. Unknown keys and wrong types are a `ConfigError` (D-023).
+`training:` (seed, folds, repeats, `min_class_size`, `min_state_fish`, `vehicle_compound`, `camera_epochs`, `use_ntt`/`use_depth`/`use_demographics`, `gold_source`, flags, and `mlp:`) and `chat:` (`model`, `temperature`, `max_tool_rounds`, `timeout_s`, `allow_remote`); the chat server's address is machine-specific and comes only from `DCS_CHAT_BASE_URL` in `.env` or the environment (D-075). Values read from the real data (vehicle name, camera epochs, duration range) go in the owner's override file, never in the defaults. Unknown keys and wrong types are a `ConfigError` (D-023).
 
 ### II.7.4 Outputs and the model artifact
 ```
@@ -1401,11 +1401,11 @@ No new core dependency; the extra `train = ["torch>=2.4"]`. CI (Linux, Python 3.
 
 **What it is.** A local open-weights language model with tool calling reads a question, calls deterministic **query tools** for every number, and writes the answer in plain English. Nothing is trained (D-071, D-073).
 
-**Pieces.** `chat_tools.py`: 11 read-only tools (`list_compounds`, `find_features`, `compare_to_vehicle`, `top_differences`, `feature_by_compound`, `fish_profile`, `fish_timeline`, `model_results`, `class_scores`, `ablation_results`, `audit_facts`). `chat.py`: the engine (OpenAI chat-completions protocol over the standard library, so Ollama, llama.cpp, vLLM and most hosts work by changing `chat.base_url`) and the system prompt. `dcs ask` is the terminal client; `dcs serve-chat` is a loopback JSON API (`/api/health`, `/api/tools`, `/api/ask`, `/api/tool`) for a later web page.
+**Pieces.** `chat_tools.py`: 11 read-only tools (`list_compounds`, `find_features`, `compare_to_vehicle`, `top_differences`, `feature_by_compound`, `fish_profile`, `fish_timeline`, `model_results`, `class_scores`, `ablation_results`, `audit_facts`). `chat.py`: the engine (OpenAI chat-completions protocol over the standard library, so Ollama, llama.cpp, vLLM and most hosts work by changing `DCS_CHAT_BASE_URL`) and the system prompt. `dcs ask` is the terminal client; `dcs serve-chat` is a loopback JSON API (`/api/health`, `/api/tools`, `/api/ask`, `/api/tool`) for a later web page.
 
 **Rules the prompt enforces:** numbers only from tools; look up a measure's name before comparing; give n, effect size (Hedges' g) and p or q, and say how strong the evidence is; repeat the tools' caveats (UNREVIEWED data, different dates and cameras, pixel measures depend on the camera); scheme A is the honest score, date-only is the baseline.
 
-**Controls.** Compound-versus-vehicle uses same-date vehicle fish (fewer than 3: all vehicle fish, with a caveat). A `base_url` that is not this machine is refused unless `chat.allow_remote` is true (data summaries would leave the box); an API key goes only in `DCS_CHAT_API_KEY`. The API has no authentication and listens on loopback only, like the review app.
+**Controls.** Compound-versus-vehicle uses same-date vehicle fish (fewer than 3: all vehicle fish, with a caveat). A `DCS_CHAT_BASE_URL` that is not this machine is refused unless `chat.allow_remote` is true (data summaries would leave the box); an API key goes only in `DCS_CHAT_API_KEY` in `.env` or the environment (masked as `***` when settings are printed). The API has no authentication and listens on loopback only, like the review app, with the same guard: a non-loopback `Host` (DNS rebinding) and a foreign `Origin` on POST are refused. `/api/ask` accepts only `user`/`assistant` history turns and caps the question and history size (D-075).
 
 **State.** Tested against a stub server speaking the protocol; no language model is installed on the development laptop. The first real model run, and the choice of model, happen on the GB10.
 

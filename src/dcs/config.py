@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import copy
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 import yaml
 from dotenv import dotenv_values
 
-from dcs.config_rules import MODEL_NAMES, STAGES, first_violation  # noqa: F401  (choices re-exported for callers)
+from dcs.config_rules import MODEL_NAMES, STAGES, first_violation, is_http_url  # noqa: F401  (choices re-exported for callers)
 
 # Defaults live in the repository's config/ folder, next to the prepds thresholds (PRD §7.1).
 # Like prepds, this needs a source checkout or `pip install -e .`, not a wheel.
@@ -29,6 +29,10 @@ ENV_PROCESSED_DIR = "DCS_PROCESSED_DIR"
 ENV_OUTPUT_DIR = "DCS_OUTPUT_DIR"
 ENV_TABLE = "DCS_TABLE"
 ENV_CONFIG = "DCS_CONFIG"
+ENV_CHAT_BASE_URL = "DCS_CHAT_BASE_URL"  # the chat server's address: machine-specific, so never in a committed file
+ENV_CHAT_API_KEY = "DCS_CHAT_API_KEY"  # key for a hosted chat server: a secret, so only in .env or the environment
+# Chat settings read only from .env / the environment; the same name in a YAML file is refused.
+ENV_ONLY_SETTINGS = {"chat.base_url": ENV_CHAT_BASE_URL, "chat.api_key": ENV_CHAT_API_KEY}
 
 DEFAULT_ACCEPTED_DIR = Path("accepted")
 DEFAULT_OUTPUT_DIR = Path("outputs/dcs")
@@ -55,6 +59,16 @@ MISSING_PATH_HINTS = {
 
 class ConfigError(RuntimeError):
     """Raised when a required setting is missing or invalid (message explains the fix)."""
+
+
+@dataclass(frozen=True)
+class Secret:
+    """A key that prints as *** (check-config, reprs, tracebacks); `.value` is the real text."""
+
+    value: str = field(repr=False)
+
+    def __str__(self) -> str:
+        return "***"
 
 
 class ReadOnlyMapping(Mapping[str, Any]):
@@ -105,7 +119,7 @@ class Settings:
 
     @property
     def chat(self) -> ReadOnlyMapping:
-        """The `chat:` section (research chat, D-073)."""
+        """The `chat:` section (research chat, D-073); `base_url` and `api_key` come from .env (ENV_ONLY_SETTINGS)."""
         return self.params["chat"]
 
     def require(self, name: str) -> Path:
@@ -165,6 +179,12 @@ def load_settings(
 
     override_file = config_file if config_file is not None else lookup(ENV_CONFIG)
     params = _load_params(_expand(os.fspath(override_file), "config file") if override_file is not None else None)
+    base_url = lookup(ENV_CHAT_BASE_URL)
+    if base_url is not None and not is_http_url(base_url):
+        raise ConfigError(f"{ENV_CHAT_BASE_URL} must be an http:// or https:// address, got {base_url!r}.")
+    params["chat"]["base_url"] = base_url  # None = not set; `dcs ask` and `serve-chat` then say where to set it
+    api_key = lookup(ENV_CHAT_API_KEY)
+    params["chat"]["api_key"] = Secret(api_key) if api_key is not None else None
 
     return Settings(
         paths=paths,
@@ -217,6 +237,8 @@ def _check_types(defaults: Mapping[str, Any], override: Mapping[str, Any], sourc
     """Reject keys the defaults do not have and values of the wrong kind, naming the dotted key."""
     for key, value in override.items():
         name = f"{prefix}{key}"
+        if name in ENV_ONLY_SETTINGS:
+            raise ConfigError(f"{name} in {source} is not read from YAML: set {ENV_ONLY_SETTINGS[name]} in your .env instead.")
         if key not in defaults:
             valid = ", ".join(sorted(str(known) for known in defaults))
             raise ConfigError(f"Unknown setting {name!r} in {source}. Valid keys here: {valid}.")
