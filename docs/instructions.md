@@ -355,7 +355,7 @@ Rules, each with a note in `notes` when it applies:
 
 The result (`Folds`) holds `table` (one row per fish, scheme and repeat: `video_id`, `label`, `date`, `scheme`,
 `repeat`, `fold`; this is what `train` will save as `folds.csv`), `k` (folds per scheme), `date_confounded` and
-`notes`. The same `training.seed` always gives the same folds. To look at them:
+`notes`. The same `training.seed` always gives the same folds; `repeat_seed(seed, repeat)` gives each repeat's random state, which the models of that repeat use too. To look at them:
 
 ```python
 from dcs.folds import make_folds
@@ -452,6 +452,50 @@ model = make_model("logreg", seed=0).fit(X_train, y_train, dates_train)   # X fr
 model.classes_, model.predict_proba(X_test, dates_test)
 ```
 
+## Evaluation
+
+`evaluate(trainset, folds, models, training)` cross-validates every model on the **same folds** (`make_folds`), so
+models are compared on identical splits. `majority` and `date_only` are always added first, because the decision rule
+compares every model with them. For each scheme and repeat:
+
+1. **Per fold:** preprocessing is fitted on that fold's training fish (EC-9) and shared by all models of the fold; each
+   model is trained and gives probabilities for the test fish. Pinned fish (scheme A fold `-1`) train in every fold
+   and are never scored. A class missing from one training fold gets probability 0 there.
+2. **Within-date permutation** (scheme B only, PRD §6.6): the labels are shuffled among the fish of each date and
+   scheme B is run again (`B_permuted`, same folds, a new shuffle per repeat). A date holding one class cannot be
+   shuffled, which is why the audit gives the share of fish on dates with 2+ classes (D-016).
+3. **Metrics** (PRD §6.7) on the **pooled** out-of-fold predictions of the repeat (D-017): `balanced_accuracy`,
+   `macro_f1`, `log_loss`, `top3_accuracy`. Class averages run over the classes present among the scored fish. Plain
+   accuracy is never reported.
+
+The result (`Evaluation`) holds `predictions` (one row per model, scheme, repeat and scored fish: `fold`, `video_id`,
+`date`, `label`, `predicted`, and `p:<class>` per class; in `B_permuted` rows `label` is the shuffled label the model
+was trained and scored on), `metrics` (one row per repeat), `summary` (mean and `std` across repeats, the "spread"),
+`per_class` (precision, recall, F1, fish; pooled over repeats), `decision` and `vehicle`:
+
+| Output | Rule |
+|---|---|
+| `decision` | A model is **useful** when its scheme-A balanced accuracy beats `majority` and `date_only` by more than the spread (the larger of the two spreads compared, D-055) and beats its own `B_permuted` score. Otherwise **not useful**, with the reason. **undecided** when scheme A was skipped (every class on one date); the two references are marked `baseline` |
+| `vehicle` | Compound stage only: vehicle against any drug, from the compound model's scheme-A probabilities (drug score = 1 − P(vehicle)): AUROC and balanced accuracy, mean and spread across repeats. Empty when `training.vehicle_compound` is not among the kept classes |
+
+`log=print` prints one line per scheme and repeat with its time, so a long run shows progress. To run it by hand:
+
+```python
+from dcs.evaluate import evaluate
+from dcs.models import BASELINES
+ev = evaluate(result, folds, BASELINES, settings.training, log=print)   # result, folds from the sections above
+ev.summary["balanced_accuracy"]                                          # mean and spread per model and scheme
+ev.decision                                                              # useful / not useful, and why
+```
+
+How to read it: scheme A is the main score. **Date effect** = scheme B − scheme A. When `date_only` beats the
+behavior models in scheme A, the dates alone (experiment campaigns) tell the compounds apart better than the
+behavior does. When `B_permuted` is as high as `B`, the model learned the date, not the compound. On the real
+unreviewed set (compound stage, default settings, dry run with nothing written) every behavior model was **not useful**:
+`date_only` scored well above them in scheme A. That is a statement about the unreviewed data and the camera epochs
+(see Camera framing), not a final result. Runtime there: about 2 min per stage on a 10-core laptop, most of it the
+forest and boosting in scheme B and `B_permuted`.
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -496,6 +540,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_audit.py` | Each audit table and fact on small hand-built tables: filter steps, class status and scheme A, per-date and compound × date counts, missing values, manual share and flags per compound, §2.3 statistics, a compound with no Accepted fish, the D-016 share, the G1 stop rule (vehicle, one-date and unaccepted compounds never count; the unreviewed count), vehicle name from the settings, fps and tracker notes, framing setups (a shift, a zoom, two equally common setups, slow drift, one fish at the surface, a date without depth data), dose spelling variants counted once, a stage that cannot be built; `dcs audit` end to end on synthetic data and without a table |
 | `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features stop with a hint |
 | `test_dcs_models.py` | Every baseline has the same interface and probabilities that sum to 1; majority gives the class shares; date-only: same date, nearest date, tie to the earlier date, non-date text; logreg, forest and boosting find a planted signal and weight classes; same seed, same probabilities; `mlp` and unknown names are errors |
+| `test_dcs_evaluate.py` | Every model sees the same folds; majority and date-only always run; preprocessing is fitted without the test fold (EC-9, by spying on every fit); metrics equal scikit-learn's on the pooled predictions of a repeat, no plain accuracy (D-017); per-class scores pool the repeats; spread = standard deviation across repeats; the permutation stays inside each date; a planted signal is judged useful; **leakage canary** (label depends only on the date: scheme B perfect, scheme A below chance, permuted = real, not useful); pinned fish never scored in scheme A; no scheme A means undecided; vehicle vs drug; same seed, same metrics (EC-14) |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
 ## Keeping this section current

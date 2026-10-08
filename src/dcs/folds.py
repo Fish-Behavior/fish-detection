@@ -54,7 +54,7 @@ def make_folds(y: pd.Series, groups: pd.Series, ids: pd.Series, training: Mappin
 
     tables = []
     for repeat in range(training["repeats"]):
-        state = int(np.random.SeedSequence([training["seed"], repeat]).generate_state(1)[0])
+        state = repeat_seed(training["seed"], repeat)
         if k_a:
             fold = pd.Series(PINNED, index=y.index)
             splitter = StratifiedGroupKFold(k_a, shuffle=True, random_state=state)
@@ -67,6 +67,11 @@ def make_folds(y: pd.Series, groups: pd.Series, ids: pd.Series, training: Mappin
             fold.iloc[test] = number
         tables.append(_rows(SCHEME_B, repeat, fold, y, groups, ids))
     return Folds(pd.concat(tables, ignore_index=True), {SCHEME_A: k_a, SCHEME_B: k_b}, confounded, tuple(notes))
+
+
+def repeat_seed(seed: int, repeat: int) -> int:
+    """The random state of one repeat, shared by its folds and by the models trained on them (EC-14)."""
+    return int(np.random.SeedSequence([seed, repeat]).generate_state(1)[0])
 
 
 def _one_fold_notes(repeat: int, fold: pd.Series, y: pd.Series, groups: pd.Series) -> list[str]:
