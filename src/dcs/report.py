@@ -8,6 +8,7 @@ corrected for (camera framing, FR-9).
 
 from __future__ import annotations
 
+import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,7 +156,8 @@ def render_report(
 
 def confusion_file(stage: str) -> str:
     """`confusion_compound.png`, `confusion_dose_compound_a.png`: the stage name made safe for a file name."""
-    return f"confusion_{slug(stage)}.png"
+    plain = all(c.isalnum() or c in " _" for c in stage)
+    return f"confusion_{slug(stage)}.png" if plain else f"confusion_{slug(stage)}_{zlib.crc32(stage.encode()):08x}.png"
 
 
 def save_confusion(result: StageResult, path: Path) -> None:

@@ -307,7 +307,9 @@ def fish_timeline(data: ResearchData, video_id: str, bin_s: float = 60) -> dict[
         part = frames[frames["bin"] == number]
         known = part[part["state"] != schema.UNDETERMINED]
         shares = known["state"].value_counts(normalize=True)
-        detected = part[part["detected"].astype(bool)]
+        det = frames["detected"].astype(bool)
+        real = det & det.shift(fill_value=False)  # the first frame after a gap carries a 0.0 sentinel velocity
+        detected = part[real[part.index]]
         bins.append({"start_s": number * bin_s, "end_s": min((number + 1) * bin_s, duration), "known_s": len(known) * step,
                      "state_shares": {k: float(v) for k, v in shares.items()},
                      "mean_speed_px_s": _num(detected["velocity"].mean())})  # fmt: skip

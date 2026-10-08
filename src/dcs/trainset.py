@@ -158,6 +158,14 @@ def build_trainset(table: pd.DataFrame, described: Mapping[str, Any], training: 
 
 def stage_labels(table: pd.DataFrame, stage: str) -> pd.Series:
     """The cleaned label of every row: compound, or `<compound> @ <dose>` in the dose stage."""
+    blank = table["compound"].isna() | table["compound"].astype(str).str.strip().eq("")
+    if stage == "dose":
+        blank |= table["concentration_mM"].isna() | table["concentration_mM"].astype(str).str.strip().eq("")
+    if blank.any():
+        raise ConfigError(
+            f"{int(blank.sum())} fish have a blank compound or concentration_mM (e.g. {', '.join(table.loc[blank, 'video_id'].astype(str)[:3])}). "
+            "Fix the gold labels and run `python -m dcs featurize` again."
+        )
     compound = table["compound"].map(compound_label)
     return compound if stage == "compound" else compound + DOSE_SEPARATOR + table["concentration_mM"].map(dose_label)
 

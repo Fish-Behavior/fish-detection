@@ -43,11 +43,12 @@ def make_folds(y: pd.Series, groups: pd.Series, ids: pd.Series, training: Mappin
             "scheme-A score (date-confounded)"
         )
     n_dates = groups[held].nunique()
-    k_a = min(k, n_dates) if n_dates >= 2 else 0
+    support = int(y[held].value_counts().max()) if held.any() else 0  # sklearn refuses K above every class size
+    k_a = min(k, n_dates, support) if n_dates >= 2 else 0
     if not k_a:
         notes.append(f"scheme A skipped: {n_dates} date(s) hold fish of a class seen on two or more dates, 2 needed")
     elif k_a < k:
-        notes.append(f"scheme A: only {n_dates} dates can be held out, so K is {k_a}, not {k}")
+        notes.append(f"scheme A: only {n_dates} dates and {support} fish in the largest class can be held out, so K is {k_a}, not {k}")
     k_b = min(k, int(y.value_counts().max()))  # sklearn refuses K above every class size
     if k_b < k:
         notes.append(f"scheme B: the largest class has {k_b} fish, so K is {k_b}, not {k}")
