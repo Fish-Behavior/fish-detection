@@ -443,14 +443,37 @@ the preprocessed matrix; only `date_only` reads `dates`. The five (PRD §6.2, `B
 | `hist_gb` | Histogram gradient boosting (scikit-learn), classes balanced | Strong tabular default, no extra dependency |
 
 The settings are fixed (D-053); there is no tuning, because a few hundred fish cannot support a tuning loop on top of
-the date-held-out folds. The same seed gives identical probabilities. `mlp` is listed in `training.models` but arrives
-in U13; until then `train` skips it with a message. To try one:
+the date-held-out folds. The same seed gives identical probabilities. The MLP (next section) has the same interface.
+To try one:
 
 ```python
 from dcs.models import make_model
 model = make_model("logreg", seed=0).fit(X_train, y_train, dates_train)   # X from fitted.transform(...)
 model.classes_, model.predict_proba(X_test, dates_test)
 ```
+
+## The MLP (PyTorch)
+
+`make_model("mlp", seed, settings.training["mlp"], device)` builds the neural network of PRD §6.3 from `training.mlp`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `hidden_sizes` | `[128, 64]` | Two hidden layers, each Linear -> ReLU -> Dropout |
+| `dropout` | 0.3 | Share of units switched off in each training step |
+| `learning_rate`, `weight_decay` | 0.001, 0.01 | AdamW optimizer |
+| `batch_size` | 32 | Fish per optimizer step |
+| `max_epochs`, `patience` | 300, 20 | Stop after `patience` epochs without a better validation loss; keep the best epoch's weights |
+| `inner_val_fraction` | 0.2 | Share of each training fold held back to decide when to stop (stratified when every class has 2+ fish) |
+| `seeds` | 5 | Networks per fold, each with its own random start; their probabilities are averaged |
+
+The loss weights classes by their size, like the baselines' `class_weight="balanced"`. Inside cross-validation the
+MLP sees the same preprocessed matrix as every other model, so it gets no extra information. On the same CPU, the
+same seed gives the same probabilities (EC-14); on a GPU the last digits may differ, and the report says so.
+
+PyTorch is optional (`pip install -e ".[train]"`). Without it, `train` runs the baselines and prints
+`mlp: skipped, PyTorch is not installed` (EC-16). `dcs train --device` picks where the MLP trains: `auto` (default; the
+GPU when PyTorch sees one, else the CPU), `cpu`, or `cuda`. `cuda` without a GPU stops with a message (EC-15). Cost on
+the real unreviewed set: about 1.3 s per fold for 5 seeds on a laptop CPU, so about 2 min per stage.
 
 ## Evaluation
 
@@ -503,12 +526,14 @@ python -m dcs train                                   # both stages, every model
 python -m dcs train --stage compound                  # Stage 1 only (compound, dose or both)
 python -m dcs train --models logreg,random_forest     # subset; majority and date_only are always added
 python -m dcs train --seed 1 --repeats 10             # other seed / more repeats for this run only
+python -m dcs train --device cuda                     # MLP on the GPU (stops if PyTorch sees none)
 ```
 
 It reads only `DCS_TABLE` (the training table and its schema file, both from `featurize`) and, per stage, builds the
 training set, the shared folds and the evaluation above. It prints one line per scheme and repeat, so a long run shows
 progress (`tee train.log` keeps it). The command-line values are checked by the same rules as the settings file; they
-apply to this run only and are saved in `config_used.yaml`. `mlp` is skipped with a message until U13.
+apply to this run only and are saved in `config_used.yaml`. `--device auto|cpu|cuda` (default `auto`) is where the
+MLP trains; the device used is in `run_info.json`.
 
 When `stage` is `both` and one stage cannot be built (for example the dose stage with too few fish per dose), the
 other still runs and the report says why the first is missing. When no stage can be built, nothing is written and
@@ -548,7 +573,10 @@ a clone re-runs with the same profile as the PC (`dcs audit` prints it; it must 
 git clone <repository url> fish-detection && cd fish-detection
 git checkout <branch to run>
 python3 -m venv .venv && source .venv/bin/activate
-pip install -U pip && pip install -e ".[dev]"      # torch is not needed before the MLP (U13)
+pip install -U pip
+pip install torch --index-url https://download.pytorch.org/whl/cu130   # CUDA build for aarch64 first (PRD Appendix B step 5)
+pip install -e ".[dev,train]"                      # torch already satisfied, so it is not replaced
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"   # must print True
 pytest tests/dcs -q                                # synthetic data only; must pass on aarch64 (EC-19)
 
 # 2. once: paths on the box (.env is git-ignored)
@@ -593,6 +621,7 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `No schema file ... beside the table` / `schema file ... is damaged` | Copy both featurize files together, or run `python -m dcs featurize` again |
 | `marks forbidden column(s)` / `in the schema but not in the table` | The two files come from different runs or were edited: run `featurize` again |
 | `No feature left` | Every usable feature is constant or of a rare state: switch on a group (`use_ntt`, `use_depth`) or lower `min_state_fish` |
+| `--device cuda, but PyTorch sees no CUDA GPU` (train) | Install the CUDA build of torch (GB10 runbook, step 1), or run with `--device auto` or `cpu` |
 | `--models must be` / `--stage must be` / `--seed must be` / `--repeats must be` (train) | Fix the command-line value; the message lists what is allowed |
 | `<stage> stage cannot be built: ...` (train) | No stage could be built; the rest of the message is one of the training-set errors above |
 | `are categories, which are not encoded yet` | `use_demographics: true` is not supported before U14: set it back to `false` |
@@ -621,6 +650,8 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features stop with a hint |
 | `test_dcs_models.py` | Every baseline has the same interface and probabilities that sum to 1; majority gives the class shares; date-only: same date, nearest date, tie to the earlier date, non-date text; logreg, forest and boosting find a planted signal and weight classes; same seed, same probabilities; `mlp` and unknown names are errors |
 | `test_dcs_evaluate.py` | Every model sees the same folds; majority and date-only always run; preprocessing is fitted without the test fold (EC-9, by spying on every fit); metrics equal scikit-learn's on the pooled predictions of a repeat, no plain accuracy (D-017); per-class scores pool the repeats; spread = standard deviation across repeats; the permutation stays inside each date; a planted signal is judged useful; **leakage canary** (label depends only on the date: scheme B perfect, scheme A below chance, permuted = real, not useful); pinned fish never scored in scheme A; no scheme A means undecided; vehicle vs drug; same seed, same metrics (EC-14) |
+| `test_dcs_mlp.py` | (runs only where torch is installed) Interface and a planted signal; built from the settings; layer sizes, ReLU and dropout from the config; one network per seed; early stopping on noise; balanced loss weights; same seed same CPU probabilities, other seed different (EC-14); a one-fish class still trains; `--device` rules (EC-15) |
+| `test_dcs_no_torch.py` | With torch hidden: `torch_available()` is false and `dcs train --models logreg,mlp --device cuda` runs the baselines and skips the MLP with a message (EC-16) |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |

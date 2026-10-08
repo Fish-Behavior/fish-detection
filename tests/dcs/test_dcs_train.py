@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import re
 from pathlib import Path
@@ -13,12 +12,8 @@ import yaml
 
 from dcs.cli import main
 from dcs.config import load_settings
-from dcs.featurize import featurize, write_outputs
 from dcs.folds import make_folds
-from dcs.gold import read_accepted
-from dcs.synthetic import make_gold_dataset
 from dcs.trainset import build_trainset, load_table
-from tests.dcs.synth_helpers import SMALL
 
 RUN_FILES = {
     "run_info.json", "config_used.yaml", "audit.md", "folds.csv", "metrics.csv", "predictions.csv", "report.md",
@@ -26,20 +21,11 @@ RUN_FILES = {
 }  # fmt: skip
 
 
-@pytest.fixture(scope="module")
-def table_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """24 fish: two compounds and vehicle, 8 each on 4 dates; every dose class has 4 fish, so the dose stage
-    cannot be built with min_class_size 6."""
-    synth = make_gold_dataset(tmp_path_factory.mktemp("train"), dataclasses.replace(SMALL, vehicle_per_date=2))
-    result = featurize(read_accepted(synth.accepted_dir), synth.workbook_path, load_settings().training)
-    return write_outputs(result, tmp_path_factory.mktemp("table") / "training_table.parquet")[0]
-
-
 @pytest.fixture
-def setup(table_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+def setup(tiny_table: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     config = tmp_path / "fast.yaml"
     config.write_text(yaml.safe_dump({"training": {"folds": 3, "repeats": 2}}), encoding="utf-8")
-    monkeypatch.setenv("DCS_TABLE", str(table_path))
+    monkeypatch.setenv("DCS_TABLE", str(tiny_table))
     monkeypatch.setenv("DCS_OUTPUT_DIR", str(tmp_path / "out"))
     return {"config": config, "runs": tmp_path / "out" / "training"}
 
@@ -79,10 +65,10 @@ def test_command_line_overrides_land_in_config_used(setup: dict[str, Path]) -> N
     assert (used["stage"], used["models"], used["seed"], used["repeats"], used["folds"]) == ("compound", ["logreg"], 3, 1, 3)
 
 
-def test_folds_csv_is_the_shared_split(setup: dict[str, Path], table_path: Path) -> None:
+def test_folds_csv_is_the_shared_split(setup: dict[str, Path], tiny_table: Path) -> None:
     assert train(setup, "--stage", "compound", "--models", "logreg") == 0
     saved = pd.read_csv(only_run(setup) / "folds.csv", dtype={"date": str})
-    table, described = load_table(table_path)
+    table, described = load_table(tiny_table)
     training = {**load_settings().training, "folds": 3, "repeats": 2}
     ts = build_trainset(table, described, training, "compound")
     expected = make_folds(ts.y, ts.groups, ts.ids, training).table.assign(stage="compound")
@@ -99,11 +85,15 @@ def test_metrics_and_predictions_carry_stage_and_scheme(setup: dict[str, Path]) 
     assert any(column.startswith("p:") for column in predictions.columns)
 
 
-def test_mlp_is_skipped_with_a_message_until_it_exists(setup: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
-    assert train(setup, "--models", "logreg,mlp") == 0
-    assert "mlp" in capsys.readouterr().out
+def test_mlp_runs_beside_the_baselines_when_torch_is_installed(setup: dict[str, Path]) -> None:
+    pytest.importorskip("torch")
+    small = {"training": {"folds": 3, "repeats": 1, "mlp": {"hidden_sizes": [8], "max_epochs": 20, "seeds": 1}}}
+    setup["config"].write_text(yaml.safe_dump(small), encoding="utf-8")
+    assert train(setup, "--models", "logreg,mlp", "--device", "cpu") == 0
     info = json.loads((only_run(setup) / "run_info.json").read_text(encoding="utf-8"))
-    assert info["skipped_models"] == ["mlp"] and "mlp" not in info["models"]
+    assert info["models"] == ["majority", "date_only", "logreg", "mlp"] and info["skipped_models"] == []
+    assert info["device"] == "cpu" and info["versions"]["torch"]
+    assert "mlp" in set(pd.read_csv(only_run(setup) / "metrics.csv")["model"])
 
 
 def test_same_seed_gives_identical_metrics(setup: dict[str, Path]) -> None:

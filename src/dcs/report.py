@@ -110,7 +110,8 @@ def render_report(info: Mapping[str, Any], results: Mapping[str, StageResult], a
         f"- Command: `{info['command']}`",
         f"- Git commit: {info['git_commit']}" + (" (with uncommitted changes)" if info["git_dirty"] else ""),
         f"- Stages: {', '.join(results)}",
-        f"- Models: {', '.join(info['models'])}" + (f"; skipped: {skipped} (not built yet)" if skipped else ""),
+        f"- Models: {', '.join(info['models'])}" + (f"; skipped: {skipped} (PyTorch not installed)" if skipped else "")
+        + (f"; MLP on {info['device']}" if "mlp" in info["models"] else ""),
         f"- Seed {info['seed']}, {info['folds']} folds, {info['repeats']} repeats. Scores come from the pooled "
         "out-of-fold predictions of each repeat; `±` is the standard deviation across repeats, the spread (D-017)",
         "- The data audit of the same table is `audit.md` in this folder",
@@ -122,6 +123,8 @@ def render_report(info: Mapping[str, Any], results: Mapping[str, StageResult], a
             "coverage follow the camera setup, so a model can score by recognizing the camera instead of the compound"
         )
     caveats.append("Features are not vehicle-normalized yet (FR-9 comes with the ablations, U14)")
+    if info.get("device") == "cuda":
+        caveats.append("The MLP ran on a GPU: repeating the run may change its scores in the last digits (NFR-1)")
     lines += ["", "## Caveats", "", *(f"- {text}" for text in [*caveats, *notes])]
     lines += ["", "## How to read this", "", *(f"- {text}" for text in READING)]
     for stage, result in results.items():

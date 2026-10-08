@@ -56,8 +56,10 @@ def evaluate(
     models: Sequence[str],
     training: Mapping[str, Any],
     log: Callable[[str], None] = lambda message: None,
+    device: str = "cpu",
 ) -> Evaluation:
-    """Cross-validate `models` (majority and date-only are always added first) on `folds`."""
+    """Cross-validate `models` (majority and date-only are always added first) on `folds`; `device` is the
+    resolved device for the MLP."""
     names = list(dict.fromkeys([*REFERENCE, *models]))
     classes = tuple(sorted(ts.classes))
     dates = ts.groups.to_numpy(dtype=object)
@@ -71,7 +73,7 @@ def evaluate(
             runs.append((PERMUTED, permute_within_date(ts.y, ts.groups, rng).to_numpy(dtype=object)))
         for label_scheme, labels in runs:
             seed = repeat_seed(training["seed"], repeat)
-            frames.append(_cross_validate(ts, fold, labels, dates, names, classes, seed, label_scheme, repeat))
+            frames.append(_cross_validate(ts, fold, labels, dates, names, classes, seed, label_scheme, repeat, training, device))
         log(f"{ts.stage}: scheme {scheme} repeat {repeat + 1}/{training['repeats']} ({time.monotonic() - started:.1f} s)")
 
     predictions = pd.concat(frames, ignore_index=True)
@@ -109,6 +111,8 @@ def _cross_validate(
     seed: int,
     scheme: str,
     repeat: int,
+    training: Mapping[str, Any],
+    device: str,
 ) -> pd.DataFrame:
     """Out-of-fold probabilities of every model for one scheme and repeat; scored fish only."""
     column = {label: i for i, label in enumerate(classes)}
@@ -118,7 +122,7 @@ def _cross_validate(
         fitted = fit_preprocess(ts.X[train], ts.kinds)
         X_train, X_test = fitted.transform(ts.X[train]), fitted.transform(ts.X[test])
         for name in names:
-            model = make_model(name, seed).fit(X_train, labels[train], dates[train])
+            model = make_model(name, seed, training["mlp"], device).fit(X_train, labels[train], dates[train])
             # a class missing from this training fold gets probability 0
             proba[name][np.ix_(test, [column[c] for c in model.classes_])] = model.predict_proba(X_test, dates[test])
     scored = fold >= 0

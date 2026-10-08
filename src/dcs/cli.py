@@ -36,6 +36,7 @@ PRODUCED_INPUTS = {
     "table": "not found yet (written by dcs featurize)",
 }
 LABEL_WIDTH = 19
+DEVICES = ("auto", "cpu", "cuda")  # PRD §7.2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,6 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--models", help="comma-separated model names, e.g. logreg,random_forest (default: training.models)")
     train.add_argument("--seed", type=int, help="seed for folds, models and permutation (default: training.seed)")
     train.add_argument("--repeats", type=int, help="cross-validation repeats (default: training.repeats)")
+    train.add_argument(
+        "--device", choices=DEVICES, default="auto", help="where the MLP trains: auto (GPU if PyTorch sees one), cpu, cuda"
+    )
     train.set_defaults(handler=run_train)
     return parser
 
@@ -148,7 +152,7 @@ def run_audit(settings: Settings, args: argparse.Namespace) -> int:
 def run_train(settings: Settings, args: argparse.Namespace) -> int:
     """Evaluate every model on the training table and write one run folder; print where the report is."""
     training = _with_overrides(settings.training, args)
-    run = run_training(settings, training, command=shlex.join(["python", "-m", "dcs", *args.argv]))
+    run = run_training(settings, training, command=shlex.join(["python", "-m", "dcs", *args.argv]), device=args.device)
     print(f"Run folder: {run}")
     print(f"  report: {run / 'report.md'}")
     return 0

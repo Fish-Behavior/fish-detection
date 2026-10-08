@@ -89,8 +89,6 @@ def test_same_seed_gives_identical_probabilities(name: str) -> None:
     np.testing.assert_array_equal(runs[0], runs[1])
 
 
-def test_unknown_or_unbuilt_model_is_an_error() -> None:
-    with pytest.raises(ValueError, match="U13"):
-        make_model("mlp", seed=0)
+def test_unknown_model_is_an_error() -> None:
     with pytest.raises(ValueError, match="bogus"):
         make_model("bogus", seed=0)

@@ -176,6 +176,7 @@ def test_annotate_without_prepared_frames_explains_what_to_run(env, capsys) -> N
 @pytest.fixture(scope="module")
 def tiny_model_run(tmp_path_factory) -> Path:
     pytest.importorskip("torch")
+    pytest.importorskip("torchvision")  # the `ml` extra; torch alone comes with dcs's `train` extra
     from PIL import Image
 
     from prepds.annotation.examples import Example

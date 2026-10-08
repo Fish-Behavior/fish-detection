@@ -2,11 +2,13 @@
 
 Every model has `fit(X, y, dates)`, `predict_proba(X, dates)` and `classes_` (sorted labels, the column order of
 the probabilities). `X` is the preprocessed matrix of one fold; only the date-only baseline reads `dates`. The MLP
-(U13) joins through the same interface. Torch is never imported here.
+(`dcs.mlp`, U13) has the same interface; torch is imported only when it is built, never here.
 """
 
 from __future__ import annotations
 
+import importlib.util
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -59,8 +61,23 @@ class DateOnly:
         return np.vstack(rows).astype(float)
 
 
-def make_model(name: str, seed: int) -> SklearnModel | DateOnly:
-    """A fresh, unfitted model. Settings are the PRD's (L2 logreg, balanced classes) plus D-053's sizes."""
+def torch_available() -> bool:
+    """True when torch can be imported, found without importing it."""
+    try:
+        return importlib.util.find_spec("torch") is not None
+    except (ImportError, ValueError):  # a hidden or broken torch entry in sys.modules
+        return False
+
+
+def make_model(name: str, seed: int, mlp: Mapping[str, Any] | None = None, device: str = "cpu") -> Any:
+    """A fresh, unfitted model. Baseline settings are the PRD's (L2 logreg, balanced classes) plus D-053's sizes;
+    the MLP needs the `training.mlp` settings and a resolved device (D-059)."""
+    if name == "mlp":
+        if mlp is None:
+            raise ValueError("The MLP needs the training.mlp settings")
+        from dcs.mlp import MLP  # torch is imported only here
+
+        return MLP(mlp, seed, device)
     if name == "date_only":
         return DateOnly()
     estimators = {
@@ -71,10 +88,8 @@ def make_model(name: str, seed: int) -> SklearnModel | DateOnly:
         ),
         "hist_gb": lambda: HistGradientBoostingClassifier(class_weight="balanced", random_state=seed),
     }
-    if name == "mlp":
-        raise ValueError("The MLP is not built yet (U13)")
     if name not in estimators:
-        raise ValueError(f"Unknown model {name!r}; expected one of {', '.join(BASELINES)}")
+        raise ValueError(f"Unknown model {name!r}; expected one of {', '.join(BASELINES)} or mlp")
     return SklearnModel(estimators[name]())
 
 

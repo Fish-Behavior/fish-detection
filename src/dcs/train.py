@@ -28,7 +28,7 @@ from dcs.audit import build_audit, render
 from dcs.config import ConfigError, Settings
 from dcs.evaluate import REFERENCE, evaluate
 from dcs.folds import make_folds
-from dcs.models import BASELINES
+from dcs.models import BASELINES, torch_available
 from dcs.report import StageResult, render_report, save_confusion
 from dcs.trainset import STAGES, build_trainset, load_table
 
@@ -42,16 +42,30 @@ PROGRESS = partial(print, flush=True)
 
 
 def run_training(
-    settings: Settings, training: Mapping[str, Any], command: str, log: Callable[[str], None] = PROGRESS
+    settings: Settings,
+    training: Mapping[str, Any],
+    command: str,
+    device: str = "auto",
+    log: Callable[[str], None] = PROGRESS,
 ) -> Path:
-    """Evaluate every stage and model in `training` on the table in the settings; return the new run folder."""
+    """Evaluate every stage and model in `training` on the table in the settings; return the new run folder.
+    `device` (auto, cpu, cuda) is for the MLP only."""
     started, clock = datetime.now(timezone.utc), time.monotonic()
     table_path = settings.require("table")
     table, described = load_table(table_path)
-    models = list(dict.fromkeys([*REFERENCE, *(m for m in training["models"] if m in BASELINES)]))
-    skipped = [m for m in training["models"] if m not in BASELINES]
-    for name in skipped:
-        log(f"{name}: skipped, not built yet (the MLP arrives in U13)")
+    runnable = set(BASELINES) | ({"mlp"} if torch_available() else set())
+    models = list(dict.fromkeys([*REFERENCE, *(m for m in training["models"] if m in runnable)]))
+    skipped = [m for m in training["models"] if m not in runnable]
+    for name in skipped:  # EC-16: only the MLP can be missing
+        log(f"{name}: skipped, PyTorch is not installed (pip install -e \".[train]\"; on the GB10 see the runbook)")
+    cuda = None
+    if "mlp" in models:
+        from dcs.mlp import cuda_version, resolve_device  # torch only when the MLP runs
+
+        device, cuda = resolve_device(device), cuda_version()
+        log(f"mlp: device {device}")
+    else:
+        device = "cpu"
 
     results: dict[str, StageResult] = {}
     notes = []
@@ -64,7 +78,7 @@ def run_training(
             continue
         folds = make_folds(ts.y, ts.groups, ts.ids, training)
         log(f"{stage}: {len(ts.y)} fish, {len(ts.classes)} classes, {len(ts.features)} features, models {', '.join(models)}")
-        results[stage] = StageResult(ts, folds, evaluate(ts, folds, models, training, log))
+        results[stage] = StageResult(ts, folds, evaluate(ts, folds, models, training, log, device))
     if not results:
         raise ConfigError(" ".join(notes))
 
@@ -81,9 +95,10 @@ def run_training(
         "stages": list(results),
         "models": models,
         "skipped_models": skipped,
+        "device": device,
         "gold_source": described["gold_source"],
         "table": str(table_path),
-        "versions": {"python": platform.python_version(), **{name: _version(name) for name in PACKAGES}, "cuda": None},
+        "versions": {"python": platform.python_version(), **{name: _version(name) for name in PACKAGES}, "cuda": cuda},
         "hardware": {"system": platform.system(), "machine": platform.machine(), "cpus": os.cpu_count()},
         "started_utc": started.isoformat(timespec="seconds"),
         "seconds": round(time.monotonic() - clock, 1),
