@@ -604,6 +604,7 @@ Each run gets its own folder `<DCS_OUTPUT_DIR>/training/<run_id>/` (`run_id` = U
 |---|---|
 | `report.md` | **Read this first.** Source (Accepted, or UNREVIEWED = temporarily accepted), caveats, how to read the scores, then per stage: classes kept and dropped, folds, the score table (every model on one row with `majority`, `date_only`, `B permuted` and the date effect B − A beside it), the decision and its reason, vehicle against drug, per-class scores and the confusion matrix of the best model |
 | `metrics.csv` | One row per stage, model, scheme (`A`, `B`, `B_permuted`) and repeat: `fish`, `balanced_accuracy`, `macro_f1`, `log_loss`, `top3_accuracy` |
+| `decisions.csv` | Per stage and model: the decision rule's verdict and its reason (what the chat and a frontend read) |
 | `predictions.csv` | Out-of-fold predictions: stage, model, scheme, repeat, fold, `video_id`, date, label, predicted, `p:<class>` per class |
 | `folds.csv` | The folds every model used (stage, `video_id`, label, date, scheme, repeat, fold; `-1` = pinned) |
 | `confusion_<stage>.png` | Best model (highest scheme-A balanced accuracy), share of each true class predicted as each class, all repeats |
@@ -666,6 +667,39 @@ accepted index (D-018). Labels come from each manifest; the date stays empty; re
 left out; every fish not Accepted is marked unreviewed (`reviewed = false`). With `DCS_DB_PATH` set, NTT values come
 from the workbook as usual. Its table goes to `<DCS_OUTPUT_DIR>/videos_table.parquet` (or `--out`) and never replaces
 the training table. Such a table is for `predict` only; `train` needs dates.
+
+## Research query tools (what the chat looks things up with)
+
+`dcs.chat_tools` holds the functions the research chat calls; every number in a chat answer comes from one of them.
+They read the training table and its schema, the per-video folders (frames and segments, from the gold source in the
+settings) and a run folder (`ResearchData.from_settings(settings)` takes the latest one). They change nothing.
+
+| Tool | Answers | Built from |
+|---|---|---|
+| `list_compounds` | Which compounds, how many fish, Accepted fish, dates and doses each; which is vehicle | Table |
+| `find_features` | What a measure is called and what it means ("freezing" -> `state_freezing_drift_share`, ...) | Schema + glossary |
+| `compare_to_vehicle` | One measure, compound (or one dose) vs vehicle: n, mean, sd, median, quartiles, Hedges' g, Mann-Whitney p | Table |
+| `top_differences` | Every measure ranked by effect size for a compound, with p and Benjamini-Hochberg q | Table |
+| `feature_by_compound` | One measure across all compounds, each against vehicle | Table |
+| `fish_profile` | One fish: labels, date, flags, every measure with its percentile in its compound and in vehicle, out-of-fold predictions | Table + run |
+| `fish_timeline` | One fish over time: state shares and mean speed per bin, the bouts, first time each state appeared | `frames.parquet`, `segments.csv` |
+| `model_results` | Scores per model (scheme A, B, permuted, date effect), verdict and reason, saved model | `metrics.csv`, `decisions.csv`, `run_info.json` |
+| `class_scores` | Per-class precision, recall, F1 and the most common confusions | `predictions.csv` |
+| `ablation_results` | Each ablation next to the main run | `metrics.csv` |
+| `audit_facts` | The audit's facts and notes | Table (same as `dcs audit`) |
+
+**The control is vehicle fish from the same dates** (D-071): compounds were recorded on different days and cameras,
+so a plain compound-vs-all-vehicle difference can be a date or camera difference. With fewer than 3 vehicle fish on
+those dates the tool uses all vehicle fish and says so in `caveats`. Every comparison also carries the UNREVIEWED
+caveat (temporarily accepted data) and, for pixel measures, the camera caveat. A bad argument (unknown compound,
+feature or fish) returns `{"error": ...}` listing the valid choices instead of stopping. To call one by hand:
+
+```python
+from dcs.chat_tools import ResearchData, call_tool
+data = ResearchData.from_settings(settings)                 # settings from load_settings()
+call_tool(data, "top_differences", {"compound": "COMPOUND_A", "n": 5})
+call_tool(data, "fish_timeline", {"video_id": "F_0042", "bin_s": 60})
+```
 
 ## Training on the GB10 (temporarily accepted data)
 
@@ -772,6 +806,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_artifact.py` | `model/` holds the files of PRD §7.4 plus the reference predictions, classes in probability order, model named in the report and `run_info.json`; reload in a **fresh process** reproduces the reference (EC-18) for logistic regression and (with torch) the MLP; a version mismatch is a warning; a missing feature column is an error naming it; no model folder is an error |
 | `test_dcs_predict.py` | `dcs predict` on the training table reproduces `reference_predictions.csv` and says so (AC-9); default output file and CSV input; missing columns stop with their names; version warnings printed; `featurize --videos` needs no index, marks unreviewed fish, leaves the date empty and the training table untouched; with the workbook the NTT values are kept; folders -> `featurize --videos` -> `predict` gives the same predictions as the reference (D-018) |
 | `test_dcs_privacy.py` | `git ls-files` holds no `.parquet`, `.csv`, `.xlsx`, `.pt`, `.joblib`, pickle, video or `.env` file outside the two named synthetic fixtures (AC-8); the outputs of `dcs` and `prepds` and the restricted inputs are git-ignored; the pattern itself catches what it should. Skipped outside a git checkout |
+| `test_dcs_chat_tools.py` | Tool schemas valid and unique; compounds and vehicle; feature search; `compare_to_vehicle` equals hand-computed n, mean, Hedges' g and Mann-Whitney p with the same-date control; fallback to all vehicle fish with a caveat; bad arguments return errors naming the choices; `top_differences` ordered with q >= p; fish profile percentiles and out-of-fold predictions; timeline bins cover the recording and shares sum to 1; model results, class scores, ablations and audit facts read from a real `dcs train` run; no run -> a hint; the latest run found from the settings |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |

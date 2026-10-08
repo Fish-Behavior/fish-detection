@@ -3,7 +3,7 @@
 For each stage: training set -> shared folds -> evaluation of every model; for the compound stage also the
 ablations (NTT, demographics, depth, FR-9 pair; U14) on the same folds. Then the run folder
 `<DCS_OUTPUT_DIR>/training/<run_id>/` gets run_info.json, config_used.yaml, audit.md, folds.csv, metrics.csv,
-predictions.csv, report.md and confusion_<stage>.png. Nothing is written when no stage can be built. The final
+predictions.csv, decisions.csv, report.md and confusion_<stage>.png. Nothing is written when no stage can be built. The final
 model (`model/`) is saved from U16 on.
 """
 
@@ -133,6 +133,7 @@ def run_training(
     for name, frames in (
         ("folds.csv", {stage: r.folds.table for stage, r in results.items()}),
         ("predictions.csv", {stage: r.evaluation.predictions for stage, r in results.items()}),
+        ("decisions.csv", {stage: r.evaluation.decision for stage, r in results.items()}),  # verdict + reason, machine-readable
     ):
         pd.concat([frame.assign(stage=stage) for stage, frame in frames.items()]).pipe(_stage_first).to_csv(run / name, index=False)
     metrics = [r.evaluation.metrics.assign(stage=stage, ablation="main") for stage, r in results.items()]
