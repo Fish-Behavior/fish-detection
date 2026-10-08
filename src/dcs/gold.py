@@ -66,8 +66,11 @@ __all__ = [
     "read_accepted",
     "read_gold",
     "read_processed",
+    "read_videos",
+    "SOURCE_VIDEOS",
 ]
 
+SOURCE_VIDEOS = "videos"  # per-video folders without index or catalog, for predict (D-018); never trained on
 TRACKER_CLASSICAL = "classical"
 TRACKER_MODEL = "model"
 DROP_STATUS = "review_status"  # REJECTED or NOT_PROCESSED in the unreviewed output
@@ -151,7 +154,7 @@ class GoldSet:
 
     @property
     def allows_undetermined(self) -> bool:
-        return self.source == SOURCE_PROCESSED
+        return self.source != SOURCE_ACCEPTED  # only Accepted videos are free of Undetermined (EC-22)
 
     def folder_of(self, video_id: str) -> Path:
         return self.folder / video_id
@@ -273,6 +276,40 @@ def read_processed(output_dir: Path, options: ReadOptions | None = None) -> Gold
     return _assemble(SOURCE_PROCESSED, processed, rows, dropped, seen, options, output_dir)
 
 
+def read_videos(folder: Path, options: ReadOptions | None = None) -> GoldSet:
+    """Per-video folders (`<folder>/<video_id>/` with manifest, frames, segments) without an index or catalog
+    (D-018): for scoring new fish with `predict`. Labels come from the manifest when it has them; date and the
+    workbook fields stay empty. Rejected and unprocessed videos are dropped; the rest count as unreviewed unless
+    Accepted."""
+    options = options or ReadOptions()
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise ConfigError(f"--videos {folder} is not a folder.")
+    rows: list[dict[str, Any]] = []
+    dropped: Dropped = []
+    seen: Counter[str] = Counter()
+    for video in sorted(path for path in folder.iterdir() if path.is_dir()):
+        manifest = read_manifest(video)
+        if isinstance(manifest, FileProblem):
+            dropped.append((video.name, manifest.reason, manifest.detail))
+            continue
+        check_identity(manifest, video.name)
+        if manifest["review_status"] not in KEPT_STATUSES:
+            dropped.append((video.name, DROP_STATUS, f"review status {manifest['review_status']}"))
+            continue
+        check_manifest_keys(manifest, video.name)
+        if not _keep_profile(manifest["calibration_profile_version"], video.name, options, seen, dropped):
+            continue
+        files = inspect_data(video, allow_undetermined=True)
+        if isinstance(files, FileProblem):
+            dropped.append((video.name, files.reason, files.detail))
+            continue
+        row = {name: manifest.get(name) for name in INDEX_FIELDS if name not in schema.WORKBOOK_INDEX_FIELDS}
+        row.update(video_id=video.name, **_review_fields(manifest, video.name), undetermined_share=files.undetermined_share)
+        rows.append(row)
+    return _assemble(SOURCE_VIDEOS, folder, rows, dropped, seen, options, None, need_dates=False)
+
+
 def load_video(gold: GoldSet, video_id: str) -> Video:
     """Read one kept fish's frames and segments; both are checked again, since files may change after the scan."""
     if video_id not in gold.video_ids:
@@ -303,6 +340,7 @@ def _assemble(
     seen: Counter[str],
     options: ReadOptions,
     evidence_dir: Path | None,
+    need_dates: bool = True,
 ) -> GoldSet:
     """Set-level rules in order: one profile (EC-21), something left, dates (EC-27), tracker (EC-29), fps (EC-26)."""
     videos = pd.DataFrame(rows, columns=list(VIDEO_COLUMNS))
@@ -310,7 +348,8 @@ def _assemble(
     if videos.empty:
         reasons = dict(Counter(reason for _, reason, _ in dropped))
         raise GoldDataError(f"No usable fish in {folder}; dropped by reason: {reasons}")
-    check_dates(videos, NO_DATE_HINTS[source])
+    if need_dates:
+        check_dates(videos, NO_DATE_HINTS[source])
     is_model = options.marker in profile
     evidence = None if evidence_dir is None else Path(evidence_dir)
     checked = check_tracker_evidence(videos["video_id"], profile, is_model, evidence)

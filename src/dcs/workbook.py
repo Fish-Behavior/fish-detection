@@ -101,17 +101,18 @@ def _trial_rows(path: Path) -> pd.DataFrame:
 
 
 def _check_against(rows: pd.DataFrame, videos: pd.DataFrame) -> None:
-    """A gold fish's workbook row must name its compound and date (EC-28)."""
+    """A gold fish's workbook row must name its compound and date (EC-28); a value the gold set does not know
+    (a fish read from its folder alone, D-018) is not compared."""
     for record in videos.to_dict("records"):
         video_id = str(record["video_id"])
         if video_id not in rows.index:
             continue
         row = rows.loc[video_id]
-        if compound_label(row["compound"]) != compound_label(record["compound"]):  # same rule as the training set
+        if not pd.isna(record["compound"]) and compound_label(row["compound"]) != compound_label(record["compound"]):  # same rule as the training set
             raise GoldDataError(
                 f"{video_id}: workbook compound {row['compound']!r} disagrees with the gold set's {record['compound']!r} (EC-28)"
             )
-        if row["date"] != _as_date(record["date"]):
+        if not pd.isna(record["date"]) and row["date"] != _as_date(record["date"]):
             raise GoldDataError(f"{video_id}: workbook date {row['date']} disagrees with the gold set's {record['date']} (EC-28)")
 
 

@@ -643,6 +643,30 @@ model.predict(table)                                     # video_id, predicted, 
 A missing feature column stops with the names of the missing columns; extra columns are ignored. A different
 scikit-learn or torch version gives a warning, not an error: the predictions may differ in the last digits.
 
+## Predicting new fish (`dcs predict`)
+
+```bash
+python -m dcs predict --model outputs/dcs/training/<run_id> --input outputs/dcs/training_table.parquet
+python -m dcs featurize --videos <folder of video folders> [--out new_fish.parquet]   # fish without index/catalog
+python -m dcs predict --model outputs/dcs/training/<run_id> --input outputs/dcs/videos_table.parquet --out scores.csv
+```
+
+`predict` loads `<run>/model/`, prints a warning per library whose version differs from the saved one, and writes one
+row per fish: `video_id`, `predicted` and `p:<class>` per class (default file `<DCS_OUTPUT_DIR>/<input name>_predictions.csv`).
+It uses only the saved preprocessing; the input needs every feature column the model was trained with (a missing one
+stops with its name), extra columns are ignored. Input: a `featurize` table (`.parquet`) or the same columns as `.csv`.
+When some input fish are the model's own training fish, it compares them with `reference_predictions.csv` and prints
+`matches the saved reference predictions for N fish` (or `DIFFERS`, with the largest gap): run it on the training
+table after copying a run folder to another machine to check the copy (AC-9). `--device` (default `cpu`) matters for
+an MLP only.
+
+`featurize --videos <dir>` reads per-video folders (`<dir>/<video_id>/` with `manifest.json`, `frames.parquet`,
+`segments.csv`, as `prepds run` writes under `outputs/processed/`) **without** `trials_catalog.parquet` or the
+accepted index (D-018). Labels come from each manifest; the date stays empty; rejected and unprocessed videos are
+left out; every fish not Accepted is marked unreviewed (`reviewed = false`). With `DCS_DB_PATH` set, NTT values come
+from the workbook as usual. Its table goes to `<DCS_OUTPUT_DIR>/videos_table.parquet` (or `--out`) and never replaces
+the training table. Such a table is for `predict` only; `train` needs dates.
+
 ## Training on the GB10 (temporarily accepted data)
 
 Copying files onto the GB10 (WinSCP, `pscp`) may not be allowed for this account. The box therefore builds everything
@@ -712,6 +736,8 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `--device cuda, but PyTorch sees no CUDA GPU` (train) | Install the CUDA build of torch (GB10 runbook, step 1), or run with `--device auto` or `cpu` |
 | `--models must be` / `--stage must be` / `--seed must be` / `--repeats must be` (train) | Fix the command-line value; the message lists what is allowed |
 | `<stage> stage cannot be built: ...` (train) | No stage could be built; the rest of the message is one of the training-set errors above |
+| `--input ... does not exist` (predict) | Point `--input` at a table from `dcs featurize` |
+| `--videos ... is not a folder` | Point it at the folder holding one `<video_id>/` folder per fish |
 | `No saved model in ...` | `--model` must be a run folder written by `dcs train` (it holds `model/model_info.json`) |
 | `The input lacks ... feature column(s) the model needs` | Build the input with `python -m dcs featurize` from the same `dcs` version as the model |
 | `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
@@ -744,6 +770,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_ablations.py` | Vehicle normalization: vehicle fish removed, counts logged once; date reference with 2+ vehicle fish; fallback to the framing setup, then all vehicle fish; camera-epoch reference skips the date level; `epoch_of`; the NTT keep rule (gain vs spread, undecided without scheme A); every ablation reported; switch ablations reuse the main folds; the FR-9 pair shares classes and folds; FR-9 is a note when the vehicle is not a kept class; `camera_epochs` switches the reference |
 | `test_dcs_stage2.py` | One dose model per compound with two doses, never the vehicle; a compound left with one dose gets none; date-only and the permuted score beside every dose model; the FR-9 variant on the same folds; without the vehicle it is a note; no dose class left is a note, not a stop; `dcs train` writes one section, metrics rows and confusion PNG per compound |
 | `test_dcs_artifact.py` | `model/` holds the files of PRD §7.4 plus the reference predictions, classes in probability order, model named in the report and `run_info.json`; reload in a **fresh process** reproduces the reference (EC-18) for logistic regression and (with torch) the MLP; a version mismatch is a warning; a missing feature column is an error naming it; no model folder is an error |
+| `test_dcs_predict.py` | `dcs predict` on the training table reproduces `reference_predictions.csv` and says so (AC-9); default output file and CSV input; missing columns stop with their names; version warnings printed; `featurize --videos` needs no index, marks unreviewed fish, leaves the date empty and the training table untouched; with the workbook the NTT values are kept; folders -> `featurize --videos` -> `predict` gives the same predictions as the reference (D-018) |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |

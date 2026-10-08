@@ -36,9 +36,15 @@ def small(tmp_path_factory: pytest.TempPathFactory) -> SynthResult:
 
 
 @pytest.fixture(scope="session")
-def tiny_table(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def tiny_synth(tmp_path_factory: pytest.TempPathFactory) -> SynthResult:
+    """The synthetic gold folder behind `tiny_table` (read only)."""
+    return make_gold_dataset(tmp_path_factory.mktemp("tiny"), dataclasses.replace(SMALL, vehicle_per_date=2))
+
+
+@pytest.fixture(scope="session")
+def tiny_table(tiny_synth: SynthResult, tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A synthetic training table and its schema: 24 fish, two compounds and vehicle, 8 each on 4 dates. Every
     dose class has 4 fish, so the dose stage cannot be built with min_class_size 6."""
-    synth = make_gold_dataset(tmp_path_factory.mktemp("tiny"), dataclasses.replace(SMALL, vehicle_per_date=2))
+    synth = tiny_synth
     result = featurize(read_accepted(synth.accepted_dir), synth.workbook_path, load_settings().training)
     return write_outputs(result, tmp_path_factory.mktemp("tiny_table") / "training_table.parquet")[0]

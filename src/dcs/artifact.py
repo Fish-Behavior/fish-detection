@@ -87,15 +87,16 @@ def save_model(run: Path, ts: TrainSet, name: str, training: Mapping[str, Any], 
 
 
 def load_model(run: Path, device: str = "cpu") -> Loaded:
-    """The model saved in `run/model/`, with a warning per package whose version differs from the saved one."""
+    """The model saved in `run/model/`, with a warning per package whose version differs from the saved one.
+    `device` (auto, cpu, cuda) matters for an MLP only."""
     folder = Path(run) / MODEL_DIR
     if not (folder / INFO_FILE).is_file():
         raise ConfigError(f"No saved model in {folder}. Point --model at a run folder written by `python -m dcs train`.")
     info = json.loads((folder / INFO_FILE).read_text(encoding="utf-8"))
     if info["model"] == "mlp":
-        from dcs.mlp import MLP  # torch only for an MLP
+        from dcs.mlp import MLP, resolve_device  # torch only for an MLP
 
-        model: Any = MLP.load(folder / MLP_FILE, device)
+        model: Any = MLP.load(folder / MLP_FILE, resolve_device(device))
     else:
         model = joblib.load(folder / SKLEARN_FILE)
     warnings = tuple(

@@ -6,8 +6,9 @@ which shows what `dcs` will read so a new `.env` or override YAML can be
 verified before any data is touched; `synth`, which writes a synthetic
 gold dataset for trying the other commands without real data; and
 `featurize`, which turns the gold set into the training table; `audit`,
-which reports what that table holds before anything is trained; and `train`,
-which evaluates every model on shared folds and writes a run folder with the report.
+which reports what that table holds before anything is trained; `train`,
+which evaluates every model on shared folds and writes a run folder with the report and the saved model; and
+`predict`, which scores a table with a saved model.
 """
 
 from __future__ import annotations
@@ -18,12 +19,15 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import pandas as pd
+
 from dcs import __version__
 from dcs.audit import AUDIT_FILE, build_audit, render
 from dcs.config import PATH_VARIABLES, ConfigError, Settings, load_settings
 from dcs.config_rules import STAGES, VALUE_RULES
 from dcs.featurize import featurize, write_outputs
-from dcs.gold import SOURCE_ACCEPTED, read_gold
+from dcs.artifact import MODEL_DIR, REFERENCE_FILE, load_model
+from dcs.gold import ReadOptions, read_gold, read_videos
 from dcs.synthetic import SynthConfig, make_gold_dataset
 from dcs.train import run_training
 from dcs.trainset import load_table
@@ -36,6 +40,8 @@ PRODUCED_INPUTS = {
     "table": "not found yet (written by dcs featurize)",
 }
 LABEL_WIDTH = 19
+VIDEOS_TABLE = "videos_table.parquet"  # featurize --videos default, never the training table
+MATCH_TOLERANCE = 1e-9  # predict vs reference_predictions.csv (CSV round trip)
 DEVICES = ("auto", "cpu", "cuda")  # PRD §7.2
 
 
@@ -65,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     feat = commands.add_parser("featurize", help="gold set (+ workbook NTT) -> training_table.parquet and its schema json")
     feat.add_argument("--profile", help="calibration profile to keep when the set mixes several (EC-21)")
+    feat.add_argument(
+        "--videos", help="read per-video folders (<dir>/<video_id>/) without index or catalog, for predict (D-018)"
+    )
+    feat.add_argument("--out", help=f"table to write (default: DCS_TABLE; with --videos: <DCS_OUTPUT_DIR>/{VIDEOS_TABLE})")
     feat.set_defaults(handler=run_featurize)
 
     audit = commands.add_parser("audit", help="training table -> audit.md: counts, drops, confounds, G1 verdict (no training)")
@@ -82,6 +92,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train.add_argument("--no-ablations", action="store_true", help="skip the compound-stage ablations (faster)")
     train.set_defaults(handler=run_train)
+
+    predict = commands.add_parser("predict", help="saved model + table -> class probabilities per fish (CSV)")
+    predict.add_argument("--model", required=True, help="run folder written by `dcs train` (holds model/)")
+    predict.add_argument("--input", required=True, help="table from `dcs featurize` (.parquet), or the same columns as .csv")
+    predict.add_argument("--out", help="CSV to write (default: <DCS_OUTPUT_DIR>/<input name>_predictions.csv)")
+    predict.add_argument("--device", choices=DEVICES, default="cpu", help="for an MLP: cpu (default), cuda or auto")
+    predict.set_defaults(handler=run_predict)
     return parser
 
 
@@ -125,11 +142,21 @@ def run_synth(settings: Settings | None, args: argparse.Namespace) -> int:
 
 def run_featurize(settings: Settings, args: argparse.Namespace) -> int:
     """Read the gold source chosen in the settings, featurize every kept fish, write the table and schema."""
-    gold = read_gold(settings, profile=args.profile)
-    result = featurize(gold, settings.paths.db_path, settings.training)
-    table_path, json_path = write_outputs(result, settings.paths.table)
-    reviewed = "reviewed" if gold.source == SOURCE_ACCEPTED else "UNREVIEWED"
-    print(f"Featurized {len(result.table)} fish ({reviewed}, profile {gold.profile}), {len(result.schema['dropped'])} dropped")
+    training = settings.training
+    if args.videos:
+        options = ReadOptions(args.profile, training["model_profile_marker"], training["fps_tolerance"])
+        gold = read_videos(Path(args.videos).expanduser(), options)
+        default = settings.paths.output_dir / VIDEOS_TABLE
+    else:
+        gold = read_gold(settings, profile=args.profile)
+        default = settings.paths.table
+    result = featurize(gold, settings.paths.db_path, training)
+    table_path, json_path = write_outputs(result, Path(args.out).expanduser() if args.out else default)
+    accepted = int(result.table["reviewed"].sum())
+    print(
+        f"Featurized {len(result.table)} fish ({accepted} Accepted, the rest UNREVIEWED; profile {gold.profile}), "
+        f"{len(result.schema['dropped'])} dropped"
+    )
     print(f"  table:  {table_path}")
     print(f"  schema: {json_path}")
     return 0
@@ -156,6 +183,31 @@ def run_train(settings: Settings, args: argparse.Namespace) -> int:
     run = run_training(settings, training, command=shlex.join(["python", "-m", "dcs", *args.argv]), device=args.device, ablations=not args.no_ablations)
     print(f"Run folder: {run}")
     print(f"  report: {run / 'report.md'}")
+    return 0
+
+
+def run_predict(settings: Settings, args: argparse.Namespace) -> int:
+    """Score every fish of the input with the saved model; compare with the saved reference where fish overlap (AC-9)."""
+    run, source = Path(args.model).expanduser(), Path(args.input).expanduser()
+    if not source.is_file():
+        raise ConfigError(f"--input {source} does not exist. Build it with `python -m dcs featurize`.")
+    model = load_model(run, device=args.device)
+    for warning in model.version_warnings:
+        print(f"  warning: {warning}")
+    table = pd.read_parquet(source) if source.suffix == ".parquet" else pd.read_csv(source)
+    predictions = model.predict(table)
+    out = Path(args.out).expanduser() if args.out else settings.paths.output_dir / f"{source.stem}_predictions.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    predictions.to_csv(out, index=False)
+    info = model.info
+    print(f"Predicted {len(predictions)} fish with {info['model']} (cross-validation verdict: {info['verdict']}): {out}")
+    reference = pd.read_csv(run / MODEL_DIR / REFERENCE_FILE).set_index("video_id")
+    shared = predictions.set_index("video_id").reindex(reference.index).dropna(subset=["predicted"])
+    if not shared.empty:
+        columns = [c for c in reference.columns if c.startswith("p:")]
+        gap = float((shared[columns] - reference.loc[shared.index, columns]).abs().to_numpy().max())
+        verdict = "matches" if gap <= MATCH_TOLERANCE else f"DIFFERS (largest gap {gap:.3g}) from"
+        print(f"  {verdict} the saved reference predictions for {len(shared)} fish")
     return 0
 
 
