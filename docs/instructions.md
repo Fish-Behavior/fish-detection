@@ -428,6 +428,30 @@ fitted.log1p, fitted.fill["velocity_mean"]               # what was logged; the 
 fitted.transform(result.X.iloc[100:])                    # the other fish, scaled with the training fish's numbers
 ```
 
+## Baseline models
+
+`make_model(name, seed)` returns a fresh model; all of them work the same way: `fit(X, y, dates)`, then
+`predict_proba(X, dates)` gives one probability per class, in the order of `model.classes_` (sorted labels). `X` is
+the preprocessed matrix; only `date_only` reads `dates`. The five (PRD §6.2, `BASELINES`):
+
+| Name | What it is | Why it is there |
+|---|---|---|
+| `majority` | Always the class shares of the training fish (the largest class wins) | The floor: a model must beat guessing the biggest class |
+| `date_only` | The label mix of the test fish's date in training (scheme B); for a date never seen in training (scheme A), the nearest training date, the earlier one on a tie; a date that is not an ISO date gets the overall class shares | The leakage ceiling: how much the day alone explains, with no behavior at all (D-011) |
+| `logreg` | Logistic regression, L2, classes weighted by their size | Simple linear model |
+| `random_forest` | 500 trees, classes balanced, all CPU cores | Non-linear, robust on small tables |
+| `hist_gb` | Histogram gradient boosting (scikit-learn), classes balanced | Strong tabular default, no extra dependency |
+
+The settings are fixed (D-053); there is no tuning, because a few hundred fish cannot support a tuning loop on top of
+the date-held-out folds. The same seed gives identical probabilities. `mlp` is listed in `training.models` but arrives
+in U13; until then `train` skips it with a message. To try one:
+
+```python
+from dcs.models import make_model
+model = make_model("logreg", seed=0).fit(X_train, y_train, dates_train)   # X from fitted.transform(...)
+model.classes_, model.predict_proba(X_test, dates_test)
+```
+
 ## When `dcs` stops: what to do
 
 Errors print one line starting with `Configuration error:` (exit code 2).
@@ -471,6 +495,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_trainset.py` | Label cleaning, class filter and very-small flag (both stages), forbidden columns never in the matrix, group switches, rare-state and constant features dropped, the stop messages, and a synthetic set end to end |
 | `test_dcs_audit.py` | Each audit table and fact on small hand-built tables: filter steps, class status and scheme A, per-date and compound × date counts, missing values, manual share and flags per compound, §2.3 statistics, a compound with no Accepted fish, the D-016 share, the G1 stop rule (vehicle, one-date and unaccepted compounds never count; the unreviewed count), vehicle name from the settings, fps and tracker notes, framing setups (a shift, a zoom, two equally common setups, slow drift, one fish at the surface, a date without depth data), dose spelling variants counted once, a stage that cannot be built; `dcs audit` end to end on synthetic data and without a table |
 | `test_dcs_preprocess.py` | Training rows come out with mean 0 and spread 1; an extreme test fold leaves the fitted numbers alone (EC-9); gaps get the training median (EC-2); `log1p` only on count and duration kinds; JSON round trip; constant or empty columns in a fold; column order; category features stop with a hint |
+| `test_dcs_models.py` | Every baseline has the same interface and probabilities that sum to 1; majority gives the class shares; date-only: same date, nearest date, tie to the earlier date, non-date text; logreg, forest and boosting find a planted signal and weight classes; same seed, same probabilities; `mlp` and unknown names are errors |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
 
 ## Keeping this section current
