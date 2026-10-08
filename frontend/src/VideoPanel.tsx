@@ -3,7 +3,7 @@ import type { RefObject } from 'react'
 import { frameAt, trailRuns, videoPoint } from './model.ts'
 import type {
   Box,
-  DemoSession,
+  SessionData,
   Edits,
   FrameValue,
   Point,
@@ -14,10 +14,9 @@ import { Card, Icon } from './ui.tsx'
 export type EditTool =
   'inspect' | 'waterline' | 'roi' | 'point' | 'box' | 'keypoint'
 export interface VideoProps {
-  session: DemoSession
+  session: SessionData
   edits: Edits
   src: string
-  isLocal: boolean
   title: string
   time: number
   duration: number
@@ -34,18 +33,7 @@ export interface VideoProps {
 }
 const PREVIEW = '#c6b4ff'
 export default function VideoPanel(p: VideoProps) {
-  const {
-    session,
-    edits,
-    src,
-    isLocal,
-    title,
-    time,
-    duration,
-    videoRef,
-    seek,
-    tool,
-  } = p
+  const { session, edits, src, title, time, duration, videoRef, seek, tool } = p
   const [playing, setPlaying] = useState(false),
     [speed, setSpeed] = useState('1'),
     [error, setError] = useState('')
@@ -58,10 +46,14 @@ export default function VideoPanel(p: VideoProps) {
     roi: false,
   })
   const drag = useRef<Point | null>(null)
-  const index = Math.min(
-    Math.round(time * session.overlay.fps),
-    session.overlay.t.length - 1,
+  const index = Math.max(
+    0,
+    Math.min(
+      Math.round(time * session.overlay.fps),
+      session.overlay.t.length - 1,
+    ),
   )
+  const hasTracking = session.overlay.t.length > 0
   const frame = frameAt(session, index, edits),
     scene = edits.scene ?? session.scene
   const finite = (...n: (number | null)[]) => n.every(Number.isFinite),
@@ -74,14 +66,17 @@ export default function VideoPanel(p: VideoProps) {
       finite(p.sceneDraft.waterline) &&
       p.sceneDraft.waterline !== scene.waterline,
     roi: validBox(p.sceneDraft.roi) && !sameBox(p.sceneDraft.roi, scene.roi),
-    box: validBox(d.box) && !sameBox(d.box, frame.box),
+    box:
+      !!d.box && validBox(d.box) && !(frame.box && sameBox(d.box, frame.box)),
     point:
       d.detected && finite(d.x, d.y) && (d.x !== frame.x || d.y !== frame.y),
     keypoints: Object.entries(d.keypoints)
       .filter(
         ([k, [x, y]]) =>
           finite(x, y) &&
-          (x !== frame.keypoints[k][0] || y !== frame.keypoints[k][1]),
+          (!frame.keypoints[k] ||
+            x !== frame.keypoints[k][0] ||
+            y !== frame.keypoints[k][1]),
       )
       .map(([k, [x, y]]) => [k, x, y] as [string, number, number]),
     missing: !d.detected && frame.detected,
@@ -122,11 +117,7 @@ export default function VideoPanel(p: VideoProps) {
     <Card
       title="Tracking workspace"
       eyebrow="Video + prepds overlays"
-      accessory={
-        <span className={`badge ${isLocal ? 'neutral' : 'success'}`}>
-          {isLocal ? 'Local playback' : 'Synthetic clip'}
-        </span>
-      }
+      accessory={<span className="badge success">Session video</span>}
       className="video-card"
     >
       <div className="video-stage">
@@ -154,7 +145,7 @@ export default function VideoPanel(p: VideoProps) {
             )
           }
         />
-        {!isLocal && (
+        {
           <svg
             viewBox={`0 0 ${session.overlay.width} ${session.overlay.height}`}
             className={`video-overlay ${tool !== 'inspect' ? 'editing' : ''}`}
@@ -236,7 +227,7 @@ export default function VideoPanel(p: VideoProps) {
               ))}
             {frame.detected && (
               <>
-                {layers.box && (
+                {layers.box && frame.box && (
                   <rect
                     {...rectangle(frame.box)}
                     fill="none"
@@ -250,6 +241,8 @@ export default function VideoPanel(p: VideoProps) {
                       .slice(0, 2)
                       .map((a, i) => {
                         const b = ['tail_base', 'tail_tip'][i]
+                        if (!frame.keypoints[a] || !frame.keypoints[b])
+                          return null
                         return (
                           <line
                             key={a}
@@ -289,7 +282,7 @@ export default function VideoPanel(p: VideoProps) {
                 )}
               </>
             )}
-            {!frame.detected && (
+            {hasTracking && !frame.detected && (
               <text x="45" y="94" fill="white" fontSize="12">
                 Fish not detected
               </text>
@@ -313,7 +306,7 @@ export default function VideoPanel(p: VideoProps) {
                 strokeDasharray="4 3"
               />
             )}
-            {draft.box && (
+            {draft.box && p.frameDraft.box && (
               <rect
                 {...rectangle(p.frameDraft.box)}
                 fill="none"
@@ -349,10 +342,8 @@ export default function VideoPanel(p: VideoProps) {
               </text>
             )}
           </svg>
-        )}
-        <span className="video-stamp">
-          {isLocal ? 'LOCAL FILE · NO ANALYSIS' : 'ILLUSTRATIVE OVERLAYS'}
-        </span>
+        }
+        <span className="video-stamp">TRACKING OVERLAYS</span>
       </div>
       <div className="playback">
         <button
@@ -430,9 +421,8 @@ export default function VideoPanel(p: VideoProps) {
           Next frame
         </button>
         <span className="small muted">
-          {isLocal
-            ? 'Analysis unavailable'
-            : `Frame ${index} · ${session.overlay.width} × ${session.overlay.height} · ${session.overlay.fps} fps`}
+          Frame {index} · {session.overlay.width} × {session.overlay.height} ·{' '}
+          {session.overlay.fps} fps
         </span>
       </div>
       {error && (
@@ -440,7 +430,7 @@ export default function VideoPanel(p: VideoProps) {
           {error}
         </p>
       )}
-      {!isLocal && (
+      {
         <div className="overlay-toggles">
           {Object.entries(layers).map(([key, value]) => (
             <label key={key}>
@@ -467,13 +457,11 @@ export default function VideoPanel(p: VideoProps) {
             </label>
           ))}
         </div>
-      )}
+      }
       <p className="video-note">
-        {isLocal
-          ? 'This file stays on your device. Tracking, charts, predictions, and correction tools require backend processing.'
-          : tool === 'inspect'
-            ? 'Stored x/y point + optional detector overlays, using prepds field conventions.'
-            : `Edit ${tool}: ${['box', 'roi'].includes(tool) ? 'drag a rectangle' : 'click or drag on the video'}, or focus the video and use arrow keys (Shift = 10 px). Purple shows the unsaved draft; Apply in the review panel to save.`}
+        {tool === 'inspect'
+          ? 'Stored x/y point + optional detector overlays, using prepds field conventions.'
+          : `Edit ${tool}: ${['box', 'roi'].includes(tool) ? 'drag a rectangle' : 'click or drag on the video'}, or focus the video and use arrow keys (Shift = 10 px). Purple shows the unsaved draft; Apply in the review panel to save.`}
       </p>
     </Card>
   )

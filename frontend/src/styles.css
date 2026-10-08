@@ -219,6 +219,10 @@ svg {
   margin-bottom: 10px;
 }
 .session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
   width: 100%;
   justify-content: flex-start;
   text-align: left;
@@ -238,16 +242,14 @@ svg {
   font-size: 12px;
   letter-spacing: 0.2px;
 }
-.session-item small,
-.local-session small {
+.session-item small {
   display: block;
   color: var(--muted);
   font-size: 11px;
   margin-top: 3px;
 }
 .session-dot,
-.live-dot,
-.preview-pill > span {
+.live-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -258,21 +260,6 @@ svg {
 .session-dot {
   margin-right: 4px;
   background: #6392bd;
-}
-.choose-file {
-  margin-top: 12px;
-  width: 100%;
-  border-style: dashed;
-  color: #637890;
-  font-size: 12px;
-}
-.local-session {
-  margin: 10px 0;
-  padding: 10px;
-  background: #f2f6fa;
-  border-radius: 7px;
-  overflow-wrap: anywhere;
-  font-size: 12px;
 }
 .sidebar-footer {
   display: flex;
@@ -319,16 +306,6 @@ svg {
   padding: 0 15px;
   color: #c0c9d6;
 }
-.preview-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 10px;
-  border: 1px solid #e3e9ef;
-  border-radius: 20px;
-  color: #627288;
-  font-size: 11px;
-}
 main {
   max-width: 1530px;
   margin: 0 auto;
@@ -360,28 +337,6 @@ h1 {
 .reset-button {
   flex: none;
   font-size: 12px;
-}
-.demo-banner {
-  background: #edf3f9;
-  border: 1px solid #dce7f3;
-  border-radius: 7px;
-  padding: 11px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #4c6887;
-  font-size: 12px;
-}
-.demo-banner p {
-  flex: 1;
-}
-.demo-banner b {
-  font-weight: 600;
-}
-.demo-banner .badge {
-  background: #fff8;
-  border: 1px solid #dce7f3;
-  white-space: nowrap;
 }
 .session-heading {
   display: flex;
@@ -802,16 +757,6 @@ h1 {
 .bar-track > div {
   height: 100%;
   border-radius: inherit;
-}
-.result-note {
-  display: flex;
-  gap: 6px;
-  color: #65758a;
-  font-size: 10px;
-  margin: 17px 0 15px;
-}
-.result-note svg {
-  margin-top: 1px;
 }
 .dose-status {
   display: flex;
@@ -1375,17 +1320,9 @@ tbody tr:hover {
     padding: 4px 8px;
   }
   .session-item {
+    grid-column: 1 / -1;
     min-height: 50px;
     padding: 7px 9px;
-  }
-  .choose-file {
-    margin: 0;
-    min-height: 50px;
-    font-size: 11px;
-  }
-  .local-session {
-    grid-column: 1/-1;
-    margin: 0;
   }
   .main-shell {
     margin: 0;
@@ -1393,9 +1330,6 @@ tbody tr:hover {
   .topbar {
     padding: 0 16px;
     height: 48px;
-  }
-  .topbar .preview-pill {
-    display: none;
   }
   .chat-panel {
     right: 12px;
@@ -1425,14 +1359,6 @@ tbody tr:hover {
   }
   .reset-button svg {
     width: 14px;
-  }
-  .demo-banner {
-    align-items: flex-start;
-    font-size: 11px;
-    padding: 10px;
-  }
-  .demo-banner .badge {
-    display: none;
   }
   .session-heading {
     margin-top: 20px;
@@ -1549,4 +1475,16 @@ tbody tr:hover {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+.empty-page {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+.empty-page h1 {
+  font-size: 22px;
 }

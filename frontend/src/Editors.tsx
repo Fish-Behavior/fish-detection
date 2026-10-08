@@ -3,7 +3,7 @@ import { STATES } from './model.ts'
 import type {
   Behavior,
   Box,
-  DemoSession,
+  SessionData,
   Edits,
   FrameValue,
   Scene,
@@ -70,7 +70,7 @@ function BoxFields({
   )
 }
 export interface EditorProps {
-  session: DemoSession
+  session: SessionData
   edits: Edits
   reviewer: string
   setReviewer: (s: string) => void
@@ -107,8 +107,8 @@ export default function Editors(
     p.setFrame((f) => ({
       ...f,
       detected: !missing,
-      x: missing ? null : (f.x ?? 320),
-      y: missing ? null : (f.y ?? 180),
+      x: missing ? null : (f.x ?? width / 2),
+      y: missing ? null : (f.y ?? height / 2),
     }))
   return (
     <div className="editors">
@@ -140,9 +140,8 @@ export default function Editors(
         </label>
         <p className="small muted">
           Changes preview instantly in purple on the video and timeline. Draw on
-          the video, nudge with arrow keys, or edit the fields; nothing is
-          saved until you apply it. Changing frames discards unsaved frame
-          drafts.
+          the video, nudge with arrow keys, or edit the fields; nothing is saved
+          until you apply it. Changing frames discards unsaved frame drafts.
         </p>
       </Card>
       <Card
@@ -178,109 +177,127 @@ export default function Editors(
           </button>
         </div>
       </Card>
-      <Card
-        title={`Frame ${p.frameIndex} correction`}
-        eyebrow="Tracking point + detector output"
-      >
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={!frame.detected}
-            onChange={(e) => markMissing(e.target.checked)}
-          />
-          Fish missing in this frame
-        </label>
-        <div className="field-grid">
-          <NumberField
-            label="Track x (px)"
-            value={frame.x ?? NaN}
-            max={width}
-            onChange={(n) =>
-              p.setFrame((f) => ({ ...f, x: n, detected: true }))
-            }
-          />
-          <NumberField
-            label="Track y (px)"
-            value={frame.y ?? NaN}
-            max={height}
-            onChange={(n) =>
-              p.setFrame((f) => ({ ...f, y: n, detected: true }))
-            }
-          />
-        </div>
-        <BoxFields
-          box={frame.box}
-          set={(box) => p.setFrame((f) => ({ ...f, box }))}
-          prefix="Box"
-          width={width}
-          height={height}
-        />
-        <label className="field">
-          Keypoint
-          <select
-            aria-label="Keypoint"
-            value={p.keypoint}
-            onChange={(e) => p.setKeypoint(e.target.value)}
-          >
-            {Object.keys(frame.keypoints).map((k) => (
-              <option key={k} value={k}>
-                {k.replaceAll('_', ' ')}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field-grid">
-          <NumberField
-            label="Keypoint x (px)"
-            value={kp[0]}
-            max={width}
-            onChange={(n) =>
-              p.setFrame((f) => ({
-                ...f,
-                keypoints: { ...f.keypoints, [p.keypoint]: [n, kp[1], kp[2]] },
-              }))
-            }
-          />
-          <NumberField
-            label="Keypoint y (px)"
-            value={kp[1]}
-            max={height}
-            onChange={(n) =>
-              p.setFrame((f) => ({
-                ...f,
-                keypoints: { ...f.keypoints, [p.keypoint]: [kp[0], n, kp[2]] },
-              }))
-            }
-          />
-        </div>
-        <p className="baseline">
-          Sample keypoint confidence: {Math.round(kp[2] * 100)}% · read-only
-        </p>
-        <details className="original-frame">
-          <summary>Compare with automatic frame</summary>
-          <pre>
-            {JSON.stringify(
-              {
-                x: session.overlay.x[p.frameIndex],
-                y: session.overlay.y[p.frameIndex],
-                detected: session.overlay.detected[p.frameIndex],
-                detection:
-                  session.overlay.detections.find(
-                    (d) => d.frame_idx === p.frameIndex,
-                  ) ?? null,
-              },
-              null,
-              2,
-            )}
-          </pre>
-        </details>
-        <div className="button-row">
-          <button className="primary" onClick={p.saveFrame}>
-            Apply frame
-          </button>
-          <button onClick={p.resetFrame}>Restore frame</button>
-        </div>
-      </Card>
+      {session.overlay.t.length > 0 && (
+        <Card
+          title={`Frame ${p.frameIndex} correction`}
+          eyebrow="Tracking point + detector output"
+        >
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={!frame.detected}
+              onChange={(e) => markMissing(e.target.checked)}
+            />
+            Fish missing in this frame
+          </label>
+          <div className="field-grid">
+            <NumberField
+              label="Track x (px)"
+              value={frame.x ?? NaN}
+              max={width}
+              onChange={(n) =>
+                p.setFrame((f) => ({ ...f, x: n, detected: true }))
+              }
+            />
+            <NumberField
+              label="Track y (px)"
+              value={frame.y ?? NaN}
+              max={height}
+              onChange={(n) =>
+                p.setFrame((f) => ({ ...f, y: n, detected: true }))
+              }
+            />
+          </div>
+          {frame.box ? (
+            <BoxFields
+              box={frame.box}
+              set={(box) => p.setFrame((f) => ({ ...f, box }))}
+              prefix="Box"
+              width={width}
+              height={height}
+            />
+          ) : (
+            <p className="baseline">No detector box for this frame.</p>
+          )}
+          {kp ? (
+            <>
+              <label className="field">
+                Keypoint
+                <select
+                  aria-label="Keypoint"
+                  value={p.keypoint}
+                  onChange={(e) => p.setKeypoint(e.target.value)}
+                >
+                  {Object.keys(frame.keypoints).map((k) => (
+                    <option key={k} value={k}>
+                      {k.replaceAll('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="field-grid">
+                <NumberField
+                  label="Keypoint x (px)"
+                  value={kp[0]}
+                  max={width}
+                  onChange={(n) =>
+                    p.setFrame((f) => ({
+                      ...f,
+                      keypoints: {
+                        ...f.keypoints,
+                        [p.keypoint]: [n, kp[1], kp[2]],
+                      },
+                    }))
+                  }
+                />
+                <NumberField
+                  label="Keypoint y (px)"
+                  value={kp[1]}
+                  max={height}
+                  onChange={(n) =>
+                    p.setFrame((f) => ({
+                      ...f,
+                      keypoints: {
+                        ...f.keypoints,
+                        [p.keypoint]: [kp[0], n, kp[2]],
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <p className="baseline">
+                Keypoint confidence: {Math.round(kp[2] * 100)}% · read-only
+              </p>
+            </>
+          ) : (
+            <p className="baseline">No keypoints for this frame.</p>
+          )}
+          <details className="original-frame">
+            <summary>Compare with automatic frame</summary>
+            <pre>
+              {JSON.stringify(
+                {
+                  x: session.overlay.x[p.frameIndex],
+                  y: session.overlay.y[p.frameIndex],
+                  detected: session.overlay.detected[p.frameIndex],
+                  detection:
+                    session.overlay.detections.find(
+                      (d) => d.frame_idx === p.frameIndex,
+                    ) ?? null,
+                },
+                null,
+                2,
+              )}
+            </pre>
+          </details>
+          <div className="button-row">
+            <button className="primary" onClick={p.saveFrame}>
+              Apply frame
+            </button>
+            <button onClick={p.resetFrame}>Restore frame</button>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

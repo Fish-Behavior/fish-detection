@@ -8,7 +8,6 @@ const paths = {
   pause: 'M8 4v16M16 4v16',
   chat: 'M4 4h16v12H9l-5 4V4ZM8 8h8M8 12h5',
   arrow: 'M4 12h16m-6-6 6 6-6 6',
-  upload: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',
   check: 'm5 12 4 4L19 6',
   reset: 'M4 10a8 8 0 1 1 2 8M4 4v6h6',
   close: 'm6 6 12 12M6 18 18 6',

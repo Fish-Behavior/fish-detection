@@ -54,7 +54,8 @@ export interface FrameValue {
   x: number | null
   y: number | null
   detected: boolean
-  box: Box
+  // null when the detector produced no record for this frame
+  box: Box | null
   keypoints: Record<string, Keypoint>
 }
 export interface LabelEdit {
@@ -74,7 +75,7 @@ export interface Edits {
   labels: LabelEdit[]
   finalResult: FinalResult | null
 }
-export interface DemoSession {
+export interface SessionData {
   video_id: string
   name: string
   video_url: string
@@ -82,11 +83,12 @@ export interface DemoSession {
   scene: Scene
   overlay: OverlayWindow
   segments: Segment[]
+  // null when no model result exists for this video
   predictions: {
     video_id: string
     predicted: string
     [key: `p:${string}`]: number
-  }
+  } | null
   measurements: { t: number; speed: number; turning: number; depth: number }[]
 }
 export interface ChatQuestion {
@@ -105,124 +107,8 @@ export const emptyEdits = (): Edits => ({
   finalResult: null,
 })
 
-export function position(t: number): Point {
-  return [320 + 170 * Math.sin(t * 0.5), 180 + 65 * Math.sin(t * 0.9)]
-}
-export function sampleFrame(t: number): FrameValue {
-  const [x, y] = position(t)
-  const angle = Math.atan2(58.5 * Math.cos(t * 0.9), 85 * Math.cos(t * 0.5))
-  const point = (a: number, b: number): Keypoint => [
-    x + a * Math.cos(angle) - b * Math.sin(angle),
-    y + a * Math.sin(angle) + b * Math.cos(angle),
-    0.92,
-  ]
-  const detected = !(t >= 6 && t < 6.4)
-  return {
-    x: detected ? x : null,
-    y: detected ? y : null,
-    detected,
-    box: [x - 35, y - 30, x + 35, y + 30],
-    keypoints: {
-      snout: point(20, 0),
-      tail_base: point(-17, 0),
-      tail_tip: point(-30, 0),
-      dorsal_fin_base: point(0, -7),
-      ventral: point(0, 7),
-    },
-  }
-}
-
-function makeDemo(): DemoSession {
-  const fps = 30,
-    duration = 12
-  const overlay: OverlayWindow = {
-    fps,
-    width: 640,
-    height: 360,
-    t: [],
-    x: [],
-    y: [],
-    detected: [],
-    detections: [],
-    detections_error: null,
-    has_detector: true,
-  }
-  for (let i = 0; i < fps * duration; i++) {
-    const t = i / fps,
-      frame = sampleFrame(t)
-    overlay.t.push(t)
-    overlay.x.push(frame.x)
-    overlay.y.push(frame.y)
-    overlay.detected.push(frame.detected)
-    if (frame.detected)
-      overlay.detections.push({
-        frame_idx: i,
-        t,
-        score: 0.94,
-        box: frame.box,
-        keypoints: frame.keypoints,
-      })
-  }
-  const cuts: [number, number, Behavior][] = [
-    [0, 2.5, 'Controlled Swim'],
-    [2.5, 4, 'Erratic Movement'],
-    [4, 6, 'Freezing/Drift'],
-    [6, 6.4, 'Undetermined'],
-    [6.4, 8, 'Listing/LORR'],
-    [8, 9.5, 'Surface Breach'],
-    [9.5, 12, 'Controlled Swim'],
-  ]
-  return {
-    video_id: 'SYNTH_001',
-    name: 'Synthetic tank · 001',
-    video_url: '/demo-tank.mp4',
-    duration,
-    scene: { roi: [42, 64, 598, 323], waterline: 64 },
-    overlay,
-    segments: cuts.map(([start_s, end_s, state]) => ({
-      start_s,
-      end_s,
-      state,
-      source: 'auto',
-    })),
-    predictions: {
-      video_id: 'SYNTH_001',
-      predicted: 'COMPOUND_A',
-      'p:COMPOUND_A': 0.62,
-      'p:COMPOUND_B': 0.24,
-      'p:VEHICLE': 0.14,
-    },
-    measurements: Array.from({ length: 49 }, (_, i) => {
-      const t = i / 4
-      return {
-        t,
-        speed: Math.hypot(85 * Math.cos(t * 0.5), 58.5 * Math.cos(t * 0.9)),
-        turning: 18 + 12 * Math.sin(t * 0.8),
-        depth: position(t)[1] - 64,
-      }
-    }),
-  }
-}
-const fixture = makeDemo()
-// ponytail: fixed fixtures only; replace this provider with real APIs after scaffold review.
-export const demoProvider = {
-  session: (): DemoSession => structuredClone(fixture),
-  ask: ({ question, history }: ChatQuestion): ChatAnswer => {
-    const answer = `Demo reply · The research chat backend is not connected. This sample has a 12-second synthetic clip and illustrative compound probabilities. Corrections stay in this tab; I cannot run inference or edit results. Your question: “${question}”`
-    return {
-      answer,
-      tool_calls: [],
-      history: [
-        ...history,
-        { role: 'user', content: question },
-        { role: 'assistant', content: answer },
-      ],
-    }
-  },
-}
-
 export function frameAt(
-  session: DemoSession,
+  session: SessionData,
   index: number,
   edits: Edits,
 ): FrameValue {
@@ -230,13 +116,12 @@ export function frameAt(
   const o = session.overlay,
     i = Math.max(0, Math.min(index, o.t.length - 1))
   const d = o.detections.find((d) => d.frame_idx === i)
-  const fallback = sampleFrame(o.t[i])
   return {
-    x: o.x[i],
-    y: o.y[i],
-    detected: o.detected[i],
-    box: [...(d?.box ?? fallback.box)],
-    keypoints: structuredClone(d?.keypoints ?? fallback.keypoints),
+    x: o.x[i] ?? null,
+    y: o.y[i] ?? null,
+    detected: o.detected[i] ?? false,
+    box: d ? [...d.box] : null,
+    keypoints: structuredClone(d?.keypoints ?? {}),
   }
 }
 export function staleFor(edits: Edits) {
@@ -303,7 +188,7 @@ export function validateFrame(
     validatePoint([frame.x, frame.y], width, height)
   } else if (frame.x !== null || frame.y !== null)
     throw new Error('A missing fish must have null coordinates.')
-  validateBox(frame.box, width, height)
+  if (frame.box) validateBox(frame.box, width, height)
   for (const kp of Object.values(frame.keypoints)) {
     validatePoint([kp[0], kp[1]], width, height)
     if (!Number.isFinite(kp[2]) || kp[2] < 0 || kp[2] > 1)
@@ -369,7 +254,7 @@ export function totals(segments: Segment[]): Record<Behavior, number> {
   return sums
 }
 export function trailRuns(
-  session: DemoSession,
+  session: SessionData,
   edits: Edits,
   index: number,
 ): Point[][] {

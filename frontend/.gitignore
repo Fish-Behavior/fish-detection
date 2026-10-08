@@ -4,4 +4,3 @@ dist/
 *.tsbuildinfo
 .DS_Store
 qa/
-!public/demo-tank.mp4

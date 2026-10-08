@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { demoProvider } from './model.ts'
-import type { ChatQuestion } from './model.ts'
+import type { ChatAnswer, ChatQuestion } from './model.ts'
 import { Icon } from './ui.tsx'
 
 export default function Chat({
+  ask,
   open,
   onOpenChange,
 }: {
+  ask: (q: ChatQuestion) => Promise<ChatAnswer>
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const [question, setQuestion] = useState('')
   const [history, setHistory] = useState<ChatQuestion['history']>([])
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('')
   const bubble = useRef<HTMLButtonElement>(null),
     input = useRef<HTMLInputElement>(null),
     conversation = useRef<HTMLDivElement>(null)
@@ -43,7 +46,7 @@ export default function Chat({
             </span>
             <div>
               <h2>Research assistant</h2>
-              <span>Demo replies · answers only</span>
+              <span>Answers only</span>
             </div>
             <button
               className="icon-button"
@@ -60,12 +63,8 @@ export default function Chat({
             aria-live="polite"
           >
             <div className="chat-welcome">
-              <span className="badge neutral">Frontend preview</span>
               <h3>A little help, wherever you need it.</h3>
-              <p>
-                Ask about the demo or the review workflow. Real research answers
-                will use the DCS chat API later.
-              </p>
+              <p>Ask about this session or the review workflow.</p>
               <button
                 onClick={() => {
                   setQuestion('What happens when I correct a tracking point?')
@@ -77,21 +76,36 @@ export default function Chat({
             </div>
             {history.map((message, i) => (
               <div key={i} className={`chat-message ${message.role}`}>
-                <b>{message.role === 'user' ? 'You' : 'Demo assistant'}</b>
+                <b>{message.role === 'user' ? 'You' : 'Assistant'}</b>
                 <p>{message.content}</p>
               </div>
             ))}
+            {error && (
+              <p className="inline-error" role="alert">
+                {error}
+              </p>
+            )}
           </div>
           <form
             className="chat-form"
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault()
-              if (!question.trim()) return
-              setHistory(
-                demoProvider.ask({ question: question.trim(), history })
-                  .history,
-              )
-              setQuestion('')
+              const q = question.trim()
+              if (!q || busy) return
+              setBusy(true)
+              setError('')
+              try {
+                setHistory((await ask({ question: q, history })).history)
+                setQuestion('')
+              } catch (err) {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : 'The assistant is unavailable.',
+                )
+              } finally {
+                setBusy(false)
+              }
             }}
           >
             <label className="sr-only" htmlFor="chat-question">
@@ -108,7 +122,7 @@ export default function Chat({
             <button
               type="submit"
               aria-label="Send question"
-              disabled={!question.trim()}
+              disabled={!question.trim() || busy}
             >
               <Icon name="arrow" />
             </button>

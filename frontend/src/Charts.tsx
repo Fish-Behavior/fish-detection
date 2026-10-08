@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { COLORS, STATES, totals } from './model.ts'
-import type { Behavior, DemoSession, Segment } from './model.ts'
+import type { Behavior, SessionData, Segment } from './model.ts'
 import { Card } from './ui.tsx'
 
 export function StateSummary({
@@ -199,7 +199,7 @@ export function Traces({
   seek,
   stale,
 }: {
-  session: DemoSession
+  session: SessionData
   time: number
   seek: (t: number) => void
   stale: boolean
@@ -212,13 +212,9 @@ export function Traces({
   return (
     <Card
       title="Movement traces"
-      eyebrow="Illustrative measurements · read-only"
+      eyebrow="Measurements · read-only"
       accessory={
-        stale ? (
-          <span className="badge warning">Measurements stale</span>
-        ) : (
-          <span className="badge neutral">Sample data</span>
-        )
+        stale && <span className="badge warning">Measurements stale</span>
       }
     >
       <div className="traces">
@@ -277,7 +273,7 @@ export function Traces({
         <span>{session.duration} s</span>
       </div>
       <details className="measurement-table">
-        <summary>View numerical sample measurements</summary>
+        <summary>View numerical measurements</summary>
         <div className="table-scroll">
           <table>
             <thead>
