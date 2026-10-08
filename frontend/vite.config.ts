@@ -1,8 +1,10 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Host and ports come from the repository-root .env (FISHLAB_*); real environment variables win.
-export default defineConfig(({ mode }) => {
+// Dev-server host and ports come from the repository-root .env (FISHLAB_*); real environment variables win.
+// A production build (also run inside Docker, where .env is not copied) needs none of them.
+export default defineConfig(({ command, mode }) => {
+  if (command !== 'serve') return { plugins: [react()] }
   const env = loadEnv(mode, '..', 'FISHLAB_')
   for (const name of ['FISHLAB_HOST', 'FISHLAB_PORT', 'FISHLAB_API_PORT']) if (!env[name]) throw new Error(`Set ${name} in the repository-root .env.`)
   const host = env.FISHLAB_HOST
