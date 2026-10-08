@@ -67,6 +67,7 @@ class MLP:
         y = np.asarray(y)
         self.classes_ = np.unique(y)
         targets = np.searchsorted(self.classes_, y)
+        self.n_inputs_ = int(np.shape(X)[1])
         self.networks_: list[nn.Sequential] = []
         self.epochs_: list[int] = []
         for child in np.random.SeedSequence(self.seed).spawn(self.config["seeds"]):
@@ -81,6 +82,33 @@ class MLP:
             proba = torch.stack([torch.softmax(net(inputs), dim=1) for net in self.networks_]).mean(dim=0)
         out = proba.cpu().numpy().astype(float)
         return out / out.sum(axis=1, keepdims=True)  # float32 rows do not sum to exactly 1
+
+    def save(self, path: Any) -> None:
+        """Settings, classes and each network's weights (PRD §7.4 `mlp.pt`); plain types and tensors only."""
+        torch.save(
+            {
+                "config": {k: list(v) if isinstance(v, tuple) else v for k, v in self.config.items()},
+                "classes": [str(c) for c in self.classes_],
+                "n_inputs": self.n_inputs_,
+                "networks": [{k: v.cpu() for k, v in net.state_dict().items()} for net in self.networks_],
+            },
+            path,
+        )
+
+    @classmethod
+    def load(cls, path: Any, device: str = "cpu") -> MLP:
+        """The saved MLP, ready to predict; `weights_only` loading cannot run code from the file."""
+        state = torch.load(path, map_location=device, weights_only=True)
+        model = cls(state["config"], seed=0, device=device)
+        model.classes_ = np.array(state["classes"], dtype=object)
+        model.n_inputs_ = state["n_inputs"]
+        model.networks_ = []
+        for weights in state["networks"]:
+            net = network(model.n_inputs_, len(model.classes_), tuple(model.config["hidden_sizes"]), model.config["dropout"])
+            net.load_state_dict(weights)
+            model.networks_.append(net.to(device).eval())
+        model.epochs_ = []
+        return model
 
     def _train_one(self, X: np.ndarray, targets: np.ndarray, seed: int) -> tuple[nn.Sequential, int]:
         c = self.config

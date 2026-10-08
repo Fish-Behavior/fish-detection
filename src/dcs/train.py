@@ -17,7 +17,6 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from functools import partial
-from importlib import metadata
 from itertools import count
 from pathlib import Path
 from typing import Any
@@ -26,12 +25,13 @@ import pandas as pd
 import yaml
 
 from dcs.ablations import FR9_NORMALIZED, Ablation, render_ablations, run_ablations
+from dcs.artifact import MODEL_DIR, package_version, save_model
 from dcs.audit import build_audit, render
 from dcs.config import ConfigError, Settings
 from dcs.evaluate import REFERENCE, evaluate
 from dcs.folds import make_folds
 from dcs.models import BASELINES, torch_available
-from dcs.report import StageResult, confusion_file, render_report, save_confusion
+from dcs.report import StageResult, best_model, confusion_file, render_report, save_confusion
 from dcs.stage2 import DoseModel, render_stage2, run_stage2, stage_key
 from dcs.trainset import STAGES, build_trainset, load_table
 
@@ -117,11 +117,17 @@ def run_training(
         "ablations": [a.name for a in extra],
         "gold_source": described["gold_source"],
         "table": str(table_path),
-        "versions": {"python": platform.python_version(), **{name: _version(name) for name in PACKAGES}, "cuda": cuda},
+        "versions": {"python": platform.python_version(), **{name: package_version(name) for name in PACKAGES}, "cuda": cuda},
         "hardware": {"system": platform.system(), "machine": platform.machine(), "cpus": os.cpu_count()},
         "started_utc": started.isoformat(timespec="seconds"),
         "seconds": round(time.monotonic() - clock, 1),
     }
+    if "compound" in results:  # the final model: best compound model by scheme A, refit on all its fish (PRD §6.9)
+        compound = results["compound"]
+        name = best_model(compound.evaluation)[0]
+        verdict = compound.evaluation.decision.set_index("model").loc[name, "verdict"]
+        log(f"saving the final model: {name}, refit on all {len(compound.trainset.y)} fish")
+        info["saved_model"] = {"folder": MODEL_DIR, **save_model(run, compound.trainset, name, training, device, verdict)}
     (run / "audit.md").write_text(render(audit), encoding="utf-8")
     (run / "config_used.yaml").write_text(yaml.safe_dump({"training": _plain(training)}, sort_keys=False), encoding="utf-8")
     for name, frames in (
@@ -175,14 +181,6 @@ def _git() -> tuple[str, bool]:
     if head.returncode != 0:
         return "nogit", False
     return head.stdout.strip(), bool(status.stdout.strip())
-
-
-def _version(package: str) -> str | None:
-    """Installed version without importing (torch is imported only by the MLP)."""
-    try:
-        return metadata.version(package)
-    except metadata.PackageNotFoundError:
-        return None
 
 
 def _plain(value: Any) -> Any:

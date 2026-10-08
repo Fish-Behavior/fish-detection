@@ -129,6 +129,13 @@ def render_report(
         "out-of-fold predictions of each repeat; `±` is the standard deviation across repeats, the spread (D-017)",
         "- The data audit of the same table is `audit.md` in this folder",
     ]
+    saved = info.get("saved_model")
+    if saved:
+        lines.append(
+            f"- Saved model: `model/` = {saved['model']} refit on all {saved['fish']} fish of the {saved['stage']} stage "
+            f"(verdict: {saved['verdict']}). Its expected performance is the cross-validation estimate below, not a "
+            "score on those fish (PRD §6.9); `python -m dcs predict --model <this folder> --input <table>` uses it"
+        )
     caveats = []
     if audit.facts.get("framing differs between dates"):
         caveats.append(

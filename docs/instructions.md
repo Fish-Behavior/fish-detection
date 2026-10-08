@@ -611,8 +611,37 @@ Each run gets its own folder `<DCS_OUTPUT_DIR>/training/<run_id>/` (`run_id` = U
 | `config_used.yaml` | Every `training:` setting of this run, command-line values included |
 | `run_info.json` | Run id, git commit and whether tracked files had uncommitted changes, command, seed, folds, repeats, stages, models (and skipped ones), source, table path, versions (Python, scikit-learn, numpy, pandas, torch), hardware, start time, seconds |
 
-The trained model itself (`model/`) is saved from U16 on; until then a run is an evaluation, not a model to reuse.
+| `model/` | The final model (next section) |
+
 Runtime on the real unreviewed set: about 4 to 5 min for both stages and the five baselines on a 10-core laptop.
+
+## The saved model (`model/`)
+
+After the evaluation, `dcs train` takes the **best compound model** (highest scheme-A balanced accuracy; a reference
+baseline only when nothing else ran), refits it, preprocessing included, on **all** fish of the compound stage, and
+saves it in `<run>/model/` (PRD §6.9, §7.4). The dose models are exploratory and are not saved.
+
+| File | What it holds |
+|---|---|
+| `model_info.json` | Model name, stage, the decision-rule verdict it earned in cross-validation, fish, features, seed, device, versions (Python, scikit-learn, numpy, pandas, torch) |
+| `preprocess.json` | Feature order, `log1p` list, fill values, means and spreads, category values |
+| `classes.json` | Class names in the order of the probability columns |
+| `sklearn.joblib` / `mlp.pt` | The model: a scikit-learn model (joblib), or the MLP's settings and weights (`torch.save`, read back with `weights_only`, so the file cannot run code) |
+| `reference_predictions.csv` | The final model's probabilities for its own training fish (`video_id`, `predicted`, `p:<class>`); a reloaded copy must give exactly these (AC-9, D-006) |
+
+The model's expected performance is the cross-validation estimate in `report.md`, never its score on the fish it was
+refit on. A model whose verdict is *not useful* is still saved (the report and `model_info.json` say so), so the
+pipeline can be checked end to end; do not draw conclusions from its predictions.
+
+```python
+from dcs.artifact import load_model
+model = load_model("outputs/dcs/training/<run_id>")      # device="cuda" to run an MLP on the GPU
+model.version_warnings                                   # set when scikit-learn/torch differ from the saved versions
+model.predict(table)                                     # video_id, predicted, p:<class>; any table from `featurize`
+```
+
+A missing feature column stops with the names of the missing columns; extra columns are ignored. A different
+scikit-learn or torch version gives a warning, not an error: the predictions may differ in the last digits.
 
 ## Training on the GB10 (temporarily accepted data)
 
@@ -683,6 +712,8 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `--device cuda, but PyTorch sees no CUDA GPU` (train) | Install the CUDA build of torch (GB10 runbook, step 1), or run with `--device auto` or `cpu` |
 | `--models must be` / `--stage must be` / `--seed must be` / `--repeats must be` (train) | Fix the command-line value; the message lists what is allowed |
 | `<stage> stage cannot be built: ...` (train) | No stage could be built; the rest of the message is one of the training-set errors above |
+| `No saved model in ...` | `--model` must be a run folder written by `dcs train` (it holds `model/model_info.json`) |
+| `The input lacks ... feature column(s) the model needs` | Build the input with `python -m dcs featurize` from the same `dcs` version as the model |
 | `DCS_TABLE points to ..., which does not exist` (audit) | Run `python -m dcs featurize` first, or point `DCS_TABLE` at a copied table (copy its schema file with it) |
 
 The audit's **notes** are not errors: it always writes `audit.md`. A note such as `vehicle ... is not in the table`
@@ -712,6 +743,7 @@ pytest tests/ -q           # everything, before a commit
 | `test_dcs_no_torch.py` | With torch hidden: `torch_available()` is false and `dcs train --models logreg,mlp --device cuda` runs the baselines and skips the MLP with a message (EC-16) |
 | `test_dcs_ablations.py` | Vehicle normalization: vehicle fish removed, counts logged once; date reference with 2+ vehicle fish; fallback to the framing setup, then all vehicle fish; camera-epoch reference skips the date level; `epoch_of`; the NTT keep rule (gain vs spread, undecided without scheme A); every ablation reported; switch ablations reuse the main folds; the FR-9 pair shares classes and folds; FR-9 is a note when the vehicle is not a kept class; `camera_epochs` switches the reference |
 | `test_dcs_stage2.py` | One dose model per compound with two doses, never the vehicle; a compound left with one dose gets none; date-only and the permuted score beside every dose model; the FR-9 variant on the same folds; without the vehicle it is a note; no dose class left is a note, not a stop; `dcs train` writes one section, metrics rows and confusion PNG per compound |
+| `test_dcs_artifact.py` | `model/` holds the files of PRD §7.4 plus the reference predictions, classes in probability order, model named in the report and `run_info.json`; reload in a **fresh process** reproduces the reference (EC-18) for logistic regression and (with torch) the MLP; a version mismatch is a warning; a missing feature column is an error naming it; no model folder is an error |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A; no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
