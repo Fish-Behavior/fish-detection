@@ -915,7 +915,7 @@ details[open] summary::before {
   width: calc(100% - 66px);
   height: 70px;
   cursor: crosshair;
-  touch-action: none;
+  touch-action: pan-y;
 }
 .time-axis {
   display: flex;
@@ -1316,6 +1316,9 @@ tbody tr:hover {
   }
   .editors {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .editors > :first-child {
+    grid-column: 1 / -1;
   }
   .frame-control > span {
     margin-left: 0;

@@ -23,7 +23,7 @@ npm run preview
 ## Try the workflow
 
 1. Play the synthetic clip, change playback speed, or seek using the slider, numeric time, charts, or segment table.
-2. Switch to **Review & corrections**. The selected video and time remain shared.
+2. Switch to **Review**. The selected video and time remain shared.
 3. Enter a reviewer name. Choose a video interaction to draw a point, keypoint, waterline, ROI, or detector box. Numeric fields provide keyboard alternatives. Apply the draft in its corresponding panel.
 4. Correct a behavior time range. The reviewed timeline and time totals update. Later overlapping edits win.
 5. Expand **Override final drug / dose** to record a manual decision. It does not alter the automatic compound-probability bars. Model dose prediction is unavailable in the current DCS artifact.

@@ -30,7 +30,9 @@ export interface VideoProps {
   sceneDraft: Scene
   frameDraft: FrameValue
   sketch: (tool: EditTool, p: Point | Box) => void
+  nudge: (tool: EditTool, dx: number, dy: number) => void
 }
+const PREVIEW = '#c6b4ff'
 export default function VideoPanel(p: VideoProps) {
   const {
     session,
@@ -62,6 +64,28 @@ export default function VideoPanel(p: VideoProps) {
   )
   const frame = frameAt(session, index, edits),
     scene = edits.scene ?? session.scene
+  const finite = (...n: (number | null)[]) => n.every(Number.isFinite),
+    validBox = (b: Box) => finite(...b) && b[2] > b[0] && b[3] > b[1],
+    sameBox = (a: Box, b: Box) => a.every((v, i) => v === b[i])
+  const d = p.frameDraft
+  // Unsaved drafts preview whenever they differ from the saved value, whatever tool is selected.
+  const draft = {
+    waterline:
+      finite(p.sceneDraft.waterline) &&
+      p.sceneDraft.waterline !== scene.waterline,
+    roi: validBox(p.sceneDraft.roi) && !sameBox(p.sceneDraft.roi, scene.roi),
+    box: validBox(d.box) && !sameBox(d.box, frame.box),
+    point:
+      d.detected && finite(d.x, d.y) && (d.x !== frame.x || d.y !== frame.y),
+    keypoints: Object.entries(d.keypoints)
+      .filter(
+        ([k, [x, y]]) =>
+          finite(x, y) &&
+          (x !== frame.keypoints[k][0] || y !== frame.keypoints[k][1]),
+      )
+      .map(([k, [x, y]]) => [k, x, y] as [string, number, number]),
+    missing: !d.detected && frame.detected,
+  }
   useEffect(() => {
     setPlaying(false)
     setError('')
@@ -135,7 +159,20 @@ export default function VideoPanel(p: VideoProps) {
             viewBox={`0 0 ${session.overlay.width} ${session.overlay.height}`}
             className={`video-overlay ${tool !== 'inspect' ? 'editing' : ''}`}
             role="img"
-            aria-label="Fish overlays. Use the review forms to edit with the keyboard."
+            aria-label="Fish overlays. With an edit tool selected, focus here and use arrow keys (Shift for 10 px) to move the draft."
+            tabIndex={tool !== 'inspect' ? 0 : undefined}
+            onKeyDown={(e) => {
+              const step = e.shiftKey ? 10 : 1,
+                move = {
+                  ArrowLeft: [-step, 0],
+                  ArrowRight: [step, 0],
+                  ArrowUp: [0, -step],
+                  ArrowDown: [0, step],
+                }[e.key]
+              if (tool === 'inspect' || !move) return
+              e.preventDefault()
+              p.nudge(tool, move[0], move[1])
+            }}
             onPointerDown={(e) => {
               if (tool === 'inspect') return
               const q = locate(e)
@@ -257,66 +294,60 @@ export default function VideoPanel(p: VideoProps) {
                 Fish not detected
               </text>
             )}
-            {tool === 'waterline' &&
-              Number.isFinite(p.sceneDraft.waterline) && (
-                <line
-                  x1="0"
-                  x2={session.overlay.width}
-                  y1={p.sceneDraft.waterline}
-                  y2={p.sceneDraft.waterline}
-                  stroke="#c6b4ff"
-                  strokeWidth="2"
-                />
-              )}
-            {tool === 'roi' &&
-              p.sceneDraft.roi.every(Number.isFinite) &&
-              p.sceneDraft.roi[2] > p.sceneDraft.roi[0] &&
-              p.sceneDraft.roi[3] > p.sceneDraft.roi[1] && (
-                <rect
-                  {...rectangle(p.sceneDraft.roi)}
-                  fill="#c6b4ff11"
-                  stroke="#c6b4ff"
-                  strokeWidth="2"
-                  strokeDasharray="4 3"
-                />
-              )}
-            {tool === 'box' &&
-              p.frameDraft.box.every(Number.isFinite) &&
-              p.frameDraft.box[2] > p.frameDraft.box[0] &&
-              p.frameDraft.box[3] > p.frameDraft.box[1] && (
-                <rect
-                  {...rectangle(p.frameDraft.box)}
-                  fill="none"
-                  stroke="#c6b4ff"
-                  strokeWidth="2"
-                  strokeDasharray="4 3"
-                />
-              )}
-            {tool === 'point' &&
-              p.frameDraft.x !== null &&
-              p.frameDraft.y !== null &&
-              Number.isFinite(p.frameDraft.x) &&
-              Number.isFinite(p.frameDraft.y) && (
-                <circle
-                  cx={p.frameDraft.x}
-                  cy={p.frameDraft.y}
-                  r="6"
-                  fill="none"
-                  stroke="#c6b4ff"
-                  strokeWidth="2"
-                />
-              )}
-            {tool === 'keypoint' &&
-              p.frameDraft.keypoints[p.keypoint].every(Number.isFinite) && (
-                <circle
-                  cx={p.frameDraft.keypoints[p.keypoint][0]}
-                  cy={p.frameDraft.keypoints[p.keypoint][1]}
-                  r="6"
-                  fill="none"
-                  stroke="#c6b4ff"
-                  strokeWidth="2"
-                />
-              )}
+            {draft.waterline && (
+              <line
+                x1="0"
+                x2={session.overlay.width}
+                y1={p.sceneDraft.waterline}
+                y2={p.sceneDraft.waterline}
+                stroke={PREVIEW}
+                strokeWidth="2"
+              />
+            )}
+            {draft.roi && (
+              <rect
+                {...rectangle(p.sceneDraft.roi)}
+                fill="#c6b4ff11"
+                stroke={PREVIEW}
+                strokeWidth="2"
+                strokeDasharray="4 3"
+              />
+            )}
+            {draft.box && (
+              <rect
+                {...rectangle(p.frameDraft.box)}
+                fill="none"
+                stroke={PREVIEW}
+                strokeWidth="2"
+                strokeDasharray="4 3"
+              />
+            )}
+            {draft.point && (
+              <circle
+                cx={p.frameDraft.x!}
+                cy={p.frameDraft.y!}
+                r="6"
+                fill="none"
+                stroke={PREVIEW}
+                strokeWidth="2"
+              />
+            )}
+            {draft.keypoints.map(([name, x, y]) => (
+              <circle
+                key={name}
+                cx={x}
+                cy={y}
+                r="6"
+                fill="none"
+                stroke={PREVIEW}
+                strokeWidth="2"
+              />
+            ))}
+            {draft.missing && (
+              <text x="45" y="112" fill={PREVIEW} fontSize="12">
+                Draft: fish marked missing
+              </text>
+            )}
           </svg>
         )}
         <span className="video-stamp">
@@ -442,7 +473,7 @@ export default function VideoPanel(p: VideoProps) {
           ? 'This file stays on your device. Tracking, charts, predictions, and correction tools require backend processing.'
           : tool === 'inspect'
             ? 'Stored x/y point + optional detector overlays, using prepds field conventions.'
-            : `Edit ${tool}: ${['box', 'roi'].includes(tool) ? 'drag a rectangle' : 'click or drag on the video'}. Apply the draft in the review panel.`}
+            : `Edit ${tool}: ${['box', 'roi'].includes(tool) ? 'drag a rectangle' : 'click or drag on the video'}, or focus the video and use arrow keys (Shift = 10 px). Purple shows the unsaved draft; Apply in the review panel to save.`}
       </p>
     </Card>
   )

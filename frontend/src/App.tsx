@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   COLORS,
   demoProvider,
@@ -15,7 +15,7 @@ import type { Behavior, Box, Edits, Point, Scene } from './model.ts'
 import { Card, Icon } from './ui.tsx'
 import VideoPanel from './VideoPanel.tsx'
 import type { EditTool } from './VideoPanel.tsx'
-import Editors from './Editors.tsx'
+import Editors, { LabelEditor } from './Editors.tsx'
 import { Ethogram, StateSummary, Traces } from './Charts.tsx'
 import Chat from './Chat.tsx'
 
@@ -36,7 +36,7 @@ export default function App() {
       frameAt(session, 0, emptyEdits()),
     )
   const [range, setRange] = useState<[number, number]>([2.5, 4]),
-    [label, setLabel] = useState<Behavior>('Controlled Swim')
+    [label, setLabel] = useState<Behavior>('Erratic Movement')
   const [compound, setCompound] = useState('COMPOUND_A'),
     [dose, setDose] = useState('')
   const [reviewStatus, setReviewStatus] = useState('PROCESSED_AUTO'),
@@ -59,12 +59,20 @@ export default function App() {
   const current =
     segments.find((s) => s.start_s <= time && s.end_s > time) ??
     segments.at(-1)!
+  // Only preview a relabel that would actually change something in the chosen range.
+  const labelDraft =
+    tab === 'review' &&
+    range.every(Number.isFinite) &&
+    range[0] < range[1] &&
+    segments.some(
+      (s) => s.start_s < range[1] && s.end_s > range[0] && s.state !== label,
+    )
   const editCount =
     Object.keys(edits.frames).length +
     edits.labels.length +
     Number(!!edits.scene) +
     Number(!!edits.finalResult)
-  useEffect(() => {
+  useLayoutEffect(() => {
     setFrameDraft(frameAt(session, frameIndex, edits))
   }, [frameIndex, edits.frames])
   useEffect(
@@ -148,6 +156,58 @@ export default function App() {
           [keypoint]: [p[0], p[1], f.keypoints[keypoint][2]],
         },
       }))
+  }
+  const nudge = (kind: EditTool, dx: number, dy: number) => {
+    const { width, height } = session.overlay,
+      clamp = (v: number, max: number) => Math.max(0, Math.min(max, v)),
+      shift = (b: Box): Box => {
+        const x = Math.max(-b[0], Math.min(width - b[2], dx)),
+          y = Math.max(-b[1], Math.min(height - b[3], dy))
+        return [b[0] + x, b[1] + y, b[2] + x, b[3] + y]
+      }
+    if (kind === 'waterline')
+      setSceneDraft((s) => ({ ...s, waterline: clamp(s.waterline + dy, height) }))
+    if (kind === 'roi') setSceneDraft((s) => ({ ...s, roi: shift(s.roi) }))
+    if (kind === 'box') setFrameDraft((f) => ({ ...f, box: shift(f.box) }))
+    if (kind === 'point')
+      setFrameDraft((f) => ({
+        ...f,
+        x: clamp((f.x ?? width / 2) + dx, width),
+        y: clamp((f.y ?? height / 2) + dy, height),
+        detected: true,
+      }))
+    if (kind === 'keypoint')
+      setFrameDraft((f) => {
+        const [x, y, c] = f.keypoints[keypoint]
+        return {
+          ...f,
+          keypoints: {
+            ...f.keypoints,
+            [keypoint]: [clamp(x + dx, width), clamp(y + dy, height), c],
+          },
+        }
+      })
+  }
+  const saveLabels = () =>
+    apply(() => {
+      validateInterval(range[0], range[1], session.duration)
+      setEdits((e) => ({
+        ...e,
+        labels: [
+          ...e.labels,
+          {
+            start_s: range[0],
+            end_s: range[1],
+            state: label,
+            reviewer: reviewer.trim(),
+          },
+        ],
+      }))
+    }, 'Behavior correction saved. Timeline and totals updated; feature/prediction results are stale.')
+  const resetLabels = () => {
+    setEdits((e) => ({ ...e, labels: [] }))
+    setReviewStatus('EDITED')
+    announce('Automatic behavior labels restored.')
   }
   const changeTab = (next: 'dashboard' | 'review') => {
     setTab(next)
@@ -320,14 +380,14 @@ export default function App() {
             onClick={() => changeTab('dashboard')}
           >
             <Icon name="dashboard" />
-            Analysis dashboard
+            Dashboard
           </button>
           <button
             className={tab === 'review' ? 'active' : ''}
             onClick={() => changeTab('review')}
           >
             <Icon name="review" />
-            Review & corrections
+            Review
             {editCount > 0 && <span className="nav-count">{editCount}</span>}
           </button>
         </nav>
@@ -406,7 +466,7 @@ export default function App() {
           <span>
             <b>Workspace</b>
             <span className="crumb">/</span>
-            {tab === 'dashboard' ? 'Analysis' : 'Review'}
+            {tab === 'dashboard' ? 'Dashboard' : 'Review'}
           </span>
           <span className="preview-pill">
             <span />
@@ -418,9 +478,7 @@ export default function App() {
             <div>
               <p className="eyebrow">ZEBRAFISH · SESSION WORKSPACE</p>
               <h1>
-                {tab === 'dashboard'
-                  ? 'From movement to insight.'
-                  : 'A closer look. A clearer result.'}
+                {tab === 'dashboard' ? 'Dashboard' : 'Review'}
               </h1>
               <p className="subtitle">
                 {tab === 'dashboard'
@@ -545,6 +603,7 @@ export default function App() {
                 sceneDraft={sceneDraft}
                 frameDraft={frameDraft}
                 sketch={sketch}
+                nudge={nudge}
               />
               {!isLocal && (
                 <>
@@ -557,7 +616,20 @@ export default function App() {
                     setRange={setRange}
                     seek={seek}
                     stale={stale.labels}
+                    draft={labelDraft ? label : undefined}
                   />
+                  {tab === 'review' && (
+                    <LabelEditor
+                      session={session}
+                      edits={edits}
+                      range={range}
+                      setRange={setRange}
+                      state={label}
+                      setState={setLabel}
+                      saveLabels={saveLabels}
+                      resetLabels={resetLabels}
+                    />
+                  )}
                   <Traces
                     session={session}
                     time={time}
@@ -710,10 +782,6 @@ export default function App() {
                     frame={frameDraft}
                     setFrame={setFrameDraft}
                     frameIndex={frameIndex}
-                    range={range}
-                    setRange={setRange}
-                    state={label}
-                    setState={setLabel}
                     saveScene={() =>
                       apply(() => {
                         validateScene(
@@ -749,23 +817,6 @@ export default function App() {
                         }))
                       }, `Frame ${frameIndex} correction saved. Dependent results are stale.`)
                     }
-                    saveLabels={() =>
-                      apply(() => {
-                        validateInterval(range[0], range[1], session.duration)
-                        setEdits((e) => ({
-                          ...e,
-                          labels: [
-                            ...e.labels,
-                            {
-                              start_s: range[0],
-                              end_s: range[1],
-                              state: label,
-                              reviewer: reviewer.trim(),
-                            },
-                          ],
-                        }))
-                      }, 'Behavior correction saved. Timeline and totals updated; feature/prediction results are stale.')
-                    }
                     resetScene={() => {
                       setEdits((e) => ({ ...e, scene: null }))
                       setSceneDraft(initialScene())
@@ -784,16 +835,6 @@ export default function App() {
                       setReviewStatus('EDITED')
                       announce('Automatic frame restored.')
                     }}
-                    resetLabels={() => {
-                      setEdits((e) => ({ ...e, labels: [] }))
-                      setReviewStatus('EDITED')
-                      announce('Automatic behavior labels restored.')
-                    }}
-                  />
-                  {results}
-                  <StateSummary
-                    segments={segments}
-                    duration={session.duration}
                   />
                   <Card
                     title="Review decision"
@@ -837,6 +878,11 @@ export default function App() {
                       </button>
                     </div>
                   </Card>
+                  {results}
+                  <StateSummary
+                    segments={segments}
+                    duration={session.duration}
+                  />
                 </>
               )}
             </div>

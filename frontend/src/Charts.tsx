@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { COLORS, STATES, totals } from './model.ts'
-import type { DemoSession, Segment } from './model.ts'
+import type { Behavior, DemoSession, Segment } from './model.ts'
 import { Card } from './ui.tsx'
 
 export function StateSummary({
@@ -53,6 +53,7 @@ export function Ethogram({
   setRange,
   seek,
   stale,
+  draft,
 }: {
   original: Segment[]
   segments: Segment[]
@@ -62,6 +63,7 @@ export function Ethogram({
   setRange: (r: [number, number]) => void
   seek: (t: number) => void
   stale: boolean
+  draft?: Behavior
 }) {
   const start = useRef<number | null>(null)
   const getTime = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -133,6 +135,20 @@ export function Ethogram({
             </rect>
           )),
         )}
+        {draft && range.every(Number.isFinite) && range[0] < range[1] && (
+          <rect
+            x={(range[0] / duration) * 1000}
+            y="44"
+            width={((range[1] - range[0]) / duration) * 1000}
+            height="34"
+            fill={COLORS[draft]}
+            stroke="#c6b4ff"
+            strokeWidth="3"
+            strokeDasharray="4 3"
+          >
+            <title>Draft: {draft} (not saved)</title>
+          </rect>
+        )}
         {range.every(Number.isFinite) && range[0] < range[1] && (
           <rect
             x={(range[0] / duration) * 1000}
@@ -168,8 +184,10 @@ export function Ethogram({
         ))}
       </div>
       <p className="small muted">
-        Selection: {range[0].toFixed(2)}–{range[1].toFixed(2)} s. The reviewed
-        row includes manual labels.
+        Selection: {range[0].toFixed(2)}–{range[1].toFixed(2)} s.{' '}
+        {draft
+          ? `The reviewed row previews ${draft} here until you apply it.`
+          : 'The reviewed row includes manual labels.'}
       </p>
     </Card>
   )

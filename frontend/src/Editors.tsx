@@ -94,7 +94,12 @@ export interface EditorProps {
   resetFrame: () => void
   resetLabels: () => void
 }
-export default function Editors(p: EditorProps) {
+export default function Editors(
+  p: Omit<
+    EditorProps,
+    'range' | 'setRange' | 'state' | 'setState' | 'saveLabels' | 'resetLabels'
+  >,
+) {
   const { session, frame, scene } = p,
     { width, height } = session.overlay
   const kp = frame.keypoints[p.keypoint]
@@ -114,7 +119,7 @@ export default function Editors(p: EditorProps) {
             value={p.reviewer}
             onChange={(e) => p.setReviewer(e.target.value)}
             maxLength={100}
-            placeholder="Name for this review"
+            placeholder="Needed to save, not to preview"
             autoComplete="name"
           />
         </label>
@@ -134,8 +139,10 @@ export default function Editors(p: EditorProps) {
           </select>
         </label>
         <p className="small muted">
-          Draw on the video or use the fields below. Purple markers preview
-          unsaved drafts. Changing frames discards unsaved frame drafts.
+          Changes preview instantly in purple on the video and timeline. Draw on
+          the video, nudge with arrow keys, or edit the fields; nothing is
+          saved until you apply it. Changing frames discards unsaved frame
+          drafts.
         </p>
       </Card>
       <Card
@@ -274,57 +281,75 @@ export default function Editors(p: EditorProps) {
           <button onClick={p.resetFrame}>Restore frame</button>
         </div>
       </Card>
-      <Card title="Relabel a time range" eyebrow="Behavior override">
-        <div className="field-grid">
-          <NumberField
-            label="From (s)"
-            value={p.range[0]}
-            max={session.duration}
-            onChange={(n) => p.setRange([n, p.range[1]])}
-          />
-          <NumberField
-            label="To (s)"
-            value={p.range[1]}
-            max={session.duration}
-            onChange={(n) => p.setRange([p.range[0], n])}
-          />
-        </div>
-        <label className="field">
-          Behavior state
-          <select
-            aria-label="Behavior state"
-            value={p.state}
-            onChange={(e) => p.setState(e.target.value as Behavior)}
-          >
-            {STATES.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-        <div className="button-row">
-          <button className="primary" onClick={p.saveLabels}>
-            Apply behavior
-          </button>
-          <button onClick={p.resetLabels}>Restore labels</button>
-        </div>
-        <p className="small muted">
-          Latest overlapping correction wins. Automatic labels remain visible in
-          the timeline.
-        </p>
-        {p.edits.labels.length > 0 && (
-          <ul className="edit-list">
-            {p.edits.labels.map((e, i) => (
-              <li key={i}>
-                <b>
-                  {e.start_s.toFixed(2)}–{e.end_s.toFixed(2)} s
-                </b>{' '}
-                · {e.state}
-                <span>by {e.reviewer}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
     </div>
+  )
+}
+
+export function LabelEditor(
+  p: Pick<
+    EditorProps,
+    | 'session'
+    | 'edits'
+    | 'range'
+    | 'setRange'
+    | 'state'
+    | 'setState'
+    | 'saveLabels'
+    | 'resetLabels'
+  >,
+) {
+  const { session } = p
+  return (
+    <Card title="Relabel a time range" eyebrow="Behavior override">
+      <div className="field-grid">
+        <NumberField
+          label="From (s)"
+          value={p.range[0]}
+          max={session.duration}
+          onChange={(n) => p.setRange([n, p.range[1]])}
+        />
+        <NumberField
+          label="To (s)"
+          value={p.range[1]}
+          max={session.duration}
+          onChange={(n) => p.setRange([p.range[0], n])}
+        />
+      </div>
+      <label className="field">
+        Behavior state
+        <select
+          aria-label="Behavior state"
+          value={p.state}
+          onChange={(e) => p.setState(e.target.value as Behavior)}
+        >
+          {STATES.map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+      </label>
+      <div className="button-row">
+        <button className="primary" onClick={p.saveLabels}>
+          Apply behavior
+        </button>
+        <button onClick={p.resetLabels}>Restore labels</button>
+      </div>
+      <p className="small muted">
+        Latest overlapping correction wins. Automatic labels remain visible in
+        the timeline.
+      </p>
+      {p.edits.labels.length > 0 && (
+        <ul className="edit-list">
+          {p.edits.labels.map((e, i) => (
+            <li key={i}>
+              <b>
+                {e.start_s.toFixed(2)}–{e.end_s.toFixed(2)} s
+              </b>{' '}
+              · {e.state}
+              <span>by {e.reviewer}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
