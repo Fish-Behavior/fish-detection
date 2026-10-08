@@ -4,10 +4,12 @@ import { Icon } from './ui.tsx'
 
 export default function Chat({
   ask,
+  available,
   open,
   onOpenChange,
 }: {
   ask: (q: ChatQuestion) => Promise<ChatAnswer>
+  available: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -46,7 +48,7 @@ export default function Chat({
             </span>
             <div>
               <h2>Research assistant</h2>
-              <span>Answers only</span>
+              <span>{available ? 'Answers only' : 'Not connected'}</span>
             </div>
             <button
               className="icon-button"
@@ -64,8 +66,11 @@ export default function Chat({
           >
             <div className="chat-welcome">
               <h3>A little help, wherever you need it.</h3>
-              <p>Ask about this session or the review workflow.</p>
+              <p>{available
+                ? 'Ask about stored behavior data, compounds, or model results.'
+                : 'The research chat model is not configured yet. Connect the chat service to enable answers.'}</p>
               <button
+                disabled={!available}
                 onClick={() => {
                   setQuestion('What happens when I correct a tracking point?')
                   input.current?.focus()
@@ -91,7 +96,7 @@ export default function Chat({
             onSubmit={async (e) => {
               e.preventDefault()
               const q = question.trim()
-              if (!q || busy) return
+              if (!available || !q || busy) return
               setBusy(true)
               setError('')
               try {
@@ -115,6 +120,7 @@ export default function Chat({
               ref={input}
               id="chat-question"
               value={question}
+              disabled={!available}
               onChange={(e) => setQuestion(e.target.value)}
               maxLength={2000}
               placeholder="Ask a research question…"
@@ -122,7 +128,7 @@ export default function Chat({
             <button
               type="submit"
               aria-label="Send question"
-              disabled={!question.trim() || busy}
+              disabled={!available || !question.trim() || busy}
             >
               <Icon name="arrow" />
             </button>

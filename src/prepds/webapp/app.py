@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from prepds import review_store
-from prepds.config import ConfigError
+from prepds.config import ConfigError, Settings
 from prepds.explain import VideoExplainer
 from prepds.calibration.profile import labeling_thresholds
 from prepds.listing_flags import read_listing_flags
@@ -68,6 +68,12 @@ def create_app(
     profile_dir: Path | None = None,
     clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc),
     allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS,
+    settings: Settings | None = None,
+    chat_url: str | None = None,
+    predictions_path: Path | None = None,
+    frontend_dir: Path | None = None,
+    classifier_root: Path | None = None,
+    model_run: Path | None = None,
 ) -> FastAPI:
     """`processed_dir`: one subdirectory per video (export output).
 
@@ -81,6 +87,12 @@ def create_app(
     explainers: dict[tuple[str, int, int, str], tuple[VideoExplainer, str | None]] = {}  # small cache: replaying a track takes a moment
     app = FastAPI(title="prepds review")
     install_local_guards(app, allowed_hosts)
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(_request, error):
+        import logging
+        logging.getLogger(__name__).error('Backend request failed', exc_info=error)
+        return JSONResponse(status_code=500, content={'detail': {'code': 'backend_error', 'message': 'The backend could not complete this request. Check its log and retry.'}})
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request, error: RequestValidationError) -> JSONResponse:
@@ -319,11 +331,19 @@ def create_app(
             raise _conflict("invalid_transition", error) from error
         return detail(video_id)
 
+    from prepds.webapp.workspace import install_workspace
+    install_workspace(app, processed_dir, video_dir=video_dir, profile_dir=profile_dir, settings=settings,
+                      chat_url=chat_url, predictions_path=predictions_path, classifier_root=classifier_root,
+                      model_run=model_run, overlay_window=overlay_window, video_detail=detail,
+                      explain_second=explain_second, clock=clock)
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    if frontend_dir is not None and (frontend_dir / 'index.html').is_file():
+        app.mount('/assets', StaticFiles(directory=frontend_dir / 'assets'), name='frontend-assets')
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+        return FileResponse((frontend_dir if frontend_dir is not None and (frontend_dir / 'index.html').is_file() else STATIC_DIR) / "index.html", media_type="text/html")
 
     return app
 
@@ -333,11 +353,15 @@ def _conflict(code: str, error: Exception) -> HTTPException:
 
 
 def _resolve_source(path: Path, video_dir: Path | None) -> Path | None:
-    """The source video to serve, or None: it must be a video file, and under `video_dir` when one is set."""
+    """Resolve a video-folder or working-directory relative source, always contained by `video_dir`."""
     if not path.is_absolute():
         if video_dir is None:
             return None
+        local = path.resolve()
         path = video_dir / path
+        # Pipeline manifests can already include the repository-relative video-folder prefix.
+        if not path.exists() and path.resolve().is_relative_to(video_dir.resolve()) and local.is_file() and local.is_relative_to(video_dir.resolve()):
+            path = local
     resolved = path.resolve()
     if video_dir is not None and not resolved.is_relative_to(video_dir.resolve()):
         return None

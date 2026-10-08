@@ -41,6 +41,14 @@ def test_defaults_when_nothing_set() -> None:
     assert settings.workers == default_workers()
 
 
+def test_fishlab_chat_service_is_separate_from_dcs_language_model() -> None:
+    settings = load_settings(environ={"DCS_CHAT_BASE_URL": "http://127.0.0.1:11434/v1"})
+    assert settings.service == {}
+    settings = load_settings(environ={"FISHLAB_CHAT_URL": "http://127.0.0.1:8010",
+                                      "DCS_CHAT_BASE_URL": "http://127.0.0.1:11434/v1"})
+    assert settings.service == {"FISHLAB_CHAT_URL": "http://127.0.0.1:8010"}
+
+
 def test_env_var_sets_video_dir(tmp_path: Path) -> None:
     video_dir = tmp_path / "videos"
     video_dir.mkdir()

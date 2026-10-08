@@ -1,39 +1,108 @@
-# Backend connection handoff
+# Backend integration
 
-The React frontend is complete as a UI but has no API, database, or inference connection, and it ships with no data: until the backend supplies a session it shows only "No data yet" and hides the chat. The next implementation belongs on a separate backend branch from local `master`, followed by Docker integration on its own branch, as agreed for the first delivery.
+Implemented on `feature/frontend-backend`. Docker remains the next separate phase.
 
-## Frontend boundary
+The React UI uses the existing prepds FastAPI service. The application is a local, single reviewer tool with one Uvicorn worker. PostgreSQL is unnecessary for this workflow: each save atomically replaces a per-video JSON file. A revision check under a filesystem lock rejects stale saves from other tabs.
 
-`src/api.ts` is the only integration point and has two stubs to replace:
+## Run
 
-- `loadSession(): Promise<SessionData | null>` — resolve `null` when there is no session, reject on failure (the UI shows the error and never substitutes other data).
-- `askChat: ((q: ChatQuestion) => Promise<ChatAnswer>) | null` — leave `null` to hide the chat bubble; set it to the DCS `/api/ask` adapter to show it. Rejections appear inside the chat.
+From the repository root, configure `.env` using `.env.example`, including `PDS_VIDEO_DIR`, `PDS_DB_PATH`, `PDS_OUTPUT_DIR`, and `PDS_ACCEPTED_DIR`. Source videos stay in the configured folder; no uploads are required.
 
-`src/model.ts` owns the normalized `SessionData`, `OverlayWindow`, `DetectionOut`, correction, prediction, and chat types. `App.tsx` calls `loadSession()` once on startup; a video list/selection, refresh, and persistence calls still need to be added (the sidebar currently shows the one loaded session).
+```sh
+.venv/bin/python -m prepds catalog
+cd frontend
+npm ci
+npm start
+```
 
-The current UI expects a session with a browser-playable `video_url`, duration, positive coded frame width/height, scene, time-aligned overlay arrays, behavior segments, measurement samples, and predictions. Source-frame pixel coordinates are used for overlays and correction validation. Absent data is explicit: a frame with no detector record has `box: null` and no keypoints (`frameAt()` never generates geometry); `predictions` is `null` when no model result exists; `measurements`, `segments`, and the overlay arrays may be empty, and the UI then hides or marks the affected cards and pipeline stages as unavailable. Validate probabilities as finite values from 0 to 1; do not manufacture probabilities, confidence scores, measurements, or dose estimates.
+Open `http://127.0.0.1:8000/` (host and ports come from `FISHLAB_HOST`, `FISHLAB_PORT`, `FISHLAB_API_PORT` in the root `.env`). `npm start` builds and starts the complete app. `npm run preview` starts the same Python server with the existing build. `npm run dev` starts a private Python API on port 8008, waits for it, and starts Vite on port 8000; `/api`, `/docs` and `/openapi.json` are proxied. All three commands present the same browser address, read `.env` from the repository root, check for occupied ports and stop their owned processes on Ctrl+C. Run only one of them at a time.
 
-`OverlayWindow` in the existing prepds API permits `width` and `height` to be null. Its `/overlay` endpoint is limited to windows of at most 30 seconds. The adapter must load bounded windows around playback, keep their timestamps and frame indices aligned, and obtain/verify coded dimensions before allowing coordinate edits. Video playback needs a browser-reachable URL with range requests. Preserve the automatic baseline separately from manual corrections and identify stale derived outputs after upstream edits.
+The advanced `.venv/bin/python -m prepds review` command still serves `frontend/dist` when present, otherwise the original prepds review page. It can be used independently of the npm launcher. `--frontend-dir` selects another build folder. The launcher accepts the optional `--chat-url`, `--predictions`, `--classifier-root` and `--model-run` review arguments, but fixes its own host, ports and frontend directory.
 
-## Existing services and gaps
+Manifest source paths may be absolute, relative to `PDS_VIDEO_DIR`, or repository-relative as written by the pipeline. Every resolved video must remain inside the configured source folder. Repository-relative paths no longer receive a duplicate video-folder prefix. Missing files are reported for the selected recording while the reload button stays available.
 
-| Need | Available source | Backend work needed |
-| --- | --- | --- |
-| Processed video list and detail | prepds `GET /videos`, `GET /videos/{video_id}` on local `master` | Build frontend session/list responses; `GET /videos` only includes processed manifests. |
-| Source video and tracking | prepds `GET /videos/{video_id}/video`, `GET /videos/{video_id}/overlay` | Map nullable dimensions and windowed overlay data; expose absence and processing errors. |
-| Waterline | prepds `GET/PUT/DELETE /videos/{video_id}/waterline` | Integrate with the durable correction record and downstream stale state. |
-| Behavior review | prepds `POST /videos/{video_id}/edits`, `/accept`, `/reject` | Reconcile validation and review transitions with this UI. Existing edit API accepts behavior ranges only. |
-| ROI, frame point, missing-fish flag, detector box, keypoints, manual final result | In-memory in the frontend only (no endpoints yet) | Design and persist correction endpoints and original/manual provenance in PostgreSQL. Recompute or mark dependent outputs stale. |
-| Existing video folder | prepds catalog scans MP4 files; current `/videos` lists processed manifests | Configure/mount the existing folder once, inventory available recordings, identify unmatched/unprocessed files, and provide processing status. No per-video upload should be required. |
-| Compound probabilities | DCS `predict` on local `feature/dcs-wrapup` writes `video_id`, `predicted`, and `p:<class>` columns | Expose predictions and model/run provenance after an artifact is available. Show unavailable when no valid result exists. Current DCS does not supply a usable model dose estimate. |
-| Research chat | DCS `POST /api/ask` on local `feature/dcs-wrapup` accepts `{question, history}` and returns `{answer, tool_calls, history}` | Connect with loading/error handling and preserve the answer-only UI. The chat is hidden until `askChat` is set. |
+The sidebar recording list includes processed, unprocessed, unmatched, corrupt, failed, and interrupted recordings. `Run analysis` uses the existing classical tracker, calibrated labeling, and export pipeline for a uniquely matched catalog trial. Fix unmatched or duplicate workbook/catalog identities before processing. Existing output and correction records cannot be overwritten by this action. Processing is serialized within the single server worker, continues after the request, and can be polled or retried after a failure. If the server restarts mid-job, the API reports interrupted status.
 
-## Backend acceptance checks
+## API
 
-1. A configured video folder is inventoried without one-by-one upload. Processed and unprocessed recordings are distinguished; selecting a video keeps playback and charts synchronized.
-2. For an actual video, source dimensions and overlay timestamps align at multiple display sizes. Gaps hide points and split trails; absent detector data never becomes generated geometry.
-3. Server validation rejects out-of-frame coordinates, invalid time ranges, and blank reviewers. Saved corrections survive refresh and retain the automatic baseline and reviewer provenance.
-4. Scene/tracking edits invalidate affected measurements, automatic labels, and predictions. Behavior relabeling updates the reviewed ethogram/totals and invalidates affected features/predictions. Manual final compound/dose remains separate from model probabilities.
-5. Missing artifacts, processing failures, unavailable predictions, and chat errors are visible as such; the UI renders only what the API returns.
+Swagger/OpenAPI: `http://127.0.0.1:8000/docs`.
 
-No API path is specified here for the missing capabilities. Define those paths and PostgreSQL schema with the backend work, then replace the provider calls and add contract tests against the implemented responses.
+| Method and path | Contract |
+| --- | --- |
+| `GET /api/health` | Backend status and configured capabilities |
+| `GET /api/sessions` | Inventory and processing/review summaries |
+| `GET /api/sessions/{id}` | Normalized session, baseline fingerprint, saved review, stale flags and warnings |
+| `GET /api/sessions/{id}/video` | Source stream with byte-range seeking |
+| `GET /api/sessions/{id}/overlay?start_s=…&end_s=…` | At most 30 seconds, with absolute frame indices and source dimensions |
+| `GET /api/sessions/{id}/review-tools?baseline=…` | Existing prepds manifest metadata (without source paths), pipeline review flags, and advisory Listing hints/errors; rejects a changed baseline |
+| `GET /api/sessions/{id}/explain?second=…&baseline=…` | Existing prepds per-second explanation of the original stored track and its exact calibration profile; rejects a changed baseline |
+| `PUT /api/sessions/{id}/review` | `{revision, baseline, reviewer, edits, decision}`; complete replacement of the correction document |
+| `POST /api/sessions/{id}/process` | `{reviewer}`; queue analysis, return 202 |
+| `GET /api/sessions/{id}/processing` | Current job status/message |
+| `POST /api/sessions/{id}/rerun` | `{revision, baseline, reviewer}`; recompute reviewed measurements and labels |
+| `POST /api/sessions/{id}/predict` | `{revision, baseline, reviewer}`; DCS feature extraction and saved-model inference |
+| `POST /api/ask` | DCS `{question, history}` → `{answer, tool_calls, history}` |
+
+`edits` matches `src/model.ts`: nullable scene, frame corrections keyed by absolute frame index, behavior label intervals, and a nullable final compound/dose override. Scene/tracking changes mark measurements, automatic labels and predictions stale; label changes mark derived features/predictions stale. A manual final result stays separate from automatic model probabilities. All corrections and decisions retain reviewer names, server timestamps and revisions. Server validation enforces finite coordinates, source dimensions/frame count, time ranges, reviewers, keypoint scores, known states, and terminal Dead labels.
+
+Errors use HTTP status and `detail`, generally `{code, message}`. Invalid requests return 422, revision or baseline conflicts return 409, unavailable capabilities return 503, and unexpected failures return a sanitized 500 with details only in the backend log. The UI provides request timeouts, reload, inline errors, processing polling, and save acknowledgment. On a timeout, reload before retrying because the server may have committed the save. If another tab saved, reload to obtain its revision.
+
+## Persistence and recalculation
+
+`<PDS_OUTPUT_DIR>/processed/<video_id>/review.json` holds the current corrections, revision, reviewer, timestamp, independent review decision, recalculated results and model result/provenance. `processing.json` holds the latest job status. Writes use a same-filesystem temporary file, flush/fsync and atomic replacement. `.workspace.lock` protects the revision check plus write. There is no database, migration, version-history system, or per-edit append-only log.
+
+Automatic `frames.parquet`, `segments.csv`, detector data and manifests remain the original baseline; manual changes replace `review.json`. Reset restores the original result while keeping a durable reset revision. Fingerprints include source and pipeline artifact sizes/modification times; changed inputs are refused rather than silently reusing corrections. To review a replacement recording, explicitly archive the incompatible `review.json` first. Fingerprints detect changes cheaply and are not content hashes.
+
+`Rerun affected stages` applies manual points, missing-fish flags and ROI membership to the stored track, uses the exact calibration profile for new labels, applies the behavior overrides, and recomputes kinematics using prepds helpers. Measurements that cannot be computed are null and break the chart lines. Waterline depth is displayed only when a waterline is known; calibrated behavior rules retain their existing frame-top coordinate contract. Box/keypoint edits are durable review annotations; they do not invent a calibrated body angle or rerun detector training. Rerun does not decode/retrack the original video or clear compound staleness. `Run compound model` handles that separately.
+
+A FishLab accept/reject decision is saved separately from prepds gold acceptance; it does not publish a gold dataset, erase corrections, validate model performance, or clear stale outputs. The legacy `/videos/.../accept` endpoint retains its existing scientific acceptance rules and gold export behavior.
+
+## Classifier and research chat
+
+DCS currently lives on `feature/dcs-wrapup`. Keep a separate DCS checkout and its environment/settings; the backend does not merge branches, train a model, or fabricate outputs. The Python interpreter running prepds must also have the dependencies that checkout requires. `--classifier-root` supplies DCS source via `PYTHONPATH` to its existing CLI. Exported `DCS_*` paths are resolved against the app's working directory before the subprocess changes to the DCS checkout; the checkout's own `.env` and defaults still supply settings that were not exported. The npm launcher exports the root `.env` automatically; when launching Python directly, export needed DCS variables or configure the DCS checkout's `.env`.
+
+With a trained run and DCS checkout:
+
+```sh
+.venv/bin/python -m prepds review --classifier-root /path/to/dcs-checkout --model-run /path/to/trained-run
+```
+
+Inference builds a temporary per-video snapshot of corrected frames and segments, preserving DCS dtypes and pipeline provenance, then runs native `dcs featurize --videos` and `dcs predict --model`. The original pipeline files are not modified. The temporary snapshot is removed afterward; the probabilities and run name are persisted with the review revision. Required upstream recalculation must finish first. An existing DCS prediction CSV/parquet can also be displayed with `--predictions /path/to/predictions.csv`; invalid probabilities or missing video results are shown as unavailable.
+
+### Terminal workflow
+
+Playback is independent of analysis. Watching a recording to the end does not start inference. `Run analysis` computes tracking and behavior; `Run compound model` runs inference after analysis or correction recalculation. Enter a reviewer name in Review before running either action.
+
+For batch operation, run these commands from the prepds repository root, with DCS settings in the root `.env`. `DCS_PROCESSED_DIR` must point at the prepds output folder and `training.gold_source` must select `processed` for unreviewed outputs; use `accepted` for gold data. The model is trained separately and reused for predictions:
+
+```sh
+.venv/bin/python -m prepds run --skip-existing
+PYTHONPATH=/path/to/dcs-checkout/src .venv/bin/python -m dcs --env-file .env featurize
+PYTHONPATH=/path/to/dcs-checkout/src .venv/bin/python -m dcs --env-file .env predict \
+  --model /path/to/trained-run --input /path/to/training_table.parquet \
+  --out outputs/dcs/compound_predictions.csv
+npm --prefix frontend start -- --classifier-root /path/to/dcs-checkout \
+  --model-run /path/to/trained-run --predictions outputs/dcs/compound_predictions.csv
+```
+
+Stop an existing app before starting another. With `--predictions`, matching results appear when a recording loads; reload after regenerating the CSV. New recordings need inference before a result appears. Saved corrections require per-video recalculation/inference so predictions reflect the reviewed data. The backend does not automatically chain analysis into inference.
+
+Start the existing DCS chat service from its checkout with its configured local model, using `python -m dcs serve-chat --port 8010`. Connect it with:
+
+```sh
+.venv/bin/python -m prepds review --chat-url http://127.0.0.1:8010   # or FISHLAB_CHAT_URL in .env
+```
+
+`DCS_CHAT_BASE_URL` points DCS at its language-model server (for example Ollama's `/v1` endpoint). `FISHLAB_CHAT_URL` points FishLab at the DCS service on port 8010. They are separate services.
+
+Options can be combined. The chat bubble is always available in a session. Without a configured chat service, the panel shows a not-connected message and disables questions; configured services enable sending. Service/model failures remain visible inside chat. The adapter accepts only a loopback HTTP URL and refuses redirects and environment HTTP proxies; remote chat is not enabled by this connection. Questions/history live in the frontend and are not saved in the correction file. The DCS service researches its configured dataset, not unsaved FishLab drafts.
+
+## Verification and limits
+
+- Python contract/regression tests: `pytest tests/review tests/ingest/test_cli.py tests/ingest/test_config.py`; the local optional tracker test needs `torchvision`.
+- Frontend: `npm test` and `npm run build`.
+- Native DCS CLI inference was exercised with a trained synthetic logistic regression artifact and synthetic recording, separately from real research data.
+- Real per-recording inference through `/api/sessions/{id}/predict` was verified on the running app: 15-class probabilities persisted across reload, in about 22 seconds, with the original frames, segments and manifest unchanged.
+- On 2026-10-08, the separate DCS checkout passed 1000 tests. An exploratory CPU logistic regression run trained on 323 retained fish from the existing 328-row unreviewed table, then scored all 328 rows. Its verdict was **not useful**, so these probabilities verify integration and do not establish reliable compound identification. One cross-validation repeat was used and ablations were skipped. Regenerate older artifacts when the DCS model format changes; current artifacts include a model-file checksum.
+- Browser interaction could not be exercised in this environment: Playwright's profile was already in use and no computer-use browser was available. Verify video codec playback, responsive overlays, correction previews, and the full UI on owner hardware.
+- Run one Uvicorn worker, on loopback. This phase has no authentication, multi-user deployment, GPU/model tracker selection in the UI, full retracking after scene edits, validated research model, backup/history policy, transcoding, or Docker. Those are explicit boundaries; Docker is the user's next call.

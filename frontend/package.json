@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "start": "node scripts/serve.mjs",
+    "dev": "node scripts/serve.mjs --dev",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test src/model.test.ts"
+    "preview": "node scripts/serve.mjs --preview",
+    "test": "node --test src/*.test.ts",
+    "test:startup": "node --test scripts/serve.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

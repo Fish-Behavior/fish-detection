@@ -6,6 +6,8 @@ import {
   totals,
   staleFor,
   frameAt,
+  frameIndexAt,
+  adjacentFrameTime,
   trailRuns,
   videoPoint,
   validateScene,
@@ -14,7 +16,16 @@ import {
   validateReviewer,
 } from './model.ts'
 import type { Behavior, SessionData } from './model.ts'
-import { askChat, loadSession } from './api.ts'
+
+test('frame stepping uses stored timestamps, preserves absolute indices and clamps at recording ends', () => {
+  const s = session()
+  s.frame_count = 360
+  s.overlay = { ...s.overlay, frame_idx: [90, 91, 92], t: [3, 3.04, 3.09] }
+  assert.equal(adjacentFrameTime(s, 3.04, 1), 3.09)
+  assert.equal(adjacentFrameTime(s, 3.04, -1), 3)
+  assert.equal(adjacentFrameTime(s, 0, -1), 0)
+  assert.equal(adjacentFrameTime(s, s.duration, 1), 359 / s.overlay.fps)
+})
 
 // Test-only session: 12 s at 30 fps, fish detected except frames 180–191.
 function session(): SessionData {
@@ -200,7 +211,17 @@ test('pointer mapping accounts for letterboxing and responsive scaling', () => {
     [320, 180],
   )
 })
-test('the backend seam returns no data until it is implemented', async () => {
-  assert.equal(await loadSession(), null)
-  assert.equal(askChat, null)
+test('windowed overlays use absolute frame indices and never clamp missing frames', () => {
+  const s = session()
+  s.overlay.frame_idx = [900, 901]
+  s.overlay.t = [30, 30.0333]
+  s.overlay.x = [100, 110]; s.overlay.y = [200, 210]; s.overlay.detected = [true, true]
+  s.overlay.detections = []
+  assert.equal(frameAt(s, 900, emptyEdits()).x, 100)
+  assert.equal(frameAt(s, 30, emptyEdits()).x, null)
+  assert.equal(frameAt(s, 902, emptyEdits()).detected, false)
+  s.frame_count = 1000
+  s.overlay.t = [30.02, 30.055]
+  assert.equal(frameIndexAt(s, 30.02), 900)
+  assert.equal(frameIndexAt(s, 30.055), 901)
 })

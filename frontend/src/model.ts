@@ -33,6 +33,7 @@ export interface OverlayWindow {
   width: number
   height: number
   t: number[]
+  frame_idx?: number[]
   x: (number | null)[]
   y: (number | null)[]
   detected: boolean[]
@@ -42,7 +43,7 @@ export interface OverlayWindow {
 }
 export interface Scene {
   roi: Box
-  waterline: number
+  waterline: number | null
 }
 export interface Segment {
   start_s: number
@@ -80,6 +81,16 @@ export interface SessionData {
   name: string
   video_url: string
   duration: number
+  frame_count?: number
+  baseline?: string
+  review?: ReviewData
+  stale?: ReturnType<typeof staleFor>
+  reviewed_segments?: Segment[] | null
+  warnings?: string[]
+  processing?: { status: string; message: string }
+  processable?: boolean
+  has_tracking?: boolean
+  chat_available?: boolean
   scene: Scene
   overlay: OverlayWindow
   segments: Segment[]
@@ -89,7 +100,57 @@ export interface SessionData {
     predicted: string
     [key: `p:${string}`]: number
   } | null
-  measurements: { t: number; speed: number; turning: number; depth: number }[]
+  measurements: { t: number; speed: number | null; turning: number | null; depth: number | null }[]
+}
+export interface ReviewData {
+  revision: number
+  baseline: string
+  edits: Edits
+  decision: 'ACCEPTED' | 'REJECTED' | null
+  reviewer: string | null
+  updated_at: string | null
+}
+export interface ReviewToolsData {
+  manifest: {
+    subject_id: string
+    sex: string
+    compound: string
+    concentration_mM: string
+    calibration_profile_version: string
+    pipeline_version: string
+    processed_at: string
+    review_status: string
+    reviewer: string | null
+    edit_count: number
+    review_flags: { kind: string; start_s: number; end_s: number; message: string }[]
+  }
+  listing_flags: { start_s: number; end_s: number; max_score: number; n_samples: number }[]
+  listing_flags_error: string | null
+}
+export interface SecondExplanation {
+  start_s: number
+  end_s: number
+  n_frames: number
+  n_detected: number
+  stored_state: string
+  stored_source: string
+  speed_median_px_per_s: number | null
+  y_min_px: number | null
+  thresholds_available: boolean
+  thresholds_error: string | null
+  auto_state: string | null
+  matches_stored: boolean | null
+  votes: Record<string, number>
+  rules: { state: string; frames: number; wins: boolean; detail: string }[]
+}
+export interface SessionSummary {
+  video_id: string
+  name: string
+  processing_status: string
+  processing_message: string
+  processable: boolean
+  review_status: string
+  edited: boolean
 }
 export interface ChatQuestion {
   question: string
@@ -106,6 +167,27 @@ export const emptyEdits = (): Edits => ({
   labels: [],
   finalResult: null,
 })
+export const hasEdits = (e: Edits): boolean => !!e.scene || Object.keys(e.frames).length > 0 || e.labels.length > 0 || !!e.finalResult
+
+export function frameIndexAt(session: SessionData, time: number): number {
+  const { t, frame_idx, fps } = session.overlay
+  let index = Math.round(time * fps)
+  if (frame_idx?.length) {
+    const next = t.findIndex((value) => value >= time)
+    const i = next < 0 ? t.length - 1 : next === 0 || t[next] - time < time - t[next - 1] ? next : next - 1
+    if (Math.abs(t[i] - time) <= 1 / fps) index = frame_idx[i]
+  }
+  return Math.max(0, Math.min(index, (session.frame_count ?? session.overlay.t.length) - 1))
+}
+
+export function adjacentFrameTime(session: SessionData, time: number, direction: -1 | 1): number {
+  const { overlay } = session
+  const last = (session.frame_count ?? Math.ceil(session.duration * overlay.fps)) - 1
+  const index = Math.max(0, Math.min(last, frameIndexAt(session, time) + direction))
+  const local = overlay.frame_idx ? overlay.frame_idx.indexOf(index) : index
+  // Browser seeking is approximate; use stored timestamps when the current window contains them.
+  return overlay.t[local] ?? index / overlay.fps
+}
 
 export function frameAt(
   session: SessionData,
@@ -114,8 +196,8 @@ export function frameAt(
 ): FrameValue {
   if (edits.frames[index]) return structuredClone(edits.frames[index])
   const o = session.overlay,
-    i = Math.max(0, Math.min(index, o.t.length - 1))
-  const d = o.detections.find((d) => d.frame_idx === i)
+    i = o.frame_idx ? o.frame_idx.indexOf(index) : index
+  const d = i < 0 ? undefined : o.detections.find((d) => d.frame_idx === index)
   return {
     x: o.x[i] ?? null,
     y: o.y[i] ?? null,
@@ -170,11 +252,11 @@ export function validateScene(
   height: number,
 ): void {
   validateBox(scene.roi, width, height)
-  if (
+  if (scene.waterline !== null && (
     !Number.isFinite(scene.waterline) ||
     scene.waterline < 0 ||
     scene.waterline > height
-  )
+  ))
     throw new Error('Waterline must be inside the frame.')
 }
 export function validateFrame(

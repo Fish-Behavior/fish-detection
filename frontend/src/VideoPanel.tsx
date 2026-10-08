@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { frameAt, trailRuns, videoPoint } from './model.ts'
+import { adjacentFrameTime, frameAt, frameIndexAt, trailRuns, videoPoint } from './model.ts'
 import type {
   Box,
   SessionData,
@@ -14,6 +14,8 @@ import { Card, Icon } from './ui.tsx'
 export type EditTool =
   'inspect' | 'waterline' | 'roi' | 'point' | 'box' | 'keypoint'
 export interface VideoProps {
+  reviewMode: boolean
+  markRange: (boundary: 'start' | 'end') => void
   session: SessionData
   edits: Edits
   src: string
@@ -33,39 +35,38 @@ export interface VideoProps {
 }
 const PREVIEW = '#c6b4ff'
 export default function VideoPanel(p: VideoProps) {
-  const { session, edits, src, title, time, duration, videoRef, seek, tool } = p
+  const { session, edits, src, title, time, duration, videoRef, seek, reviewMode } = p
+  const tool = reviewMode ? p.tool : 'inspect'
   const [playing, setPlaying] = useState(false),
     [speed, setSpeed] = useState('1'),
     [error, setError] = useState('')
-  const [layers, setLayers] = useState({
+  const defaultLayers = {
     point: true,
     trail: true,
     box: true,
     keypoints: true,
     waterline: true,
     roi: false,
-  })
+  }
+  const [reviewLayers, setLayers] = useState(defaultLayers)
+  const layers = reviewMode ? reviewLayers : defaultLayers
   const drag = useRef<Point | null>(null)
-  const index = Math.max(
-    0,
-    Math.min(
-      Math.round(time * session.overlay.fps),
-      session.overlay.t.length - 1,
-    ),
-  )
+  const index = frameIndexAt(session, time)
   const hasTracking = session.overlay.t.length > 0
   const frame = frameAt(session, index, edits),
     scene = edits.scene ?? session.scene
   const finite = (...n: (number | null)[]) => n.every(Number.isFinite),
     validBox = (b: Box) => finite(...b) && b[2] > b[0] && b[3] > b[1],
     sameBox = (a: Box, b: Box) => a.every((v, i) => v === b[i])
-  const d = p.frameDraft
+  const d = reviewMode ? p.frameDraft : frame
+  const sceneDraft = reviewMode ? p.sceneDraft : scene
   // Unsaved drafts preview whenever they differ from the saved value, whatever tool is selected.
   const draft = {
+    waterlineCleared: sceneDraft.waterline === null && scene.waterline !== null,
     waterline:
-      finite(p.sceneDraft.waterline) &&
-      p.sceneDraft.waterline !== scene.waterline,
-    roi: validBox(p.sceneDraft.roi) && !sameBox(p.sceneDraft.roi, scene.roi),
+      finite(sceneDraft.waterline) &&
+      sceneDraft.waterline !== scene.waterline,
+    roi: validBox(sceneDraft.roi) && !sameBox(sceneDraft.roi, scene.roi),
     box:
       !!d.box && validBox(d.box) && !(frame.box && sameBox(d.box, frame.box)),
     point:
@@ -115,12 +116,22 @@ export default function VideoPanel(p: VideoProps) {
   })
   return (
     <Card
-      title="Tracking workspace"
-      eyebrow="Video + prepds overlays"
+      title={reviewMode ? 'Tracking review workspace' : 'Fish tracker'}
+      eyebrow={reviewMode ? 'Inspect, correct and relabel' : 'Video + tracking overlays'}
       accessory={<span className="badge success">Session video</span>}
       className="video-card"
     >
-      <div className="video-stage">
+      <div className="video-stage" tabIndex={reviewMode ? 0 : undefined}
+        role="group" aria-label={reviewMode ? 'Review player. Arrow keys seek; brackets mark the range.' : 'Session player'}
+        onKeyDown={(e) => {
+          if (!reviewMode || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey ||
+            (e.target as Element).closest('input, select, textarea, button, [contenteditable="true"]')) return
+          if (e.key === '[' || e.key === ']') {
+            e.preventDefault(); p.markRange(e.key === '[' ? 'start' : 'end')
+          } else if (tool === 'inspect' && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            e.preventDefault(); seek(time + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1))
+          }
+        }}>
         <video
           ref={videoRef}
           src={src}
@@ -160,7 +171,7 @@ export default function VideoPanel(p: VideoProps) {
                   ArrowUp: [0, -step],
                   ArrowDown: [0, step],
                 }[e.key]
-              if (tool === 'inspect' || !move) return
+              if (tool === 'inspect' || !move || e.ctrlKey || e.metaKey || e.altKey) return
               e.preventDefault()
               p.nudge(tool, move[0], move[1])
             }}
@@ -204,7 +215,7 @@ export default function VideoPanel(p: VideoProps) {
                 strokeDasharray="5 4"
               />
             )}
-            {layers.waterline && (
+            {layers.waterline && scene.waterline !== null && !draft.waterlineCleared && (
               <line
                 x1="0"
                 x2={session.overlay.width}
@@ -291,12 +302,13 @@ export default function VideoPanel(p: VideoProps) {
               <line
                 x1="0"
                 x2={session.overlay.width}
-                y1={p.sceneDraft.waterline}
-                y2={p.sceneDraft.waterline}
+                y1={p.sceneDraft.waterline ?? undefined}
+                y2={p.sceneDraft.waterline ?? undefined}
                 stroke={PREVIEW}
                 strokeWidth="2"
               />
             )}
+            {draft.waterlineCleared && <text x="45" y="130" fill={PREVIEW} fontSize="12">Draft: waterline cleared</text>}
             {draft.roi && (
               <rect
                 {...rectangle(p.sceneDraft.roi)}
@@ -391,11 +403,11 @@ export default function VideoPanel(p: VideoProps) {
           <option value="2">2×</option>
         </select>
       </div>
-      <div className="frame-control">
+      {reviewMode && <div className="frame-control">
         <button
           onClick={() => {
             videoRef.current?.pause()
-            seek(time - 1 / session.overlay.fps)
+            seek(adjacentFrameTime(session, time, -1))
           }}
         >
           Previous frame
@@ -415,7 +427,7 @@ export default function VideoPanel(p: VideoProps) {
         <button
           onClick={() => {
             videoRef.current?.pause()
-            seek(time + 1 / session.overlay.fps)
+            seek(adjacentFrameTime(session, time, 1))
           }}
         >
           Next frame
@@ -424,13 +436,18 @@ export default function VideoPanel(p: VideoProps) {
           Frame {index} · {session.overlay.width} × {session.overlay.height} ·{' '}
           {session.overlay.fps} fps
         </span>
-      </div>
+      </div>}
+      {reviewMode && <div className="button-row range-markers">
+        <button onClick={() => p.markRange('start')}>Mark range start [</button>
+        <button onClick={() => p.markRange('end')}>Mark range end ]</button>
+        <span className="small muted">Focus the player: ←/→ seek 1 s; Shift seeks 10 s. Browser frame seeking is approximate.</span>
+      </div>}
       {error && (
         <p className="inline-error" role="alert">
           {error}
         </p>
       )}
-      {
+      {reviewMode &&
         <div className="overlay-toggles">
           {Object.entries(layers).map(([key, value]) => (
             <label key={key}>
