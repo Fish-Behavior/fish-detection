@@ -2,7 +2,6 @@ name: fishlab
 
 x-runtime: &runtime
   image: fishlab:local
-  build: .
   init: true
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -35,6 +34,8 @@ services:
 
   app:
     <<: *runtime
+    # Only this service builds; prepare reuses the same image (two builds would race on the tag).
+    build: .
     command: [serve]
     depends_on:
       prepare:
