@@ -39,6 +39,8 @@ dist/
 graphify-out/
 .playwright-mcp/
 .fishlab-launch.lock/
+.fishlab-build.stamp
+.fishlab-ready.stamp
 # Editors / OS
 .vscode/
 .idea/
