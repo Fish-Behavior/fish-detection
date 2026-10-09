@@ -1,0 +1,85 @@
+# Default settings for the compound/dose classifier (`dcs`, docs/PRD.md Part II §7.3).
+#
+# Override any value with your own YAML (DCS_CONFIG or `python -m dcs --config my.yaml`);
+# only the keys you list are changed, nested sections merge key by key. A key that does
+# not exist here is an error, so a typo cannot be silently ignored.
+#
+# These defaults carry no data-derived numbers: thresholds read from the real data are
+# decided at gate G1 from the `dcs audit` report and set in an override file.
+
+training:
+  # Which prepds output to read (D-033). `processed`: the unreviewed pipeline output under
+  # DCS_PROCESSED_DIR (trials_catalog.parquet + processed/<video_id>/), used until videos are
+  # Accepted; every row is marked unreviewed. `accepted`: the reviewed gold folder (DCS_ACCEPTED_DIR).
+  gold_source: processed
+  # Calibration profiles whose name contains this text come from the model tracker (D-003).
+  model_profile_marker: "-model"
+  # Frame rates count as uniform when (max - min) / min is at most this (EC-26); prepds
+  # measures each video's rate, so equal cameras differ in the 4th digit.
+  fps_tolerance: 0.01
+  # One seed controls splits, initialization and shuffling (PRD NFR-1).
+  seed: 0
+  # Folds per cross-validation repeat, for both schemes (PRD §6.4).
+  folds: 5
+  # Cross-validation repeats with different seeds; the spread across them is the
+  # "better by more than the spread" yardstick of PRD §6.6.
+  repeats: 5
+  # Classes with fewer fish are dropped; exactly this many are flagged "very small" (PRD §5.6, Q4).
+  min_class_size: 6
+  # A state's features are dropped when fewer fish show that state at all (PRD §5.3, Q16).
+  min_state_fish: 10
+  # The vehicle (control) compound's name as the workbook writes it (case and spaces ignored). The
+  # audit's G1 stop rule leaves it out, and it shows vehicle fish per date. Set your lab's name here.
+  vehicle_compound: VEHICLE
+  # compound (Stage 1), dose (Stage 2, exploratory) or both.
+  stage: both
+  # Models to train; majority and date_only are the baselines every result is shown next to.
+  models: [majority, date_only, logreg, random_forest, hist_gb, mlp]
+  # Feature-group switches (each is also reported as an ablation, PRD §6.8).
+  # NTT is off until its keep rule passes (D-076): it failed that rule, and `has_ntt` follows the camera epoch (EC-31).
+  use_ntt: false
+  use_demographics: false
+  # Depth from the frame top encodes camera framing; off until the G1 framing check (D-015).
+  use_depth: false
+  # Vehicle reference of the FR-9 ablation (D-061). null: the fish's own date when it has 2+ vehicle fish, else its
+  # camera framing setup (audit, EC-31), else all vehicle fish. A list of dates, each the first day of a new camera
+  # epoch (read them off audit.md, "Camera framing"): the reference is the fish's epoch, which holds many more vehicle
+  # fish. Set it in your override file, never here (no data-derived numbers in the defaults).
+  camera_epochs: null
+  # Flag (never drop) recordings whose length falls outside [min, max] seconds (EC-11).
+  # null = no range check; set it at G1 from the protocol and the audit.
+  duration_range_s: null
+  # Flag (never drop) fish whose share of detected frames is below this (EC-11, D-021).
+  min_detected_fraction: 0.8
+
+  # PyTorch MLP (PRD §6.3); only used when torch is installed.
+  mlp:
+    hidden_sizes: [128, 64]
+    dropout: 0.3
+    learning_rate: 0.001
+    weight_decay: 0.01
+    batch_size: 32
+    max_epochs: 300
+    # Epochs without improvement on the inner validation split before stopping.
+    patience: 20
+    # Share of each training fold held out as the inner validation split for early stopping.
+    inner_val_fraction: 0.2
+    # Number of initialization seeds per fold; the report shows their mean and spread.
+    seeds: 5
+
+# Research chat (`python -m dcs ask`, `python -m dcs serve-chat`; D-073). Any OpenAI-compatible chat server with tool
+# calling: Ollama, a llama.cpp server, vLLM, or a host the lab chooses. Its address is machine-specific, so it is not
+# set here: put it in DCS_CHAT_BASE_URL in your .env (see .env.example).
+# The model only picks query tools and writes the answer; every number comes from the tools (D-071).
+chat:
+  # The model's name as the server lists it (an instruct model that supports tool calling). Set it in your override file.
+  model: null
+  # Low = steadier, more literal answers.
+  temperature: 0.1
+  # Tool calls the model may make for one question before it must answer.
+  max_tool_rounds: 8
+  # Seconds to wait for one reply from the server (a large local model can be slow).
+  timeout_s: 300
+  # A DCS_CHAT_BASE_URL that is not this machine sends data summaries off the box. Only allowed when true; check your
+  # data agreement first. An API key for a hosted server goes in DCS_CHAT_API_KEY in .env, never here.
+  allow_remote: false

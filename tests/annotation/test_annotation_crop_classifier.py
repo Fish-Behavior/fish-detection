@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 torch = pytest.importorskip("torch")
+pytest.importorskip("torchvision")  # the `ml` extra; torch alone comes with dcs's `train` extra
 import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402
 
