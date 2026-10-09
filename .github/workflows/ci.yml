@@ -23,7 +23,7 @@ jobs:
       # everything not owned by the webapp/annotation jobs, so new test files are never skipped
       - name: Run tests/ (all except the webapp and annotation groups)
         run: >-
-          pytest tests/ -q --cov=prepds --cov-report=
+          pytest tests/ -q -n auto --cov=prepds --cov-report=
           --ignore=tests/review --ignore=tests/annotation
       - uses: actions/upload-artifact@v4
         with: {name: cov-backend, path: cov-backend}
@@ -39,7 +39,7 @@ jobs:
         with: {python-version: "3.11", cache: pip, cache-dependency-path: pyproject.toml}
       - run: pip install -e ".[dev]"
       - name: Run tests/ (review web app group)
-        run: pytest -q --cov=prepds --cov-report= tests/review
+        run: pytest -q -n auto --cov=prepds --cov-report= tests/review
       - uses: actions/upload-artifact@v4
         with: {name: cov-webapp, path: cov-webapp}
 
@@ -55,7 +55,7 @@ jobs:
       - run: pip install -e ".[dev]"
       # torch tests skip themselves (no [ml] extra), so train.py / crop_classifier.py / model_tracker.py stay uncovered here
       - name: Run tests/ (annotation and model group)
-        run: pytest -q --cov=prepds --cov-report= tests/annotation
+        run: pytest -q -n auto --cov=prepds --cov-report= tests/annotation
       - uses: actions/upload-artifact@v4
         with: {name: cov-annotation, path: cov-annotation}
 
