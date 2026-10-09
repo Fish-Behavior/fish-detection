@@ -1,6 +1,19 @@
 #!/bin/sh
 set -eu
 
+full=0
+setup=0
+for arg in "$@"; do
+    case "$arg" in
+        --setup) setup=1 ;;
+        --full) full=1; setup=1 ;;
+        *) echo 'Usage: ./start.sh [--setup | --full]
+  (no flag)  build if needed, start the app; needs a finished setup
+  --setup    build + prepare data (check, catalog, track, DCS) when needed, then stop
+  --full     like --setup but redo every step' >&2; exit 2 ;;
+    esac
+done
+
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 export FISHLAB_ROOT="$PWD"
 export FISHLAB_UID="$(id -u)" FISHLAB_GID="$(id -g)"
@@ -74,6 +87,10 @@ FishLab startup workflow (stops at the first failed step and names it):
   5. DCS        featurize, check-config, audit, model (trains only if none is saved), predict
   6. Chat       optional, only if enabled in .env
   7. Serve      start frontend + API, wait for health, print the link
+Two modes: ./start.sh --setup does steps 1-5 (slow, once per machine or after inputs change);
+plain ./start.sh builds if needed and runs step 7, and tells you to run --setup when it is required.
+Fast path: if the image and the inputs (.env, workbook, videos, config, DCS checkout) are unchanged
+since the last successful run, steps 1-5 are skipped and only step 7 runs. Use ./start.sh --full to redo everything.
 Review and accept videos in the browser, then run ./stop.sh to shut down.
 
 Average waiting times (steps under ~1 min are not listed):
@@ -83,12 +100,71 @@ Average waiting times (steps under ~1 min are not listed):
   - 5 DCS:    only the model training is slow and only when no saved model exists; not timed
 
 EOF
-step="frontend and Python image build"
-docker compose build
-step="stop the previous Compose app"
-docker compose stop app
-step="prepds / DCS preparation (see the named step in the log)"
-docker compose up --no-build --force-recreate --abort-on-container-exit --exit-code-from prepare prepare
+# Fast path: stamps record the last fully successful build / preparation. When nothing they depend on
+# changed, those steps are skipped. Any doubt (missing stamp, newer file, different video count,
+# failed previous prepare, --full) falls back to the full, safe path.
+build_stamp=.fishlab-build.stamp
+ready_stamp=.fishlab-ready.stamp
+changed() { # changed STAMP PATH... : true if STAMP is missing or any existing PATH has a file newer than it
+    stamp=$1; shift
+    [ -f "$stamp" ] || return 0
+    for path in "$@"; do
+        [ -e "$path" ] || continue
+        [ -n "$(find "$path" -newer "$stamp" -type f ! -path '*/node_modules/*' ! -path '*/dist/*' -print -quit 2>/dev/null)" ] && return 0
+    done
+    return 1
+}
+# Only .mp4 files matter to the catalog. PDS_VIDEO_DIR may be the repo itself, so skip generated/work folders.
+mp4s() { find "$(envval PDS_VIDEO_DIR)" \( -name .git -o -name .venv -o -name node_modules -o -name outputs -o -name accepted \) -prune -o -type f -iname '*.mp4' "$@" -print 2>/dev/null; }
+video_count() { mp4s | wc -l | tr -d ' '; }
+videos_changed() { [ -f "$ready_stamp" ] || return 0; [ -n "$(mp4s -newer "$ready_stamp" | head -n 1)" ]; }
+output_dir="$(envval PDS_OUTPUT_DIR)"; output_dir="${output_dir:-outputs}"
+
+need_build=1
+if [ "$full" -eq 0 ] && docker image inspect fishlab:local >/dev/null 2>&1 \
+    && ! changed "$build_stamp" Dockerfile pyproject.toml uv.lock README.md src/prepds config scripts/docker_app.py frontend; then
+    need_build=0
+fi
+
+need_prepare=1
+if [ "$full" -eq 0 ] && [ -f "$output_dir/docker/startup.json" ] \
+    && grep -q '"ok": true' "$output_dir/docker/startup.json" \
+    && [ "$(cat "$ready_stamp" 2>/dev/null)" = "$(video_count)" ] \
+    && ! videos_changed \
+    && ! changed "$ready_stamp" .env "$(envval PDS_DB_PATH)" config \
+        "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-}}"; then
+    need_prepare=0
+fi
+# Setup also redoes preparation after an image rebuild (the code that produces the outputs changed).
+if [ "$setup" -eq 1 ] && [ "$need_build" -eq 1 ]; then need_prepare=1; fi
+if [ "$setup" -eq 0 ] && [ "$need_prepare" -eq 1 ]; then
+    step="setup check"
+    printf '\nFishLab is not set up yet, or its inputs changed (.env, workbook, config, videos, DCS).\nRun  ./start.sh --setup  first (builds and prepares the data), then ./start.sh.\nNothing was started.\n' >&2
+    exit 1
+fi
+
+if [ "$need_build" -eq 1 ]; then
+    step="frontend and Python image build"
+    docker compose build
+    touch "$build_stamp"
+else
+    echo '[SKIP] Build: image is up to date.'
+fi
+if [ "$need_prepare" -eq 1 ]; then
+    rm -f "$ready_stamp"
+    step="stop the previous Compose app"
+    docker compose stop app
+    step="prepds / DCS preparation (see the named step in the log)"
+    docker compose up --no-build --force-recreate --abort-on-container-exit --exit-code-from prepare prepare
+    video_count > "$ready_stamp"
+else
+    echo '[SKIP] Check, Track, Verify, DCS: nothing changed since the last successful preparation (use --full to redo).'
+fi
+if [ "$setup" -eq 1 ]; then
+    diagnostics=0
+    printf '\nSetup finished. Run ./start.sh to open FishLab.\n'
+    exit 0
+fi
 step="frontend + backend startup and health check"
 docker compose up -d --no-build --no-deps --wait --wait-timeout 60 app
 step="master link"
