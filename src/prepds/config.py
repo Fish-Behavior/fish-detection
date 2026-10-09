@@ -27,6 +27,8 @@ ENV_OUTPUT_DIR = "PDS_OUTPUT_DIR"
 ENV_ACCEPTED_DIR = "PDS_ACCEPTED_DIR"
 ENV_WORKERS = "PDS_WORKERS"
 ENV_CONFIG = "PDS_CONFIG"
+# Review/labeling web app bind address and the optional DCS chat service (all optional).
+SERVICE_VARIABLES = ("FISHLAB_HOST", "FISHLAB_PORT", "FISHLAB_ANNOTATE_PORT", "FISHLAB_CHAT_URL")
 
 # Maps the short names used in code (settings.require("video_dir")) to their env var.
 PATH_VARIABLES = {
@@ -59,6 +61,7 @@ class Settings:
     workers: int
     params: dict[str, Any] = field(default_factory=dict)  # merged YAML parameters
     env_file: Path | None = None  # which .env was read (None = no file, env vars only)
+    service: dict[str, str] = field(default_factory=dict)  # SERVICE_VARIABLES that are set
 
     def require(self, name: str) -> Path:
         """Return a configured input path, or fail with a clear "how to fix" message.
@@ -138,6 +141,7 @@ def load_settings(
         workers=workers,
         params=params,
         env_file=env_path if env_path.is_file() else None,
+        service={name: value for name in SERVICE_VARIABLES if (value := lookup(name))},
     )
 
 

@@ -96,16 +96,33 @@ def build_parser() -> argparse.ArgumentParser:
     export_index.set_defaults(handler=run_export_index)
 
     review = commands.add_parser("review", help="start the review web app (local, loopback only)")
-    review.add_argument("--host", default="127.0.0.1", help="loopback address to bind (default: 127.0.0.1)")
-    review.add_argument("--port", type=int, default=8000, help="port (default: 8000)")
+    review.add_argument("--host", help="loopback address to bind (default: $FISHLAB_HOST or 127.0.0.1)")
+    review.add_argument("--port", type=int, help="port (default: $FISHLAB_PORT or 8000)")
+    review.add_argument('--chat-url', help='loopback DCS chat service URL (default: $FISHLAB_CHAT_URL)')
+    review.add_argument('--predictions', type=Path, help='DCS prediction CSV or parquet to display (optional)')
+    review.add_argument('--frontend-dir', type=Path, default=Path('frontend/dist'), help='built React frontend (default: frontend/dist)')
+    review.add_argument('--classifier-root', type=Path, help='separate DCS checkout containing src/dcs, for inference')
+    review.add_argument('--model-run', type=Path, help='trained DCS run folder containing model/, for inference')
     review.set_defaults(handler=run_review)
 
     annotate = commands.add_parser("annotate", help="start the frame-labeling app for the Phase 15 tracker fine-tuning set")
-    annotate.add_argument("--host", default="127.0.0.1", help="loopback address to bind (default: 127.0.0.1)")
-    annotate.add_argument("--port", type=int, default=8001, help="port (default: 8001)")
+    annotate.add_argument("--host", help="loopback address to bind (default: $FISHLAB_HOST or 127.0.0.1)")
+    annotate.add_argument("--port", type=int, help="port (default: $FISHLAB_ANNOTATE_PORT or 8001)")
     annotate.set_defaults(handler=run_annotate)
 
     return parser
+
+
+def _bind(settings: Settings, args: argparse.Namespace, port_var: str, default_port: int) -> None:
+    """Fill args.host / args.port from the CLI, then .env, then the built-in default; loopback only."""
+    args.host = args.host or settings.service.get("FISHLAB_HOST", "127.0.0.1")
+    if args.port is None:
+        text = settings.service.get(port_var, str(default_port))
+        if not (text.isdigit() and 1 <= int(text) <= 65535):
+            raise ConfigError(f"{port_var} must be a port number, got {text!r}.")
+        args.port = int(text)
+    if args.host not in LOOPBACK_HOSTS:
+        raise ConfigError(f"the web app has no authentication: the host must be a loopback address {LOOPBACK_HOSTS}.")
 
 
 def _positive_int(text: str) -> int:
@@ -235,8 +252,7 @@ def run_export_index(settings: Settings, args: argparse.Namespace) -> int:
 
 def run_review(settings: Settings, args: argparse.Namespace) -> int:
     """Serve the review UI on a loopback address (it has no authentication)."""
-    if args.host not in LOOPBACK_HOSTS:
-        raise ConfigError(f"the review app has no authentication: --host must be a loopback address {LOOPBACK_HOSTS}.")
+    _bind(settings, args, "FISHLAB_PORT", 8000)
     import uvicorn
 
     from prepds.webapp.app import create_app
@@ -244,7 +260,9 @@ def run_review(settings: Settings, args: argparse.Namespace) -> int:
     processed = settings.paths.output_dir / "processed"
     profiles = DEFAULT_CONFIG_FILE.parent / "calibration_profiles"
     app = create_app(processed, settings.paths.accepted_dir, video_dir=settings.paths.video_dir,
-                     profile_dir=profiles if profiles.is_dir() else None)
+                     profile_dir=profiles if profiles.is_dir() else None, settings=settings,
+                     chat_url=args.chat_url or settings.service.get('FISHLAB_CHAT_URL'), predictions_path=args.predictions, frontend_dir=args.frontend_dir,
+                     classifier_root=args.classifier_root, model_run=args.model_run)
     print(f"Review app: http://{args.host}:{args.port}/  (videos in {processed})")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
@@ -252,8 +270,7 @@ def run_review(settings: Settings, args: argparse.Namespace) -> int:
 
 def run_annotate(settings: Settings, args: argparse.Namespace) -> int:
     """Serve the Phase 15 frame-labeling app on a loopback address (no authentication)."""
-    if args.host not in LOOPBACK_HOSTS:
-        raise ConfigError(f"the labeling app has no authentication: --host must be a loopback address {LOOPBACK_HOSTS}.")
+    _bind(settings, args, "FISHLAB_ANNOTATE_PORT", 8001)
     work_dir = settings.paths.output_dir / "phase15"
     if not (work_dir / "sample.json").is_file():
         raise ConfigError(f"no sampled frames in {work_dir}; run `python scripts/phase15_prepare.py` first.")

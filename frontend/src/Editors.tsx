@@ -1,11 +1,12 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { STATES } from './model.ts'
+import { emptyEdits, frameAt, STATES } from './model.ts'
 import type {
   Behavior,
   Box,
   SessionData,
   Edits,
   FrameValue,
+  LabelEdit,
   Scene,
 } from './model.ts'
 import type { EditTool } from './VideoPanel.tsx'
@@ -152,10 +153,11 @@ export default function Editors(
       >
         <NumberField
           label="Waterline y (px)"
-          value={scene.waterline}
+          value={scene.waterline ?? NaN}
           max={height}
           onChange={(n) => p.setScene((s) => ({ ...s, waterline: n }))}
         />
+        <button onClick={() => p.setScene((s) => ({ ...s, waterline: null }))}>Clear waterline draft</button>
         <BoxFields
           box={scene.roi}
           set={(roi) => p.setScene((s) => ({ ...s, roi }))}
@@ -164,7 +166,7 @@ export default function Editors(
           height={height}
         />
         <p className="baseline">
-          Automatic: waterline {session.scene.waterline} px · ROI [
+          Automatic: waterline {session.scene.waterline ?? 'unavailable'} · ROI [
           {session.scene.roi.join(', ')}]
         </p>
         <div className="button-row">
@@ -277,9 +279,7 @@ export default function Editors(
             <pre>
               {JSON.stringify(
                 {
-                  x: session.overlay.x[p.frameIndex],
-                  y: session.overlay.y[p.frameIndex],
-                  detected: session.overlay.detected[p.frameIndex],
+                  ...frameAt(session, p.frameIndex, emptyEdits()),
                   detection:
                     session.overlay.detections.find(
                       (d) => d.frame_idx === p.frameIndex,
@@ -313,7 +313,13 @@ export function LabelEditor(
     | 'setState'
     | 'saveLabels'
     | 'resetLabels'
-  >,
+  > & {
+    pending: LabelEdit[]
+    stage: () => void
+    saveStaged: () => void
+    removeStaged: (index: number) => void
+    discardStaged: () => void
+  },
 ) {
   const { session } = p
   return (
@@ -345,15 +351,29 @@ export function LabelEditor(
         </select>
       </label>
       <div className="button-row">
-        <button className="primary" onClick={p.saveLabels}>
+        <button className="primary" onClick={p.saveLabels} disabled={p.pending.length > 0}>
           Apply behavior
         </button>
+        <button onClick={p.stage}>Stage range</button>
         <button onClick={p.resetLabels}>Restore labels</button>
       </div>
       <p className="small muted">
         Latest overlapping correction wins. Automatic labels remain visible in
         the timeline.
       </p>
+      {p.pending.length > 0 && <>
+        <h3>Staged edits · not saved</h3>
+        <ul className="edit-list">
+          {p.pending.map((edit, i) => <li key={i}>
+            <b>{edit.start_s.toFixed(2)}–{edit.end_s.toFixed(2)} s</b> · {edit.state}
+            <button aria-label={`Remove staged edit ${i + 1}`} onClick={() => p.removeStaged(i)}>Remove</button>
+          </li>)}
+        </ul>
+        <div className="button-row">
+          <button className="primary" onClick={p.saveStaged}>Save staged edits</button>
+          <button onClick={p.discardStaged}>Discard staged edits</button>
+        </div>
+      </>}
       {p.edits.labels.length > 0 && (
         <ul className="edit-list">
           {p.edits.labels.map((e, i) => (

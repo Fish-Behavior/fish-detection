@@ -10,6 +10,8 @@ import {
   effectiveSegments,
   emptyEdits,
   frameAt,
+  frameIndexAt,
+  hasEdits,
   staleFor,
   validateFrame,
   validateInterval,
@@ -20,17 +22,21 @@ import type {
   Behavior,
   Box,
   Edits,
+  LabelEdit,
   Point,
   Scene,
   SessionData,
+  SessionSummary,
+  ReviewData,
 } from './model.ts'
-import { askChat, loadSession } from './api.ts'
+import { ApiError, askChat, loadSession, listSessions, loadOverlay, saveReview, rerun, predict, startProcessing, processingStatus } from './api.ts'
 import { Card, Icon } from './ui.tsx'
 import VideoPanel from './VideoPanel.tsx'
 import type { EditTool } from './VideoPanel.tsx'
 import Editors, { LabelEditor } from './Editors.tsx'
 import { Ethogram, StateSummary, Traces } from './Charts.tsx'
 import Chat from './Chat.tsx'
+import ReviewTools from './ReviewTools.tsx'
 
 function Empty({ title, message }: { title: string; message?: string }) {
   return (
@@ -46,72 +52,93 @@ function Empty({ title, message }: { title: string; message?: string }) {
 
 // Renders nothing but this shell until the backend (src/api.ts) provides a session.
 export default function App() {
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [selected, setSelected] = useState('')
+  const generation = useRef(0)
+  const pendingCount = useRef(0)
   const [load, setLoad] = useState<
     | { status: 'loading' }
-    | { status: 'error'; message: string }
+    | { status: 'error'; stage: 'connection' | 'inventory' | 'recording'; message: string }
     | { status: 'ready'; session: SessionData | null }
   >({ status: 'loading' })
-  useEffect(() => {
-    loadSession().then(
-      (session) => setLoad({ status: 'ready', session }),
-      (e) =>
-        setLoad({
-          status: 'error',
-          message: e instanceof Error ? e.message : 'The request failed.',
-        }),
-    )
-  }, [])
-  if (load.status === 'loading') return <Empty title="Loading…" />
-  if (load.status === 'error')
-    return <Empty title="Could not load data" message={load.message} />
-  if (!load.session)
-    return (
-      <Empty
-        title="No data yet"
-        message="Sessions appear here once the backend provides them."
-      />
-    )
-  return <Workspace session={load.session} />
+  const reload = async (id = selected) => {
+    if (pendingCount.current && !window.confirm('Discard staged behavior edits and reload this recording?')) return
+    const current = ++generation.current
+    setLoad({ status: 'loading' })
+    let stage: 'inventory' | 'recording' = 'inventory'
+    try {
+      const rows = await listSessions()
+      if (current !== generation.current) return
+      const next = rows.some((r) => r.video_id === id) ? id : rows[0]?.video_id ?? ''
+      setSessions(rows); setSelected(next)
+      stage = 'recording'
+      const session = next ? await loadSession(next) : null
+      if (current !== generation.current) return
+      setLoad({ status: 'ready', session })
+    } catch (e) {
+      if (current === generation.current) setLoad({ status: 'error', stage: e instanceof ApiError && e.code === 'offline' ? 'connection' : stage, message: e instanceof Error ? e.message : 'The request failed.' })
+    }
+  }
+  useEffect(() => { void reload(); return () => { generation.current++ } }, [])
+  return <>
+    <div className={`backend-toolbar${load.status === 'ready' && load.session ? ' main-shell' : ''}`}>
+      <button onClick={() => void reload()}>Reload from backend</button>
+    </div>
+    {load.status === 'loading' ? <Empty title="Loading…" /> : load.status === 'error'
+      ? <Empty title={load.stage === 'connection' ? 'Could not connect to the API' : load.stage === 'inventory' ? 'Could not load the recording list' : 'Could not load this recording'} message={load.message} /> : !load.session
+      ? <Empty title="No recordings yet" message="Set PDS_VIDEO_DIR to your recordings folder and reload." />
+      : <Workspace key={load.session.video_id + ':' + load.session.review?.revision} session={load.session} sessions={sessions} selectSession={(id) => void reload(id)} refresh={() => void reload()} onPendingChange={(count) => { pendingCount.current = count }} />}
+  </>
 }
 
-function Workspace({ session }: { session: SessionData }) {
+function Workspace({ session: initialSession, sessions, selectSession, refresh, onPendingChange }: { session: SessionData; sessions: SessionSummary[]; selectSession: (id: string) => void; refresh: () => void; onPendingChange: (count: number) => void }) {
+  const [session, setSession] = useState(initialSession)
+  const [review, setReview] = useState<ReviewData>(session.review!)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const initialScene = (): Scene => structuredClone(session.scene)
   const firstState: Behavior = session.segments[0]?.state ?? 'Undetermined'
   const firstRange = (): [number, number] => [0, Math.min(1, session.duration)]
   const [tab, setTab] = useState<'dashboard' | 'review'>('dashboard')
   const [chatOpen, setChatOpen] = useState(false)
-  const [edits, setEdits] = useState<Edits>(emptyEdits),
-    [reviewer, setReviewer] = useState('')
+  const [edits, setEdits] = useState<Edits>(() => structuredClone(session.review?.edits ?? emptyEdits())),
+    [reviewer, setReviewer] = useState(session.review?.reviewer ?? '')
   const [time, setTime] = useState(0),
     [duration, setDuration] = useState(session.duration)
   const [tool, setTool] = useState<EditTool>('inspect'),
     [keypoint, setKeypoint] = useState('snout')
-  const [sceneDraft, setSceneDraft] = useState(initialScene),
+  const [sceneDraft, setSceneDraft] = useState(() => structuredClone(edits.scene ?? session.scene)),
     [frameDraft, setFrameDraft] = useState(() =>
-      frameAt(session, 0, emptyEdits()),
+      frameAt(session, 0, edits),
     )
   const [range, setRange] = useState<[number, number]>(firstRange),
     [label, setLabel] = useState<Behavior>(firstState)
+  const [pendingLabels, setPendingLabels] = useState<LabelEdit[]>([])
   const [compound, setCompound] = useState(
-      session.predictions?.predicted ?? '',
+      edits.finalResult?.compound ?? session.predictions?.predicted ?? '',
     ),
-    [dose, setDose] = useState('')
-  const [reviewStatus, setReviewStatus] = useState('PROCESSED_AUTO'),
+    [dose, setDose] = useState(edits.finalResult?.dose ?? '')
+  const [reviewStatus, setReviewStatus] = useState(review.decision ?? (hasEdits(edits) ? 'EDITED' : session.has_tracking ? 'PROCESSED_AUTO' : 'NOT_PROCESSED')),
     [filter, setFilter] = useState('all')
   const [notice, setNotice] = useState(''),
     [error, setError] = useState('')
   const videoRef = useRef<HTMLVideoElement>(null)
-  const hasTracking = session.overlay.t.length > 0,
-    frameIndex = Math.max(
-      0,
-      Math.min(
-        Math.round(time * session.overlay.fps),
-        session.overlay.t.length - 1,
-      ),
-    )
-  const stale = staleFor(edits),
-    segments = effectiveSegments(session.segments, edits.labels)
+  const hasTracking = session.has_tracking ?? session.overlay.t.length > 0,
+    frameIndex = frameIndexAt(session, time)
+  const stale = session.stale ?? staleFor(edits)
+  const savedSegments = session.reviewed_segments ?? effectiveSegments(session.segments, edits.labels)
+  const segments = tab === 'review' ? effectiveSegments(savedSegments, pendingLabels) : savedSegments
+  useEffect(() => {
+    onPendingChange(pendingLabels.length)
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    if (pendingLabels.length) window.addEventListener('beforeunload', warn)
+    return () => { onPendingChange(0); window.removeEventListener('beforeunload', warn) }
+  }, [pendingLabels.length, onPendingChange])
   const predictions = session.predictions
+  const visibleSessions = sessions.filter((item) =>
+    filter === 'all' || (filter === 'edited' && item.edited) ||
+    (filter === 'needs-review' && !['ACCEPTED', 'REJECTED'].includes(item.review_status)),
+  )
   const predictedProbability = predictions
     ? predictions[`p:${predictions.predicted}`]
     : NaN
@@ -132,7 +159,16 @@ function Workspace({ session }: { session: SessionData }) {
     Number(!!edits.finalResult)
   useLayoutEffect(() => {
     setFrameDraft(frameAt(session, frameIndex, edits))
-  }, [frameIndex, edits.frames])
+  }, [frameIndex, edits.frames, session.overlay])
+  const windowStart = Math.max(0, Math.floor(time / 25) * 25 - 2)
+  useEffect(() => {
+    let alive = true
+    loadOverlay(session.video_id, windowStart, Math.min(windowStart + 30, session.duration)).then(
+      (overlay) => { if (alive) setSession((s) => ({ ...s, overlay })) },
+      (e) => { if (alive) setError(e.message) },
+    )
+    return () => { alive = false }
+  }, [session.video_id, windowStart])
   const seek = useCallback(
     (t: number) => {
       if (!Number.isFinite(t)) return
@@ -146,34 +182,45 @@ function Workspace({ session }: { session: SessionData }) {
     setError('')
     setNotice(message)
   }
-  const apply = (action: () => void, message: string) => {
+  const apply = async (action: (edits: Edits) => Edits, message: string, decision: ReviewData['decision'] = null) => {
+    if (busyRef.current) return
+    busyRef.current = true; setBusy(true)
     try {
       validateReviewer(reviewer)
-      action()
-      setReviewStatus('EDITED')
+      const next = action(structuredClone(edits))
+      const saved = await saveReview(session, review, next, reviewer.trim(), decision)
+      setReview(saved); setEdits(saved.edits)
+      setReviewStatus(saved.decision ?? (hasEdits(saved.edits) ? 'EDITED' : hasTracking ? 'PROCESSED_AUTO' : 'NOT_PROCESSED'))
+      const changed = ['scene', 'frames', 'labels'].some((key) => JSON.stringify(next[key as keyof Edits]) !== JSON.stringify(edits[key as keyof Edits]))
+      if (changed) setSession((s) => ({ ...s, reviewed_segments: null, stale: staleFor(next) }))
+      try {
+        const fresh = await loadSession(session.video_id)
+        if (fresh) setSession({ ...fresh, overlay: session.overlay })
+      } catch (e) {
+        announce(`${message} Reload the session to refresh derived data: ${(e as Error).message}`)
+        return true
+      }
       announce(message)
+      return true
     } catch (e) {
       setNotice('')
       setError(
         e instanceof Error ? e.message : 'The correction could not be applied.',
       )
-    }
+    } finally { busyRef.current = false; setBusy(false) }
   }
-  const reset = () => {
+  const reset = async () => {
+    if (!await apply(() => emptyEdits(), 'Corrections reset to the automatic baseline.')) return
+    setPendingLabels([])
     videoRef.current?.pause()
     setTime(0)
     setTool('inspect')
-    setEdits(emptyEdits())
     setSceneDraft(initialScene())
     setFrameDraft(frameAt(session, 0, emptyEdits()))
     setRange(firstRange())
     setCompound(session.predictions?.predicted ?? '')
     setDose('')
-    setReviewStatus('PROCESSED_AUTO')
     setFilter('all')
-    announce(
-      'Corrections reset to the automatic baseline. Chat has its own clear control.',
-    )
   }
   const sketch = (kind: EditTool, value: Point | Box) => {
     const p = value as Point
@@ -206,7 +253,7 @@ function Workspace({ session }: { session: SessionData }) {
     if (kind === 'waterline')
       setSceneDraft((s) => ({
         ...s,
-        waterline: clamp(s.waterline + dy, height),
+        waterline: clamp((s.waterline ?? 0) + dy, height),
       }))
     if (kind === 'roi') setSceneDraft((s) => ({ ...s, roi: shift(s.roi) }))
     if (kind === 'box')
@@ -232,9 +279,9 @@ function Workspace({ session }: { session: SessionData }) {
       })
   }
   const saveLabels = () =>
-    apply(() => {
+    apply((e) => {
       validateInterval(range[0], range[1], session.duration)
-      setEdits((e) => ({
+      return {
         ...e,
         labels: [
           ...e.labels,
@@ -245,12 +292,69 @@ function Workspace({ session }: { session: SessionData }) {
             reviewer: reviewer.trim(),
           },
         ],
-      }))
+      }
     }, 'Behavior correction saved. Timeline and totals updated; feature/prediction results are stale.')
-  const resetLabels = () => {
-    setEdits((e) => ({ ...e, labels: [] }))
-    setReviewStatus('EDITED')
-    announce('Automatic behavior labels restored.')
+  const stageLabels = () => {
+    try {
+      validateReviewer(reviewer)
+      validateInterval(range[0], range[1], session.duration)
+      setPendingLabels((pending) => [...pending, { start_s: range[0], end_s: range[1], state: label, reviewer: reviewer.trim() }])
+      announce('Behavior edit staged. Save the batch to persist it.')
+    } catch (e) { setError((e as Error).message) }
+  }
+  const saveStagedLabels = async () => {
+    if (await apply((e) => ({ ...e, labels: [...e.labels, ...pendingLabels] }), 'Staged behavior edits saved. Features and predictions are stale.')) setPendingLabels([])
+  }
+  const resetLabels = async () => {
+    if (await apply((e) => ({ ...e, labels: [] }), 'Automatic behavior labels restored.')) setPendingLabels([])
+  }
+  const recalculate = async () => {
+    if (pendingLabels.length) { setError('Save or discard staged labels before rerunning analysis.'); return }
+    if (busyRef.current) return
+    busyRef.current = true; setBusy(true)
+    try {
+      validateReviewer(reviewer)
+      const updated = await rerun(session, review, reviewer.trim())
+      setSession({ ...updated, overlay: session.overlay }); setReview(updated.review!); setEdits(updated.review!.edits)
+      announce('Measurements and reviewed labels recalculated. Compound predictions remain stale until a model runs on the corrected data.')
+    } catch (e) { setNotice(''); setError((e as Error).message) }
+    finally { busyRef.current = false; setBusy(false) }
+  }
+  const [processing, setProcessing] = useState(session.processing)
+  useEffect(() => {
+    if (!['queued', 'running'].includes(processing?.status ?? '')) return
+    let alive = true
+    const poll = setInterval(() => {
+      processingStatus(session.video_id).then((value) => {
+        if (!alive) return
+        setProcessing(value)
+        if (value.status === 'processed') refresh()
+        if (['failed', 'interrupted'].includes(value.status)) setError(value.message)
+      }, (e) => { if (alive) { setError(e.message); setProcessing({ status: 'interrupted', message: e.message }) } })
+    }, 2000)
+    return () => { alive = false; clearInterval(poll) }
+  }, [processing?.status, session.video_id])
+  const processVideo = async () => {
+    if (busyRef.current) return
+    busyRef.current = true; setBusy(true)
+    try {
+      validateReviewer(reviewer)
+      setProcessing(await startProcessing(session.video_id, reviewer.trim()))
+      announce('Analysis queued. Processing status updates automatically.')
+    } catch (e) { setNotice(''); setError((e as Error).message) }
+    finally { busyRef.current = false; setBusy(false) }
+  }
+  const predictCompound = async () => {
+    if (pendingLabels.length) { setError('Save or discard staged labels before running the compound model.'); return }
+    if (busyRef.current) return
+    busyRef.current = true; setBusy(true)
+    try {
+      validateReviewer(reviewer)
+      const updated = await predict(session, review, reviewer.trim())
+      setSession({ ...updated, overlay: session.overlay }); setReview(updated.review!)
+      announce('Compound probabilities recalculated by the configured DCS model.')
+    } catch (e) { setNotice(''); setError((e as Error).message) }
+    finally { busyRef.current = false; setBusy(false) }
   }
   const changeTab = (next: 'dashboard' | 'review') => {
     setTab(next)
@@ -283,6 +387,7 @@ function Workspace({ session }: { session: SessionData }) {
           <div className="probabilities">
             {Object.entries(predictions!)
               .filter(([k]) => k.startsWith('p:'))
+              .sort(([, a], [, b]) => Number(b) - Number(a))
               .map(([key, value], i) => (
                 <div className="probability" key={key}>
                   <div>
@@ -354,29 +459,27 @@ function Workspace({ session }: { session: SessionData }) {
             <button
               className="primary"
               onClick={() =>
-                apply(() => {
+                apply((e) => {
                   if (!compound.trim())
                     throw new Error('Enter a final compound.')
-                  setEdits((e) => ({
+                  return {
                     ...e,
                     finalResult: {
                       compound: compound.trim(),
                       dose: dose.trim(),
                       reviewer: reviewer.trim(),
                     },
-                  }))
+                  }
                 }, 'Manual final result saved. Automatic probabilities are unchanged.')
               }
             >
               Apply final result
             </button>
             <button
-              onClick={() => {
-                setEdits((e) => ({ ...e, finalResult: null }))
-                setCompound(session.predictions?.predicted ?? '')
-                setDose('')
-                setReviewStatus('EDITED')
-                announce('Manual final result removed.')
+              onClick={async () => {
+                if (await apply((e) => ({ ...e, finalResult: null }), 'Manual final result removed.')) {
+                  setCompound(session.predictions?.predicted ?? ''); setDose('')
+                }
               }}
             >
               Restore model result
@@ -389,20 +492,17 @@ function Workspace({ session }: { session: SessionData }) {
       </details>
       <button
         className="rerun-button"
-        onClick={() =>
-          announce(
-            'Backend required: no real tracking, feature extraction, or inference ran. Stale flags remain until real recalculation is connected.',
-          )
-        }
+        onClick={() => void recalculate()}
       >
         <Icon name="reset" />
         Rerun affected stages
       </button>
+      <button className="rerun-button" onClick={() => void predictCompound()}>Run compound model</button>
     </Card>
   )
 
   return (
-    <div className="app-shell">
+    <fieldset disabled={busy || ['queued', 'running'].includes(processing?.status ?? '')} className="app-shell workspace-controls" aria-busy={busy}>
       <aside className="sidebar">
         <a
           className="brand"
@@ -440,7 +540,7 @@ function Workspace({ session }: { session: SessionData }) {
         <div className="sidebar-session">
           <div className="sidebar-label">
             <span>SESSIONS</span>
-            <span>01</span>
+            <span>{sessions.length}</span>
           </div>
           <label className="sr-only" htmlFor="session-filter">
             Filter sessions
@@ -454,20 +554,22 @@ function Workspace({ session }: { session: SessionData }) {
             <option value="edited">With corrections</option>
             <option value="needs-review">Needs review</option>
           </select>
-          {filter === 'all' ||
-          (filter === 'edited' && editCount > 0) ||
-          (filter === 'needs-review' &&
-            !['ACCEPTED', 'REJECTED'].includes(reviewStatus)) ? (
-            <div className="session-item selected">
-              <span className="session-dot" />
-              <span>
-                <b>{session.video_id}</b>
-                <small>{session.name}</small>
-              </span>
-            </div>
-          ) : (
-            <p className="small muted">No matching sessions.</p>
-          )}
+          <div className="session-list" aria-label="Video inventory">
+            {visibleSessions.map((item) => (
+              <button key={item.video_id}
+                className={`session-item ${item.video_id === session.video_id ? 'selected' : ''}`}
+                aria-current={item.video_id === session.video_id ? 'true' : undefined}
+                onClick={() => item.video_id !== session.video_id && selectSession(item.video_id)}>
+                <span className={`session-dot ${item.processing_status}`} />
+                <span className="session-item-text">
+                  <b>{item.video_id}</b>
+                  <small>{item.name}</small>
+                  <span className="session-status">{item.processing_status}{item.edited ? ' · edited' : ''}</span>
+                </span>
+              </button>
+            ))}
+            {visibleSessions.length === 0 && <p className="small muted">No matching sessions.</p>}
+          </div>
         </div>
         <div className="sidebar-footer">
           <span className="live-dot" />
@@ -510,7 +612,7 @@ function Workspace({ session }: { session: SessionData }) {
               <div>
                 <h2>{session.video_id}</h2>
                 <p>
-                  {session.name} · {session.duration} s
+                  {session.name} · {session.duration.toFixed(1)} s
                 </p>
               </div>
             </div>
@@ -570,6 +672,14 @@ function Workspace({ session }: { session: SessionData }) {
             )}
           </ol>
           <div className="notice-slot" aria-live="polite">
+            {busy && <p className="notice">Saving to backend…</p>}
+            {session.warnings?.map((w) => <p key={w} className="inline-error">{w}</p>)}
+            {processing && processing.status !== 'idle' && <p className="notice">Analysis: {processing.status} {processing.message}</p>}
+            {!hasTracking && <div className="processing-controls">
+              <label>Reviewer <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} maxLength={100} /></label>
+              <button onClick={() => void processVideo()} disabled={!session.processable}>Run analysis</button>
+              {!session.processable && <p className="muted">No matched trial. Run prepds catalog and resolve the workbook match before analysis.</p>}
+            </div>}
             {error && (
               <p className="inline-error" role="alert">
                 {error}
@@ -594,6 +704,8 @@ function Workspace({ session }: { session: SessionData }) {
           >
             <div className="workspace-main">
               <VideoPanel
+                reviewMode={tab === 'review'}
+                markRange={(boundary) => setRange((r) => boundary === 'start' ? [time, r[1]] : [r[0], time])}
                 session={session}
                 edits={edits}
                 src={session.video_url}
@@ -611,6 +723,7 @@ function Workspace({ session }: { session: SessionData }) {
                 sketch={sketch}
                 nudge={nudge}
               />
+              {tab === 'review' && pendingLabels.length > 0 && <p className="notice" role="status">Previewing {pendingLabels.length} staged behavior edits. Save or discard the batch below; Dashboard shows saved labels.</p>}
               {segments.length > 0 && (
                 <>
                   <Ethogram
@@ -634,10 +747,26 @@ function Workspace({ session }: { session: SessionData }) {
                       setState={setLabel}
                       saveLabels={saveLabels}
                       resetLabels={resetLabels}
+                      pending={pendingLabels}
+                      stage={stageLabels}
+                      saveStaged={() => void saveStagedLabels()}
+                      removeStaged={(index) => setPendingLabels((pending) => pending.filter((_, i) => i !== index))}
+                      discardStaged={() => setPendingLabels([])}
                     />
                   )}
                 </>
               )}
+              {tab === 'review' && hasTracking && <ReviewTools
+                session={session}
+                time={time}
+                corrected={!!edits.scene || Object.keys(edits.frames).length > 0 || edits.labels.length > 0 || pendingLabels.length > 0}
+                selectRange={(start, end) => {
+                  videoRef.current?.pause()
+                  const from = Math.max(0, Math.min(start, session.duration))
+                  setRange([from, Math.max(from, Math.min(end, session.duration))])
+                  seek(from)
+                }}
+              />}
               {session.measurements.length > 0 && (
                 <Traces
                   session={session}
@@ -782,29 +911,29 @@ function Workspace({ session }: { session: SessionData }) {
                     setFrame={setFrameDraft}
                     frameIndex={frameIndex}
                     saveScene={() =>
-                      apply(() => {
+                      apply((e) => {
                         validateScene(
                           sceneDraft,
                           session.overlay.width,
                           session.overlay.height,
                         )
-                        setEdits((e) => ({
+                        return {
                           ...e,
                           scene: {
                             ...structuredClone(sceneDraft),
                             reviewer: reviewer.trim(),
                           },
-                        }))
+                        }
                       }, 'Scene correction saved. Dependent results are stale.')
                     }
                     saveFrame={() =>
-                      apply(() => {
+                      apply((e) => {
                         validateFrame(
                           frameDraft,
                           session.overlay.width,
                           session.overlay.height,
                         )
-                        setEdits((e) => ({
+                        return {
                           ...e,
                           frames: {
                             ...e.frames,
@@ -813,26 +942,18 @@ function Workspace({ session }: { session: SessionData }) {
                               reviewer: reviewer.trim(),
                             },
                           },
-                        }))
+                        }
                       }, `Frame ${frameIndex} correction saved. Dependent results are stale.`)
                     }
-                    resetScene={() => {
-                      setEdits((e) => ({ ...e, scene: null }))
-                      setSceneDraft(initialScene())
-                      setReviewStatus('EDITED')
-                      announce(
-                        'Automatic scene restored. Other corrections remain.',
-                      )
+                    resetScene={async () => {
+                      if (await apply((e) => ({ ...e, scene: null }), 'Automatic scene restored.')) setSceneDraft(initialScene())
                     }}
-                    resetFrame={() => {
-                      setEdits((e) => {
+                    resetFrame={async () => {
+                      if (await apply((e) => {
                         const frames = { ...e.frames }
                         delete frames[frameIndex]
                         return { ...e, frames }
-                      })
-                      setFrameDraft(frameAt(session, frameIndex, emptyEdits()))
-                      setReviewStatus('EDITED')
-                      announce('Automatic frame restored.')
+                      }, 'Automatic frame restored.')) setFrameDraft(frameAt(session, frameIndex, emptyEdits()))
                     }}
                   />
                   <Card
@@ -843,33 +964,18 @@ function Workspace({ session }: { session: SessionData }) {
                       Accepting this review does not validate the model or clear
                       stale results.
                     </p>
+                    {pendingLabels.length > 0 && <p className="small muted">Save or discard staged labels before deciding.</p>}
                     <div className="button-row">
                       <button
                         className="primary"
-                        onClick={() => {
-                          try {
-                            validateReviewer(reviewer)
-                            setReviewStatus('ACCEPTED')
-                            announce(
-                              `Review accepted by ${reviewer.trim()}. Results and stale flags are unchanged.`,
-                            )
-                          } catch (e) {
-                            setError((e as Error).message)
-                          }
-                        }}
+                        disabled={pendingLabels.length > 0}
+                        onClick={() => void apply((e) => e, `Review accepted by ${reviewer.trim()}.`, 'ACCEPTED')}
                       >
                         Accept review
                       </button>
                       <button
-                        onClick={() => {
-                          try {
-                            validateReviewer(reviewer)
-                            setReviewStatus('REJECTED')
-                            announce(`Review rejected by ${reviewer.trim()}.`)
-                          } catch (e) {
-                            setError((e as Error).message)
-                          }
-                        }}
+                        disabled={pendingLabels.length > 0}
+                        onClick={() => void apply((e) => e, `Review rejected by ${reviewer.trim()}.`, 'REJECTED')}
                       >
                         Reject review
                       </button>
@@ -880,6 +986,7 @@ function Workspace({ session }: { session: SessionData }) {
                     <StateSummary
                       segments={segments}
                       duration={session.duration}
+                      detailed
                     />
                   )}
                 </>
@@ -892,9 +999,7 @@ function Workspace({ session }: { session: SessionData }) {
           </footer>
         </main>
       </div>
-      {askChat && (
-        <Chat ask={askChat} open={chatOpen} onOpenChange={setChatOpen} />
-      )}
-    </div>
+      <Chat ask={askChat} available={!!session.chat_available} open={chatOpen} onOpenChange={setChatOpen} />
+    </fieldset>
   )
 }

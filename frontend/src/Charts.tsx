@@ -6,9 +6,11 @@ import { Card } from './ui.tsx'
 export function StateSummary({
   segments,
   duration,
+  detailed = false,
 }: {
   segments: Segment[]
   duration: number
+  detailed?: boolean
 }) {
   const sums = totals(segments)
   return (
@@ -27,7 +29,7 @@ export function StateSummary({
                 <i style={{ background: COLORS[s] }} />
                 {s}
               </span>
-              <b>{sums[s].toFixed(1)} s</b>
+              <b>{sums[s].toFixed(1)} s{detailed && ` · ${(duration ? sums[s] / duration * 100 : 0).toFixed(1)}% · ${segments.filter((segment) => segment.state === s).length} bouts`}</b>
             </div>
             <div className="bar-track">
               <div
@@ -245,13 +247,9 @@ export function Traces({
                   strokeDasharray="3 4"
                 />
               ))}
-              <polyline
-                points={session.measurements
-                  .map(
-                    (m) =>
-                      `${(m.t / session.duration) * 900},${92 - (m[key] / max) * 80}`,
-                  )
-                  .join(' ')}
+              <path
+                d={session.measurements.map((m, i, all) => m[key] === null ? '' :
+                  `${i === 0 || all[i - 1][key] === null ? 'M' : 'L'}${(m.t / session.duration) * 900},${92 - (m[key]! / max) * 80}`).join(' ')}
                 fill="none"
                 stroke={color}
                 strokeWidth="2.5"
@@ -294,9 +292,9 @@ export function Traces({
                         {m.t.toFixed(1)}
                       </button>
                     </td>
-                    <td>{m.speed.toFixed(1)}</td>
-                    <td>{m.turning.toFixed(1)}</td>
-                    <td>{m.depth.toFixed(1)}</td>
+                    <td>{m.speed?.toFixed(1) ?? '—'}</td>
+                    <td>{m.turning?.toFixed(1) ?? '—'}</td>
+                    <td>{m.depth?.toFixed(1) ?? '—'}</td>
                   </tr>
                 ))}
             </tbody>
