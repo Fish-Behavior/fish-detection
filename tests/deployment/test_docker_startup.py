@@ -2,7 +2,6 @@
 import json
 import shutil
 import subprocess
-import tarfile
 from pathlib import Path
 
 import pytest
@@ -185,37 +184,6 @@ def test_model_bridge_forwards_only_to_the_docker_host(monkeypatch):
         thread.join()
 
 
-def test_backup_contains_saved_work_and_config_without_source_videos(project, monkeypatch):
-    (project / ".env").write_text("PDS_OUTPUT_DIR=outputs\n")
-    (project / "config").mkdir()
-    (project / "config/custom.yaml").write_text("training: {}\n")
-    (project / "outputs/processed/F_0022").mkdir(parents=True)
-    (project / "outputs/processed/F_0022/review.json").write_text('{"revision": 2}')
-    (project / "accepted/accepted_index.parquet").write_bytes(b"saved gold")
-    (project / "dcs-results").mkdir()
-    (project / "dcs-results/model.joblib").write_bytes(b"saved model")
-    monkeypatch.setenv("DCS_OUTPUT_DIR", "dcs-results")
-
-    archive = docker_app.backup()
-    assert archive.is_file() and archive.stat().st_mode & 0o777 == 0o600
-    with tarfile.open(archive) as saved:
-        assert saved.extractfile("outputs/processed/F_0022/review.json").read() == b'{"revision": 2}'
-        assert saved.extractfile("accepted/accepted_index.parquet").read() == b"saved gold"
-        assert saved.extractfile("dcs-results/model.joblib").read() == b"saved model"
-        assert saved.extractfile(".env").read() == b"PDS_OUTPUT_DIR=outputs\n"
-        assert saved.extractfile("config/custom.yaml").read() == b"training: {}\n"
-        assert not any(name.startswith("videos/") for name in saved.getnames())
-
-
-def test_backup_failure_leaves_no_partial_archive(project, monkeypatch):
-    (project / ".env").touch()
-    (project / "config").mkdir()
-    monkeypatch.setenv("DCS_OUTPUT_DIR", str(project.parent / "outside"))
-    with pytest.raises(ValueError, match="outside"):
-        docker_app.backup()
-    assert not list((project / "backups").glob("*.tar"))
-
-
 @pytest.mark.parametrize("failure", ["", "prepare", "app"])
 def test_shell_prints_link_only_after_success_and_releases_its_lock(tmp_path, failure):
     import os
@@ -274,8 +242,7 @@ def test_start_lists_missing_setup_without_starting_anything(tmp_path):
     assert "compose build" not in log.read_text()
 
 
-@pytest.mark.parametrize("backup_fails", [False, True])
-def test_stop_backs_up_before_compose_down(tmp_path, backup_fails):
+def test_stop_removes_containers_after_stopping_app(tmp_path):
     import os
 
     root = Path(__file__).parents[2]
@@ -286,23 +253,14 @@ def test_stop_backs_up_before_compose_down(tmp_path, backup_fails):
     docker = tools / "docker"
     docker.write_text('''#!/bin/sh
 echo "$*" >> "$DOCKER_CALLS"
-case "$*" in
-  "compose run"*) [ "$BACKUP_FAILS" != 1 ] || exit 7 ;;
-esac
 exit 0
 ''')
     docker.chmod(0o755)
     log = tmp_path / "calls.txt"
     result = subprocess.run(["sh", str(tmp_path / "stop.sh")], text=True, capture_output=True,
-                            env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}",
-                                 "DOCKER_CALLS": str(log), "BACKUP_FAILS": "1" if backup_fails else "0"})
+                            env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "DOCKER_CALLS": str(log)})
     calls = log.read_text()
-    assert "compose stop -t 300 app" in calls
+    assert result.returncode == 0
     assert not (tmp_path / ".fishlab-launch.lock").exists()
-    if backup_fails:
-        assert result.returncode != 0
-        assert "compose down" not in calls
-        assert "Backup failed" in result.stderr
-    else:
-        assert result.returncode == 0
-        assert calls.index("compose stop -t 300 app") < calls.index(" backup") < calls.index("compose down")
+    assert calls.index("compose stop -t 300 app") < calls.index("compose down")
+    assert "backup" not in calls

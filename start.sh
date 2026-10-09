@@ -74,7 +74,7 @@ FishLab startup workflow (stops at the first failed step and names it):
   5. DCS        featurize, check-config, audit, model (trains only if none is saved), predict
   6. Chat       optional, only if enabled in .env
   7. Serve      start frontend + API, wait for health, print the link
-Review and accept videos in the browser, then run ./stop.sh to back up and shut down.
+Review and accept videos in the browser, then run ./stop.sh to shut down.
 
 Average waiting times (steps under ~1 min are not listed):
   - 1 Build:  a few minutes the first time; later runs reuse the cache
@@ -93,4 +93,4 @@ step="frontend + backend startup and health check"
 docker compose up -d --no-build --no-deps --wait --wait-timeout 60 app
 step="master link"
 address="$FISHLAB_HOST:$FISHLAB_PORT"
-printf '\nFishLab ready: http://%s\nStop and back up: ./stop.sh\nLogs: docker compose logs -f app\n' "$address"
+printf '\nFishLab ready: http://%s\nStop: ./stop.sh\nLogs: docker compose logs -f app\n' "$address"

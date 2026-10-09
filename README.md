@@ -46,7 +46,7 @@ Everyone uses the same two commands. Only Docker (with Compose) is needed.
 ```sh
 cp .env.example .env    # once: set PDS_VIDEO_DIR, PDS_DB_PATH, FISHLAB_HOST, FISHLAB_PORT
 ./start.sh              # build, prepare, start the app, print the local link
-./stop.sh               # back up saved work and shut down
+./stop.sh               # shut down
 ```
 
 If `.env` is not set up, `./start.sh` says what is missing and starts nothing. When it runs it prints
@@ -61,8 +61,7 @@ this workflow and stops at the first failed step:
 6. Optional research **chat**.
 7. **Serve** the frontend and API and print one local link.
 
-Review and accept videos in the browser, then `./stop.sh` stops the app, verifies a dated backup under
-`backups/`, and removes the containers. Details, the review UI, outputs, calibration and what to trust
+Review and accept videos in the browser, then `./stop.sh` stops the app and removes the containers. Details, the review UI, outputs, calibration and what to trust
 in the labels: **[docs/instructions.md](docs/instructions.md)**. Contributors who need to run the code or
 tests without Docker: see "Development without Docker" there.
 Then `catalog`, `run`, `review`, `export-index`. Setup, every command, the review

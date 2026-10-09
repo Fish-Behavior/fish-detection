@@ -3,14 +3,11 @@ from __future__ import annotations
 
 import json
 import os
-import hashlib
 import select
 import socket
 import socketserver
 import subprocess
 import sys
-import tarfile
-import tempfile
 import time
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
@@ -350,62 +347,6 @@ def health() -> None:
             raise RuntimeError("Frontend is not available.")
 
 
-def backup() -> Path:
-    root = Path.cwd().resolve()
-    sources = [Path(".env"), Path("config"), Path(os.environ.get("PDS_OUTPUT_DIR") or "outputs"),
-               Path(os.environ.get("PDS_ACCEPTED_DIR") or "accepted"),
-               Path(os.environ.get("DCS_OUTPUT_DIR") or "outputs/dcs")]
-    sources += [Path(os.environ[key]) for key in ("PDS_CONFIG", "DCS_CONFIG") if os.environ.get(key)]
-    resolved = []
-    for source in sources:
-        path = source.expanduser().resolve()
-        if path == root or not path.is_relative_to(root):
-            raise ValueError(f"Backup source is outside the project: {source}")
-        if source in (Path(".env"), Path("config")) and not path.exists():
-            raise FileNotFoundError(f"Required backup source is missing: {source}")
-        if path.exists() and not any(path == prior or path.is_relative_to(prior) for prior in resolved):
-            resolved.append(path)
-
-    files = sorted(path for source in resolved
-                   for path in (source.rglob("*") if source.is_dir() else [source]) if path.is_file() or path.is_symlink())
-    for path in files:
-        if path.is_symlink() or not path.resolve().is_relative_to(root):
-            raise ValueError(f"Backup source links outside the project or is a symlink: {path}")
-
-    directory = root / "backups"
-    directory.mkdir(mode=0o700, exist_ok=True)
-    if directory.is_symlink():
-        raise ValueError("Backup directory must not be a symlink")
-    os.chmod(directory, 0o700)
-    destination = directory / f"fishlab-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}.tar"
-    with tempfile.NamedTemporaryFile(dir=directory, prefix=".fishlab-", suffix=".tmp", delete=False) as stream:
-        temporary = Path(stream.name)
-    try:
-        os.chmod(temporary, 0o600)
-        checksums = {}
-        with tarfile.open(temporary, "w") as archive:
-            for path in files:
-                name = path.relative_to(root).as_posix()
-                with path.open("rb") as source:
-                    checksums[name] = hashlib.file_digest(source, "sha256").digest()
-                archive.add(path, arcname=name, recursive=False)
-        with tarfile.open(temporary, "r") as archive:
-            members = archive.getmembers()
-            if set(member.name for member in members) != set(checksums) or any(not member.isfile() for member in members):
-                raise RuntimeError("Backup archive contents did not match the saved files")
-            for member in members:
-                with archive.extractfile(member) as saved:
-                    if hashlib.file_digest(saved, "sha256").digest() != checksums[member.name]:
-                        raise RuntimeError(f"Backup verification failed for {member.name}")
-        with temporary.open("rb") as saved:
-            os.fsync(saved.fileno())
-        os.replace(temporary, destination)
-        print(f"[OK] Verified backup: {destination} ({len(files)} files)", flush=True)
-        return destination
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) == 2 else ""
     if mode == "prepare":
@@ -414,7 +355,5 @@ if __name__ == "__main__":
         serve()
     elif mode == "health":
         health()
-    elif mode == "backup":
-        backup()
     else:
-        sys.exit("Expected prepare, serve, health or backup.")
+        sys.exit("Expected prepare, serve or health.")

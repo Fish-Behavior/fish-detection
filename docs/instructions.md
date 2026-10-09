@@ -20,7 +20,7 @@ cp .env.example .env     # once: set PDS_VIDEO_DIR (synced video folder), PDS_DB
                          # FISHLAB_HOST=127.0.0.1 and a free FISHLAB_PORT (the link you open);
                          # optional PDS_OUTPUT_DIR, PDS_ACCEPTED_DIR, PDS_WORKERS, PDS_CONFIG, DCS_* (see the file)
 ./start.sh               # build, prepare everything, start the app, print the local link
-./stop.sh                # stop the app, verify a backup of saved work, remove the containers
+./stop.sh                # stop the app, remove the containers
 ```
 
 If `.env`, a required path, `FISHLAB_HOST` or `FISHLAB_PORT` is not set up, `./start.sh` lists what is missing and starts nothing.
@@ -41,9 +41,7 @@ Nothing outside `.env` needs configuring. Data and `.env` stay on your machine a
 Failed and unfinished steps are shown in the terminal and in `<PDS_OUTPUT_DIR>/docker/startup.json`.
 The accepted index is not exported by `./start.sh`.
 
-**What `./stop.sh` does:** stops the app, writes and verifies a private dated archive of outputs, accepted data and
-configuration under `backups/`, then removes the containers. If the backup fails, nothing is removed. Raw videos
-and unsaved browser drafts are not in the backup.
+**What `./stop.sh` does:** stops the app (waiting for in-flight saves) and removes the containers. Saved work stays on the host and is overwritten in place; no backups are made.
 
 Then open the printed link and use the review UI below. Do not start `prepds` commands by hand next to a running
 stack; two `run`s at once overwrite each other.
