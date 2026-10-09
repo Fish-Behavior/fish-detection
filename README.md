@@ -29,10 +29,15 @@ plus Undetermined and Dead. Full scope:
 | **Preprocessing dataset system** (`prepds`): catalog, tracking, features, labeling, review app, gold-dataset export | Built; 328 of 352 trials processed from the 337 synced videos. Human review of the output is still to do. |
 | Model tracker (fine-tuned fish detector) | First model trained; detection is much better than the classical tracker, Listing is still unreliable. Full re-run not done. |
 | Listing/LORR and Dead | Not detected automatically; they come from reviewers. |
-| Drug classifier, anomaly detection, reporting, live (Phase 2) camera | Not started. |
+| **Compound/dose classifier** (`dcs`): training table, audit, baselines and MLP with date-held-out validation, ablations, dose models, saved model, `predict`, research chat (`dcs ask`) | Built and tested on synthetic data. On the unreviewed real output no model yet names the compound better than the recording date does; behavior does separate vehicle from drug. Status and decisions: [docs/classifier_progress.md](docs/classifier_progress.md). |
+| Anomaly detection, reporting, live (Phase 2) camera | Not started. |
 
-Details and the task-by-task log: [docs/progress.md](docs/progress.md). Requirements:
-[docs/PRD.md](docs/PRD.md).
+Model strategy: a **lightweight, pre-trained, local language model** does the reasoning and wording for the research
+chat (nothing is trained; every number comes from deterministic query tools), and a **better vision model** is planned
+once more reviewed data exists (more labeled frames for the detector, then a clip-level behavior model).
+
+Details and the task-by-task log: [docs/progress.md](docs/progress.md). Requirements, watch list and roadmap, all in one
+file: [docs/PRD.md](docs/PRD.md) (Part I preprocessing, Part II classifier and chat, Part III open items).
 
 ## Quick Start
 
@@ -60,14 +65,24 @@ Review and accept videos in the browser, then `./stop.sh` stops the app, verifie
 `backups/`, and removes the containers. Details, the review UI, outputs, calibration and what to trust
 in the labels: **[docs/instructions.md](docs/instructions.md)**. Contributors who need to run the code or
 tests without Docker: see "Development without Docker" there.
+Then `catalog`, `run`, `review`, `export-index`. Setup, every command, the review
+UI, outputs, calibration and what to trust in the labels are in
+**[docs/instructions.md](docs/instructions.md)**. The classifier (`python -m dcs featurize`,
+`audit`, `train`, `predict`, `ask`), including the GB10 runbook, is the last part of that file.
+
+```bash
+pip install -e ".[dev,train]"   # adds PyTorch for the classifier's MLP (optional)
+python -m dcs check-config
+```
 
 ## Repository Layout
 
 ```text
 fish-detection/
 ├── src/prepds/        # the pipeline package (catalog, tracking, features, labeling, webapp, ...)
+├── src/dcs/           # the compound/dose classifier and research chat (reads prepds output, never imports it)
 ├── scripts/           # calibration and detector fine-tuning scripts
-├── config/            # default thresholds and frozen calibration profiles
+├── config/            # default thresholds, frozen calibration profiles, classifier defaults (default_training.yaml)
 ├── tests/             # automated tests (synthetic fixtures only)
 ├── docs/              # instructions, PRD, progress log, scope, contribution workflow
 ├── start.sh, stop.sh  # the way everyone runs the project (Docker)
