@@ -1,0 +1,49 @@
+name: fishlab
+
+x-runtime: &runtime
+  image: fishlab:local
+  build: .
+  init: true
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  user: "${FISHLAB_UID:-1000}:${FISHLAB_GID:-1000}"
+  working_dir: "${FISHLAB_ROOT:-/workspace}"
+  env_file: .env
+  environment:
+    FISHLAB_DCS_ENABLED: "${FISHLAB_DCS_ENABLED:-auto}"
+    FISHLAB_CLASSIFIER_ROOT: /classifier
+  volumes:
+    # Preserve the host working directory so existing manifest paths still resolve.
+    - type: bind
+      source: .
+      target: "${FISHLAB_ROOT:-/workspace}"
+    - type: bind
+      source: .env
+      target: "${FISHLAB_ROOT:-/workspace}/.env"
+      read_only: true
+    - type: bind
+      source: "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-.}}"
+      target: /classifier
+      read_only: true
+      bind:
+        create_host_path: false
+
+services:
+  prepare:
+    <<: *runtime
+    command: [prepare]
+
+  app:
+    <<: *runtime
+    command: [serve]
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    ports:
+      - "${FISHLAB_HOST:?set FISHLAB_HOST in .env}:${FISHLAB_PORT:?set FISHLAB_PORT in .env}:${FISHLAB_PORT}"
+    healthcheck:
+      test: [CMD, python, /opt/fishlab/scripts/docker_app.py, health]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 10s

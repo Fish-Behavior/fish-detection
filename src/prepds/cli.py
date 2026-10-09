@@ -96,8 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
     export_index.set_defaults(handler=run_export_index)
 
     review = commands.add_parser("review", help="start the review web app (local, loopback only)")
-    review.add_argument("--host", help="loopback address to bind (default: $FISHLAB_HOST or 127.0.0.1)")
-    review.add_argument("--port", type=int, help="port (default: $FISHLAB_PORT or 8000)")
+    review.add_argument("--host", help="loopback address to bind (default: $FISHLAB_HOST from .env)")
+    review.add_argument("--port", type=int, help="port (default: $FISHLAB_PORT from .env)")
     review.add_argument('--chat-url', help='loopback DCS chat service URL (default: $FISHLAB_CHAT_URL)')
     review.add_argument('--predictions', type=Path, help='DCS prediction CSV or parquet to display (optional)')
     review.add_argument('--frontend-dir', type=Path, default=Path('frontend/dist'), help='built React frontend (default: frontend/dist)')
@@ -106,23 +106,27 @@ def build_parser() -> argparse.ArgumentParser:
     review.set_defaults(handler=run_review)
 
     annotate = commands.add_parser("annotate", help="start the frame-labeling app for the Phase 15 tracker fine-tuning set")
-    annotate.add_argument("--host", help="loopback address to bind (default: $FISHLAB_HOST or 127.0.0.1)")
-    annotate.add_argument("--port", type=int, help="port (default: $FISHLAB_ANNOTATE_PORT or 8001)")
+    annotate.add_argument("--host", help="loopback address to bind (default: $FISHLAB_HOST from .env)")
+    annotate.add_argument("--port", type=int, help="port (default: $FISHLAB_ANNOTATE_PORT from .env)")
     annotate.set_defaults(handler=run_annotate)
 
     return parser
 
 
-def _bind(settings: Settings, args: argparse.Namespace, port_var: str, default_port: int) -> None:
-    """Fill args.host / args.port from the CLI, then .env, then the built-in default; loopback only."""
-    args.host = args.host or settings.service.get("FISHLAB_HOST", "127.0.0.1")
+def _bind(settings: Settings, args: argparse.Namespace, port_var: str) -> None:
+    """Fill args.host / args.port from the CLI, then .env (no built-in defaults); loopback only."""
+    args.host = args.host or settings.service.get("FISHLAB_HOST")
+    if not args.host:
+        raise ConfigError("set FISHLAB_HOST in .env (or pass --host).")
+    if args.host not in LOOPBACK_HOSTS:
+        raise ConfigError(f"the web app has no authentication: the host must be a loopback address {LOOPBACK_HOSTS}.")
     if args.port is None:
-        text = settings.service.get(port_var, str(default_port))
+        text = settings.service.get(port_var)
+        if text is None:
+            raise ConfigError(f"set {port_var} in .env (or pass --port).")
         if not (text.isdigit() and 1 <= int(text) <= 65535):
             raise ConfigError(f"{port_var} must be a port number, got {text!r}.")
         args.port = int(text)
-    if args.host not in LOOPBACK_HOSTS:
-        raise ConfigError(f"the web app has no authentication: the host must be a loopback address {LOOPBACK_HOSTS}.")
 
 
 def _positive_int(text: str) -> int:
@@ -252,7 +256,7 @@ def run_export_index(settings: Settings, args: argparse.Namespace) -> int:
 
 def run_review(settings: Settings, args: argparse.Namespace) -> int:
     """Serve the review UI on a loopback address (it has no authentication)."""
-    _bind(settings, args, "FISHLAB_PORT", 8000)
+    _bind(settings, args, "FISHLAB_PORT")
     import uvicorn
 
     from prepds.webapp.app import create_app
@@ -270,7 +274,7 @@ def run_review(settings: Settings, args: argparse.Namespace) -> int:
 
 def run_annotate(settings: Settings, args: argparse.Namespace) -> int:
     """Serve the Phase 15 frame-labeling app on a loopback address (no authentication)."""
-    _bind(settings, args, "FISHLAB_ANNOTATE_PORT", 8001)
+    _bind(settings, args, "FISHLAB_ANNOTATE_PORT")
     work_dir = settings.paths.output_dir / "phase15"
     if not (work_dir / "sample.json").is_file():
         raise ConfigError(f"no sampled frames in {work_dir}; run `python scripts/phase15_prepare.py` first.")

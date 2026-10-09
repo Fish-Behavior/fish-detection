@@ -67,6 +67,8 @@ def env(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PDS_OUTPUT_DIR", str(tmp_path / "out"))
     monkeypatch.setenv("PDS_ACCEPTED_DIR", str(tmp_path / "gold"))
+    monkeypatch.setenv("FISHLAB_HOST", "127.0.0.1")
+    monkeypatch.setenv("FISHLAB_ANNOTATE_PORT", "8001")
     _write_catalog(tmp_path / "out")
     return tmp_path
 
@@ -163,6 +165,11 @@ def test_export_index_without_a_catalog_keeps_previously_indexed_trial_fields(en
 def test_annotate_refuses_a_non_loopback_host(env, capsys) -> None:
     assert main(["annotate", "--host", "0.0.0.0"]) == 2
     assert "loopback" in capsys.readouterr().out.lower()
+
+
+def test_review_without_a_port_in_env_says_what_to_set(env, capsys) -> None:
+    assert main(["review"]) == 2
+    assert "FISHLAB_PORT" in capsys.readouterr().out
 
 
 def test_annotate_without_prepared_frames_explains_what_to_run(env, capsys) -> None:

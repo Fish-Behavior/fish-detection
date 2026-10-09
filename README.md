@@ -41,14 +41,30 @@ file: [docs/PRD.md](docs/PRD.md) (Part I preprocessing, Part II classifier and c
 
 ## Quick Start
 
-```bash
-uv venv --python 3.11 .venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-cp .env.example .env            # set PDS_VIDEO_DIR, PDS_DB_PATH, ...
-python -m prepds check-config
-pytest                          # synthetic data only, no real data needed
+Everyone uses the same two commands. Only Docker (with Compose) is needed.
+
+```sh
+cp .env.example .env    # once: set PDS_VIDEO_DIR, PDS_DB_PATH, FISHLAB_HOST, FISHLAB_PORT
+./start.sh              # build, prepare, start the app, print the local link
+./stop.sh               # back up saved work and shut down
 ```
 
+If `.env` is not set up, `./start.sh` says what is missing and starts nothing. When it runs it prints
+this workflow and stops at the first failed step:
+
+1. **Build** the Docker image (frontend and Python): a few minutes the first time.
+2. **Check** the configuration and **catalog** trials against videos.
+3. **Track** and label every video not yet processed (`prepds run`): about 35 s per 20-minute video per
+   worker; 328 videos took about 50 minutes on 22 workers. Finished videos are skipped on reruns.
+4. **Verify** every video has its outputs.
+5. **DCS** feature extraction, audit, model (trains only if none is saved) and predictions.
+6. Optional research **chat**.
+7. **Serve** the frontend and API and print one local link.
+
+Review and accept videos in the browser, then `./stop.sh` stops the app, verifies a dated backup under
+`backups/`, and removes the containers. Details, the review UI, outputs, calibration and what to trust
+in the labels: **[docs/instructions.md](docs/instructions.md)**. Contributors who need to run the code or
+tests without Docker: see "Development without Docker" there.
 Then `catalog`, `run`, `review`, `export-index`. Setup, every command, the review
 UI, outputs, calibration and what to trust in the labels are in
 **[docs/instructions.md](docs/instructions.md)**. The classifier (`python -m dcs featurize`,
@@ -69,6 +85,8 @@ fish-detection/
 ├── config/            # default thresholds, frozen calibration profiles, classifier defaults (default_training.yaml)
 ├── tests/             # automated tests (synthetic fixtures only)
 ├── docs/              # instructions, PRD, progress log, scope, contribution workflow
+├── start.sh, stop.sh  # the way everyone runs the project (Docker)
+├── Dockerfile, compose.yaml, scripts/docker_app.py   # launcher internals
 ├── .env.example       # template for your local .env; never commit .env
 ├── pyproject.toml, requirements.txt, uv.lock
 └── data/, outputs/, accepted/   # local only, git-ignored (restricted research data)

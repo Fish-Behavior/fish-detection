@@ -6,63 +6,77 @@ labeled dataset a later, separate drug-classification project will train on. Ful
 specification: [`PRD.md`](PRD.md). Build status/progress:
 [`progress.md`](progress.md).
 
+## Run it: `./start.sh` and `./stop.sh`
+
+Everyone runs the project the same way, from the repository root. Only Docker (with Compose)
+is needed; no host Python or Node.
 That later project lives in the same repository: see
 [Classifier (`dcs`)](#classifier-dcs-compound-and-dose-from-behavior) at the end of this file.
 
 ## Setup
 
 ```bash
-uv venv --python 3.11 .venv     # or: python3.11 -m venv .venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"      # add "[dev,ocr]" for optional pytesseract OCR support
-cp .env.example .env            # then fill in PDS_VIDEO_DIR / PDS_DB_PATH / PDS_REFERENCE_DIR
-python -m prepds check-config   # confirms every configured path actually exists
+cp .env.example .env     # once: set PDS_VIDEO_DIR (synced video folder), PDS_DB_PATH (00_NTT_DataBase.xlsx),
+                         # FISHLAB_HOST=127.0.0.1 and a free FISHLAB_PORT (the link you open);
+                         # optional PDS_OUTPUT_DIR, PDS_ACCEPTED_DIR, PDS_WORKERS, PDS_CONFIG, DCS_* (see the file)
+./start.sh               # build, prepare everything, start the app, print the local link
+./stop.sh                # stop the app, verify a backup of saved work, remove the containers
 ```
 
-`opencv-python-headless` is used deliberately (not `opencv-python`) — this project
-targets headless/WSL2-style environments with no display server, where the full
-wheel's `libGL.so.1` dependency fails at import time.
+If `.env`, a required path, `FISHLAB_HOST` or `FISHLAB_PORT` is not set up, `./start.sh` lists what is missing and starts nothing.
+Nothing outside `.env` needs configuring. Data and `.env` stay on your machine and are never committed.
 
-## Quick start
+**What `./start.sh` does (it prints this list when it runs, and stops at the first failed step):**
+
+| # | Step | Details | Average wait |
+|---|---|---|---|
+| 1 | Build | Docker image with the frontend and Python code | a few minutes the first time, cached after |
+| 2 | Check | `prepds check-config`, then `catalog` (match trial rows to videos; unmatched go to `exceptions_report.json`) | seconds |
+| 3 | Track | `prepds run`: track, label, consolidate and export every video not yet processed. Resumable; edited or accepted videos are never regenerated | ~35 s per 20-min video per worker; 328 videos took ~50 min on 22 workers (`PDS_WORKERS`). Reruns skip finished videos |
+| 4 | Verify | every processed video has its output files | seconds |
+| 5 | DCS | `featurize`, `check-config`, `audit`, model (trains only if none is saved), `predict` | training is slow and untimed; skipped if DCS is off |
+| 6 | Chat | optional research chat, only if enabled in `.env` | seconds |
+| 7 | Serve | start frontend + API, wait for health, print the link | seconds |
+
+Failed and unfinished steps are shown in the terminal and in `<PDS_OUTPUT_DIR>/docker/startup.json`.
+The accepted index is not exported by `./start.sh`.
+
+**What `./stop.sh` does:** stops the app, writes and verifies a private dated archive of outputs, accepted data and
+configuration under `backups/`, then removes the containers. If the backup fails, nothing is removed. Raw videos
+and unsaved browser drafts are not in the backup.
+
+Then open the printed link and use the review UI below. Do not start `prepds` commands by hand next to a running
+stack; two `run`s at once overwrite each other.
+
+## Development without Docker (contributors only)
+
+Not needed to use the project. For changing the code or running the tests:
 
 ```bash
-# 1. configure (paths to the restricted data; nothing here is ever committed)
-cp .env.example .env     # PDS_VIDEO_DIR (folder holding Phase_1/, Phase_2/ ...), PDS_DB_PATH (00_NTT_DataBase.xlsx),
-                         # PDS_OUTPUT_DIR, PDS_ACCEPTED_DIR, optional PDS_WORKERS / PDS_CONFIG
-python -m prepds check-config
-
-# 2. match trial rows to videos (writes outputs/trials_catalog.parquet + exceptions_report.json)
-python -m prepds catalog
-
-# 3. label every matched video (resumable; ~50 min for 328 videos on 22 workers)
-python -m prepds run --dry-run      # list what would be processed
-python -m prepds run                # writes outputs/processed/<sex>_<subject>/ + outputs/run_report.json
-
-# 4. review in the browser (local, loopback only), then rebuild the gold index
-python -m prepds review             # http://127.0.0.1:8000/
-python -m prepds export-index       # accepted_index.parquet from the ACCEPTED videos
+uv venv --python 3.11 .venv && source .venv/bin/activate
+uv pip install -e ".[dev]"      # add "[dev,ocr]" for optional pytesseract OCR support
+cp .env.example .env
+python -m prepds check-config   # confirms every configured path actually exists
+pytest                          # synthetic data only
 ```
 
-## Commands
+`opencv-python-headless` is used deliberately (not `opencv-python`): the project targets headless/WSL2-style
+environments where the full wheel's `libGL.so.1` fails at import time.
+
+CLI reference (the launcher runs the first four for you):
 
 - `check-config` - show resolved paths/settings; exit 1 if a configured path is missing.
-- `catalog` - FR-001..004: match trial rows to local videos (compound folders are found at any depth under
-  `PDS_VIDEO_DIR`). Unmatched trials/videos, duplicates and duration mismatches go to `exceptions_report.json`, not errors.
-- `run [--workers N] [--limit N] [--dry-run] [--force]` - one video per worker process: track -> features -> label
-  -> 1 s consolidation -> review flag -> strip PNG -> export. Resumable: videos already processed, edited or accepted
-  are skipped; **`--force` also overwrites edited/accepted work**. A failing video (including a crashed worker) is
-  reported in `run_report.json` and the run continues; exit code 1 if any failed. Default workers
-  `max(1, cpu_count - 2)`; `PDS_WORKERS` or `--workers` override. Measured: 328 videos (108.8 h) in 50 min on 22 workers
-  (the machine was oversubscribed, load ~37 on 24 cores; fewer workers may be as fast). Run only one `run` at a time.
-- `run --tracker model:<run dir> [--stride 5] [--device cuda]` - track with a fine-tuned fish detector instead of the classical
-  tracker (needs the `ml` extra and a GPU; single process, about 75 s/video). A model run must use its own calibration
-  profile (`--config`, e.g. `cal-2026-09-24-r4-model-m3.yaml`) and should write to its own `PDS_OUTPUT_DIR` /
-  `PDS_ACCEPTED_DIR` so it never overwrites the classical output. It also writes `detections.parquet` per video.
-- `review [--host 127.0.0.1] [--port 8000]` - review web app; refuses non-loopback hosts (no authentication).
-- `annotate [--port 8001]` - frame-labeling page (box, 5 keypoints, Listing tag) for the Phase 15 detector; needs
+- `catalog` - match trial rows to local videos (compound folders are found at any depth under `PDS_VIDEO_DIR`).
+- `run [--workers N] [--limit N] [--dry-run] [--force]` - one video per worker: track -> features -> label ->
+  1 s consolidation -> review flag -> strip PNG -> export. **`--force` also overwrites edited/accepted work.** A failing
+  video is reported in `run_report.json` and the run continues; exit 1 if any failed. Default workers `max(1, cpu_count - 2)`.
+- `run --tracker model:<run dir> [--stride 5] [--device cuda]` - fine-tuned detector instead of the classical
+  tracker (needs the `ml` extra and a GPU; single process, ~75 s/video). Use its own calibration profile
+  (`--config`, e.g. `cal-2026-09-24-r4-model-m3.yaml`) and its own `PDS_OUTPUT_DIR` / `PDS_ACCEPTED_DIR`. Not part of `./start.sh`.
+- `review [--host H] [--port P]` (defaults: `FISHLAB_HOST` / `FISHLAB_PORT` from `.env`, required) - review app without Docker; refuses non-loopback hosts (no authentication).
+- `annotate [--port P]` (default `FISHLAB_ANNOTATE_PORT` from `.env`) - frame-labeling page (box, 5 keypoints, Listing tag) for the Phase 15 detector; needs
   `outputs/phase15/sample.json` (see `scripts/phase15_prepare.py`).
-- `export-index` - rebuild `accepted_index.parquet` from ACCEPTED videos on disk, adding workbook fields from the catalog.
-- Calibration is not a CLI command: see below.
+- `export-index` - rebuild `accepted_index.parquet` from ACCEPTED videos on disk. Run it after reviewing.
 
 ## Outputs per video
 
@@ -83,7 +97,7 @@ or the accept rules.
 
 ## Review UI
 
-`prepds review`, pick a video, watch it with the timeline synced to playback, drag on the timeline to select a
+Open the link `./start.sh` printed, pick a video, watch it with the timeline synced to playback, drag on the timeline to select a
 time range, choose a state, **Stage relabel**, then **Save edits**. Accept is blocked while any `Undetermined`
 remains (no override) and asks for confirmation when `Dead` is present. Reject clears edits and re-queues the video.
 Keys on the timeline: arrows seek, `[` / `]` set the selection start/end at the playhead. Review flags (e.g. no
@@ -147,6 +161,7 @@ which also covers the raw-data extensions). Only synthetic fixtures under
 `.gitignore` — verified with `git check-ignore -v <path>` before each fixture is
 added, not assumed.
 
+Implementation is tracked task-by-task in [`progress.md`](progress.md) (PRD §12, Phase 0-15).
 ## Status
 
 Implementation is tracked task-by-task in [`progress.md`](progress.md),
