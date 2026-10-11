@@ -206,7 +206,15 @@ exit 0
 ''')
     docker.chmod(0o755)
     log = tmp_path / "calls.txt"
-    result = subprocess.run(["sh", str(tmp_path / "start.sh")], text=True, capture_output=True,
+    args = []
+    if failure == "prepare":
+        args = ["--setup"]  # plain start only runs the app; preparation belongs to --setup
+    else:  # state left by a finished --setup, so plain start skips build and prepare
+        (tmp_path / "outputs/docker").mkdir(parents=True)
+        (tmp_path / "outputs/docker/startup.json").write_text('{"ok": true}')
+        (tmp_path / ".fishlab-build.stamp").touch()
+        (tmp_path / ".fishlab-ready.stamp").write_text("0\n")
+    result = subprocess.run(["sh", str(tmp_path / "start.sh"), *args], text=True, capture_output=True,
                             env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "DOCKER_CALLS": str(log), "FAIL_STAGE": failure})
     calls = log.read_text()
     assert not (tmp_path / ".fishlab-launch.lock").exists()
@@ -217,11 +225,11 @@ exit 0
         if failure == "prepare":
             assert "compose up -d" not in calls
         else:
-            assert calls.count("compose stop app") == 2
+            assert calls.count("compose stop app") == 1
     else:
         assert result.returncode == 0
         assert "FishLab ready: http://127.0.0.1:8003" in result.stdout
-        assert calls.index("--exit-code-from prepare") < calls.index("--wait --wait-timeout")
+        assert "--exit-code-from" not in calls and "--wait --wait-timeout" in calls
 
 
 def test_start_lists_missing_setup_without_starting_anything(tmp_path):
