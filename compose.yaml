@@ -21,7 +21,7 @@ x-runtime: &runtime
       target: "${FISHLAB_ROOT:-/workspace}/.env"
       read_only: true
     - type: bind
-      source: "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-.}}"
+      source: "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-./backend/dcs}}"
       target: /classifier
       read_only: true
       bind:

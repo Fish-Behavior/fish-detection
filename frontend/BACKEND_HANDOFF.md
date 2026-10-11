@@ -99,7 +99,7 @@ Options can be combined. The chat bubble is always available in a session. Witho
 
 ## Verification and limits
 
-- Python contract/regression tests: `pytest tests/review tests/ingest/test_cli.py tests/ingest/test_config.py`; the local optional tracker test needs `torchvision`.
+- Python contract/regression tests: `pytest backend/prepds/tests/review backend/prepds/tests/ingest/test_cli.py backend/prepds/tests/ingest/test_config.py`; the local optional tracker test needs `torchvision`.
 - Frontend: `npm test` and `npm run build`.
 - Native DCS CLI inference was exercised with a trained synthetic logistic regression artifact and synthetic recording, separately from real research data.
 - Real per-recording inference through `/api/sessions/{id}/predict` was verified on the running app: 15-class probabilities persisted across reload, in about 22 seconds, with the original frames, segments and manifest unchanged.
