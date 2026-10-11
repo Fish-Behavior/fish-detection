@@ -55,7 +55,8 @@ uv venv --python 3.11 .venv && source .venv/bin/activate
 uv pip install -e ".[dev]"      # add "[dev,ocr]" for optional pytesseract OCR support
 cp .env.example .env
 python -m prepds check-config   # confirms every configured path actually exists
-pytest                          # synthetic data only
+pytest                          # synthetic data only, everything
+python backend/shared/scripts/changed_tests.py   # only the backend units you changed (see docs/PRD.md III.3)
 ```
 
 `opencv-python-headless` is used deliberately (not `opencv-python`): the project targets headless/WSL2-style
@@ -73,7 +74,7 @@ CLI reference (the launcher runs the first four for you):
   (`--config`, e.g. `cal-2026-09-24-r4-model-m3.yaml`) and its own `PDS_OUTPUT_DIR` / `PDS_ACCEPTED_DIR`. Not part of `./start.sh`.
 - `review [--host H] [--port P]` (defaults: `FISHLAB_HOST` / `FISHLAB_PORT` from `.env`, required) - review app without Docker; refuses non-loopback hosts (no authentication).
 - `annotate [--port P]` (default `FISHLAB_ANNOTATE_PORT` from `.env`) - frame-labeling page (box, 5 keypoints, Listing tag) for the Phase 15 detector; needs
-  `outputs/phase15/sample.json` (see `scripts/phase15_prepare.py`).
+  `outputs/phase15/sample.json` (see `backend/prepds/scripts/phase15_prepare.py`).
 - `export-index` - rebuild `accepted_index.parquet` from ACCEPTED videos on disk. Run it after reviewing.
 
 ## Outputs per video
@@ -85,11 +86,11 @@ CLI reference (the launcher runs the first four for you):
 
 ## Model tracker and Listing hints (Phase 15)
 
-The fine-tuned detector (`scripts/phase15_finetune.py`, run `m3`, trained on ~330 human-labeled frames) replaces the
+The fine-tuned detector (`backend/prepds/scripts/phase15_finetune.py`, run `m3`, trained on ~330 human-labeled frames) replaces the
 classical tracker in `outputs_r3/` (328 videos: undetected frames median 21.5% -> 0.4%, Undetermined median 13.7% ->
 0.0%). Read [`progress.md`](progress.md) ("Review corrections") before relying on it: it is not human-reviewed, detection gain is
 not proof of track accuracy, it can report a fish on empty frames, and its calibration is weakly identified.
-Listing/LORR is still a manual label. `scripts/phase15_flag_listing.py` writes advisory `listing_flags.json` hints
+Listing/LORR is still a manual label. `backend/prepds/scripts/phase15_flag_listing.py` writes advisory `listing_flags.json` hints
 (crop classifier, high recall, low precision) that the review app shows next to the video; they never change a state
 or the accept rules.
 
@@ -108,7 +109,7 @@ movement until the end of the video) are shown above the player.
 - **Why this label:** for the second under the playhead, the labeling rules in order with the measured value next to each
   threshold, the frame votes, and whether a reviewer changed the automatic label.
 - **Time per state:** seconds, percent and bouts for all seven states.
-- **Possible Listing hints:** advisory ranges (model run + `scripts/phase15_flag_listing.py`) with a "Go to" button.
+- **Possible Listing hints:** advisory ranges (model run + `backend/prepds/scripts/phase15_flag_listing.py`) with a "Go to" button.
 
 ## How labels are produced (and what to trust)
 
@@ -127,13 +128,13 @@ voted in 1 s bins. Precedence: undetected > Dead > Surface Breach > Listing (off
 ## Calibration (run once; frozen profile `cal-2026-09-23-r2`)
 
 The three speed thresholds were searched against proportions digitized from the two restricted reference figures
-(`src/prepds/calibration/reference_targets.json`), minimizing the mean total-variation distance per compound/dose
+(`backend/prepds/src/prepds/calibration/reference_targets.json`), minimizing the mean total-variation distance per compound/dose
 group, scored on the 1 s-consolidated output, Listing excluded. In-sample distance 0.198 (placeholder thresholds:
 0.418); **leave-one-group-out 0.246**, so expect roughly that gap on unseen groups. Reproduce with:
 
 ```bash
-python scripts/build_track_cache.py            # track the calibration videos once (~40 s each)
-python scripts/calibrate_thresholds.py         # search + per-group + leave-one-group-out (no file written)
+python backend/prepds/scripts/build_track_cache.py            # track the calibration videos once (~40 s each)
+python backend/prepds/scripts/calibrate_thresholds.py         # search + per-group + leave-one-group-out (no file written)
 ```
 
 Freeze results with `prepds.calibration.profile.write_calibration_profile` (profiles are immutable; add a new
@@ -155,7 +156,7 @@ Videos, the trial workbook, and the two reference images are restricted research
 data (PRD FR-018 / NFR-004) and are **never** committed — `data/`, `outputs/`,
 `accepted/`, and the raw-data file extensions are gitignored (see `.gitignore`,
 which also covers the raw-data extensions). Only synthetic fixtures under
-`tests/fixtures/` are committed, via narrow negations in this package's own
+`backend/shared/tests/fixtures/` are committed, via narrow negations in this package's own
 `.gitignore` — verified with `git check-ignore -v <path>` before each fixture is
 added, not assumed.
 
@@ -201,7 +202,7 @@ Same virtual environment as `prepds` (see [Setup](#setup)). Add the `DCS_*` line
 | `DCS_DB_PATH` | the trial workbook (same file as `PDS_DB_PATH`) | `featurize`, for the 8 NTT columns; unset → NTT left empty, `has_ntt = 0` |
 | `DCS_OUTPUT_DIR` | where `dcs` writes (default `outputs/dcs`, git-ignored) | everything |
 | `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; `audit`, `train` and the chat read it |
-| `DCS_CONFIG` | a YAML file overriding `config/default_training.yaml` | optional |
+| `DCS_CONFIG` | a YAML file overriding `backend/dcs/config/default_training.yaml` | optional |
 | `DCS_CHAT_BASE_URL` | the chat server's OpenAI-compatible address, e.g. Ollama on this machine (`http://127.0.0.1:11434/v1`); never in a YAML file | `ask`, `serve-chat` |
 | `DCS_CHAT_API_KEY` | key for a hosted chat server; in your own `.env` (git-ignored) or the environment, never in `.env.example` or a YAML file; `check-config` shows it as `***` | `ask`, `serve-chat`, only for a hosted server |
 
@@ -271,7 +272,7 @@ not silently skipped.
 
 | Unit | Tool | What it does | How to use it |
 |---|---|---|---|
-| U1 Config | `check-config`, `config/default_training.yaml`, `dcs.config.load_settings()` | Loads paths and training settings with the precedence above; rejects unknown keys, wrong types and out-of-range values with a message naming the key | Run `check-config` after editing `.env` or an override YAML |
+| U1 Config | `check-config`, `backend/dcs/config/default_training.yaml`, `dcs.config.load_settings()` | Loads paths and training settings with the precedence above; rejects unknown keys, wrong types and out-of-range values with a message naming the key | Run `check-config` after editing `.env` or an override YAML |
 | U2 Synthetic data | `synth`, `dcs.synthetic.make_gold_dataset(out, SynthConfig(...))` | Writes fish that follow the real prepds file formats, with a planted compound signal and a date effect. `SynthConfig` has one switch per edge case (e.g. `low_detected_fish=2`, `undetermined=True`, `missing_file="frames"`), and `result.targets` names the fish each switch hit | CLI for trying the tools; the Python form for tests |
 | U3 Gold reader | `dcs.gold.read_gold(settings)` (inside `featurize`) | Reads either source and checks the prepds file contract. **Drops** a fish (listed with a reason) when a file is missing or unreadable, or its status is REJECTED / NOT_PROCESSED. **Stops** with one clear message when the data breaks the contract: mixed calibration profiles, a fish without a date, a duplicated fish, `Undetermined` in an Accepted video, a missing column or wrong type, tracker evidence that disagrees with the profile | Nothing to call by hand; its messages tell you what to fix (table below) |
 | U4 Workbook | `dcs.workbook.read_ntt(path, videos)` (inside `featurize`) | Reads the 8 NTT columns per fish from the workbook (`<Sex>_<Subject:04d>`). `has_ntt = 1` when all 8 are filled. A `-` in a half's cell means the fish never entered that half: distance 0, speed empty (still `has_ntt = 1`). Compounds are compared with the gold set after trimming, collapsing spaces and ignoring case. Stops if the workbook disagrees with the gold set on compound or date, or has two different rows for one fish | Set `DCS_DB_PATH`; leave it unset to train without NTT |
@@ -812,7 +813,7 @@ pip install -U pip
 pip install torch --index-url https://download.pytorch.org/whl/cu130   # CUDA build for aarch64 first (PRD Appendix B step 5)
 pip install -e ".[dev,train]"                      # torch already satisfied, so it is not replaced
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"   # must print True
-pytest tests/dcs -q                                # synthetic data only; must pass on aarch64 (EC-19)
+pytest backend/dcs/tests -q                                # synthetic data only; must pass on aarch64 (EC-19)
 
 # 2. once: paths on the box (.env is git-ignored)
 cp .env.example .env    # set PDS_VIDEO_DIR, PDS_DB_PATH, DCS_DB_PATH; keep PDS_OUTPUT_DIR=outputs, DCS_PROCESSED_DIR=outputs
@@ -882,8 +883,8 @@ means set `training.vehicle_compound`; `... stage cannot be built: ...` carries 
 ## Tests
 
 ```bash
-pytest tests/dcs -q        # about 25 s on an idle machine, synthetic data only; run after every change
-pytest tests/ -q           # everything, before a commit
+pytest backend/dcs/tests -q        # about 25 s on an idle machine, synthetic data only; run after every change
+python backend/shared/scripts/changed_tests.py   # only the units you changed (add --all for everything)
 ```
 
 | File | Checks |
@@ -917,6 +918,6 @@ pytest tests/ -q           # everything, before a commit
 Whoever changes `dcs` (a new unit or a small fix) also does these, in the same branch:
 
 - [ ] **Instructions:** the new or changed tool, command, setting, column or error message is described above (what it does, how to run it, what to do when it stops), and any new test file is in the Tests table.
-- [ ] **Unused code:** nothing left that no one calls or reads (functions, constants, settings, duplicated constants). Search by name in `src/dcs` and `tests/dcs`; delete what is dead.
-- [ ] **Tests:** `pytest tests/dcs -q` is green.
+- [ ] **Unused code:** nothing left that no one calls or reads (functions, constants, settings, duplicated constants). Search by name in `backend/dcs/src/dcs` and `tests/dcs`; delete what is dead.
+- [ ] **Tests:** `pytest backend/dcs/tests -q` is green.
 - [ ] **Progress file:** [`classifier_progress.md`](classifier_progress.md) lists the unit, its decisions (D-nnn) and what was removed.
