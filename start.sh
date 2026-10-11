@@ -122,7 +122,7 @@ output_dir="$(envval PDS_OUTPUT_DIR)"; output_dir="${output_dir:-outputs}"
 
 need_build=1
 if [ "$full" -eq 0 ] && docker image inspect fishlab:local >/dev/null 2>&1 \
-    && ! changed "$build_stamp" Dockerfile pyproject.toml uv.lock README.md src/prepds config scripts/docker_app.py frontend; then
+    && ! changed "$build_stamp" Dockerfile pyproject.toml uv.lock README.md backend/prepds/src backend/prepds/config backend/shared/scripts/docker_app.py frontend; then
     need_build=0
 fi
 
