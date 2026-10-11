@@ -791,6 +791,11 @@ box; set it only if your data agreement allows it. A hosted server's key goes in
 | `timeout_s` | 300 | Seconds to wait for one reply |
 | `allow_remote` | `false` | Allow a server that is not this machine |
 
+**Choosing a model.** `python -m dcs.chat_eval <model> [<model> ...] [--show-answers]` asks 27 fixed questions
+(`config/chat_eval_questions.yaml`) to each model and prints how many got the right tool, the right arguments and the
+right number (computed by calling the tool directly), how many answers invented a number, and the latency. Run it with
+a training run present so the run questions are included; read the failed answers yourself before choosing.
+
 ## Training on the GB10 (temporarily accepted data)
 
 Copying files onto the GB10 (WinSCP, `pscp`) may not be allowed for this account. The box therefore builds everything
