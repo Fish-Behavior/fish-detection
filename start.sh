@@ -131,7 +131,7 @@ if [ "$full" -eq 0 ] && [ -f "$output_dir/docker/startup.json" ] \
     && grep -q '"ok": true' "$output_dir/docker/startup.json" \
     && [ "$(cat "$ready_stamp" 2>/dev/null)" = "$(video_count)" ] \
     && ! videos_changed \
-    && ! changed "$ready_stamp" .env "$(envval PDS_DB_PATH)" config \
+    && ! changed "$ready_stamp" .env "$(envval PDS_DB_PATH)" backend/prepds/config backend/dcs/config \
         "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-}}"; then
     need_prepare=0
 fi
