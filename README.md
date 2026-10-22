@@ -66,11 +66,9 @@ on, both start the model server first, since preparation checks it), and `--full
    `docker compose --profile chat up -d model && docker compose exec model ollama pull qwen3:30b-a3b`.
 7. **Serve** the frontend and API and print one local link.
 
-Review and accept videos in the browser, then `./stop.sh` stops the app and removes the containers. Details, the
-review UI, the research chat, outputs, calibration and what to trust in the labels:
-**[docs/instructions.md](docs/instructions.md)**. Contributors who need to run the code or tests without Docker: see
-"Development without Docker" there. The classifier (`python -m dcs featurize`, `audit`, `train`, `predict`, `ask`),
-including the GB10 runbook, is the last part of that file.
+Review and accept videos in the browser, then `./stop.sh` stops the app and removes the containers. Every command, why it
+exists and how it works (prepds, dcs, the research chat, the GB10 runbook, what to trust, error fixes), plus the reviewer steps:
+**[docs/RUNBOOK.md](docs/RUNBOOK.md)**. Running without Docker: section 4 there.
 
 ```bash
 pip install -e ".[dev,train]"   # adds PyTorch for the classifier's MLP (optional)
@@ -86,7 +84,7 @@ fish-detection/
 │   ├── dcs/           # compound/dose classifier and research chat (reads prepds output, never imports it): src/, tests/, config/, docs/
 │   └── shared/        # used by both: tests/fixtures (synthetic data), tests/deployment, scripts/ (docker_app.py, changed_tests.py)
 ├── frontend/          # React review UI
-├── docs/              # instructions, PRD, scope, contribution workflow (cross-unit docs; unit docs live in backend/<unit>/docs)
+├── docs/              # RUNBOOK, PRD, scope, contribution workflow (cross-unit docs; unit docs live in backend/<unit>/docs)
 ├── start.sh, stop.sh  # the way everyone runs the project (Docker)
 ├── Dockerfile, compose.yaml   # launcher internals
 ├── .env.example       # template for your local .env; never commit .env

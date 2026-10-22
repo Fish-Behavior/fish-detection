@@ -1164,7 +1164,7 @@ T052                          — sequential, depends on all five above being wr
 | **Advisor / collaborator** | Dr. Ashish Kharel / Dr. Scott Hall |
 | **Privacy rule** | This file and every file added to `docs/` use placeholders (`COMPOUND_A`, `F_0042`). Never write real compound names, subject IDs, dates, data files or local paths here. The README forbids committing restricted data; this PRD applies the same rule to names and dates voluntarily |
 
-**Numbering.** Part II sections are written `II.n`. The code (`backend/dcs/src/dcs`, `tests/dcs`), `backend/dcs/config/default_training.yaml` and [instructions.md](instructions.md) cite them as "PRD §n.m" without the `II.` (for example "PRD §6.4" = **II.6.4**). Requirement ids (FR-1..FR-11, NFR-1..6, AC-1..11, EC-1..31, Q1..Q17, D-nnn) belong to Part II and do not collide with Part I's three-digit ids (FR-001...).
+**Numbering.** Part II sections are written `II.n`. The code (`backend/dcs/src/dcs`, `tests/dcs`), `backend/dcs/config/default_training.yaml` and [RUNBOOK.md](RUNBOOK.md) cite them as "PRD §n.m" without the `II.` (for example "PRD §6.4" = **II.6.4**). Requirement ids (FR-1..FR-11, NFR-1..6, AC-1..11, EC-1..31, Q1..Q17, D-nnn) belong to Part II and do not collide with Part I's three-digit ids (FR-001...).
 
 ## II.1 Executive summary
 
@@ -1300,7 +1300,7 @@ FR-1 to FR-6 on one machine, producing one reviewed report and one loadable mode
 
 ### II.5.1 Input and the two-step flow
 - **Source (read-only), two kinds, chosen by `training.gold_source`:** `accepted` reads `<DCS_ACCEPTED_DIR>` (the reviewed gold folder); `processed` (current default) reads the unreviewed Part I output (`DCS_PROCESSED_DIR`: `trials_catalog.parquet` plus `processed/<video_id>/`), allows `Undetermined` (measured per fish, never a behavior), drops `REJECTED`/`NOT_PROCESSED` fish with a reason, and marks every row unreviewed.
-- **Step 1, `featurize`** runs where the data lives; **step 2, `train`** reads only the table. The original plan was to copy the table to the GB10; because copying onto the box may be blocked by least-privilege rules, the box instead **clones the repository, re-runs `prepds` on the raw videos and trains on that output** (D-057). Runbook: [instructions.md](instructions.md), "Training on the GB10".
+- **Step 1, `featurize`** runs where the data lives; **step 2, `train`** reads only the table. The original plan was to copy the table to the GB10; because copying onto the box may be blocked by least-privilege rules, the box instead **clones the repository, re-runs `prepds` on the raw videos and trains on that output** (D-057). Runbook: [RUNBOOK.md](RUNBOOK.md), "Training on the GB10 (from a clone)".
 
 ### II.5.2 Eligible rows
 1. Review status Accepted (source `accepted`), or any processed non-rejected fish (source `processed`, flagged).
@@ -1377,10 +1377,10 @@ Input: each video's frames resampled to 1 s (about 1200 steps x 8 channels, unde
 ## II.7 Technical specification
 
 ### II.7.1 Code layout (as built)
-`backend/dcs/src/dcs/`, a second package in the same repository and `pyproject.toml`: `schema`, `config`, `config_rules`, `gold`/`gold_checks`/`gold_rules` (readers), `workbook`, `featurize`, `trainset`, `folds`, `audit`, `preprocess`, `models`, `mlp`, `evaluate`, `ablations`, `stage2`, `report`, `train`, `artifact`, `chat_tools`, `chat`, `chat_server`, `synthetic*` (synthetic gold data), `cli`. One step per module, under the harness limit of 400 lines per file (D-009). Defaults: `backend/dcs/config/default_training.yaml`. Tests: `backend/dcs/tests/` with synthetic data only (975 tests in about 54 s). Per-module documentation: [instructions.md](instructions.md), part "Classifier (`dcs`)".
+`backend/dcs/src/dcs/`, a second package in the same repository and `pyproject.toml`: `schema`, `config`, `config_rules`, `gold`/`gold_checks`/`gold_rules` (readers), `workbook`, `featurize`, `trainset`, `folds`, `audit`, `preprocess`, `models`, `mlp`, `evaluate`, `ablations`, `stage2`, `report`, `train`, `artifact`, `chat_tools`, `chat`, `chat_server`, `synthetic*` (synthetic gold data), `cli`. One step per module, under the harness limit of 400 lines per file (D-009). Defaults: `backend/dcs/config/default_training.yaml`. Tests: `backend/dcs/tests/` with synthetic data only (975 tests in about 54 s). Per-module documentation: [RUNBOOK.md](RUNBOOK.md), section 5 (dcs).
 
 ### II.7.2 CLI
-`check-config`, `synth`, `featurize [--videos] [--profile]`, `audit`, `train [--stage --models --seed --repeats --device --no-ablations]`, `predict`, `ask`, `serve-chat`. Full table: [instructions.md](instructions.md), "Commands".
+`check-config`, `synth`, `featurize [--videos] [--profile]`, `audit`, `train [--stage --models --seed --repeats --device --no-ablations]`, `predict`, `ask`, `serve-chat`. Command table: [RUNBOOK.md](RUNBOOK.md), section 2.
 
 ### II.7.3 Configuration
 `training:` (seed, folds, repeats, `min_class_size`, `min_state_fish`, `vehicle_compound`, `camera_epochs`, `use_ntt`/`use_depth`/`use_demographics`, `gold_source`, flags, and `mlp:`) and `chat:` (`model`, `temperature`, `max_tool_rounds`, `timeout_s`, `allow_remote`); the chat server's address is machine-specific and comes only from `DCS_CHAT_BASE_URL` in `.env` or the environment (D-075). Values read from the real data (vehicle name, camera epochs, duration range) go in the owner's override file, never in the defaults. Unknown keys and wrong types are a `ConfigError` (D-023).
@@ -1424,7 +1424,7 @@ No new core dependency; the extra `train = ["torch>=2.4"]`. CI (Linux, Python 3.
 **What is still missing for an independent test.** Everything above is retrospective. The strongest check is prospective: record a small number of new fish of every compound (and vehicle) on the same new dates, with one camera setup, do not look at them while tuning, and score them once with the saved model. That also lifts the dose-date confound (all doses of a compound share dates). It needs the owner's recording plan; see III.1.
 
 ### II.9.2 Test approach
-Synthetic tables and synthetic gold data only; test first for every pure function. `pytest tests/dcs -q` for the fast loop, `pytest tests/ -q` before a pull request. Every implemented edge case has a test (map: the Tests table in [instructions.md](instructions.md)); EC-30 belongs to the not-started 1D-CNN. Edge cases added during the build: EC-27 index row without `date`; EC-28 workbook row missing, duplicated or disagreeing; EC-29 tracker evidence disagrees; EC-30 sequences of different lengths; EC-31 camera framing differs between dates.
+Synthetic tables and synthetic gold data only; test first for every pure function. `pytest tests/dcs -q` for the fast loop, `pytest tests/ -q` before a pull request. Every implemented edge case has a test (tests are under `backend/dcs/tests/`, one file per module); EC-30 belongs to the not-started 1D-CNN. Edge cases added during the build: EC-27 index row without `date`; EC-28 workbook row missing, duplicated or disagreeing; EC-29 tracker evidence disagrees; EC-30 sequences of different lengths; EC-31 camera framing differs between dates.
 
 ### II.9.3 Acceptance checklist
 - [x] AC-1 `audit` reports the II.2.3 statistics (synthetic and real unreviewed set)
@@ -1478,7 +1478,7 @@ Q1 tabular first, 1D-CNN second: yes. Q2 UToledo OneDrive approved. Q3 home PC W
 
 ## II.13 Glossary and runbook
 - **NTT:** Novel Tank Test, the workbook's per-trial movement summary (a different session from the video). **Scheme A / B:** date-held-out versus random validation. **Date effect:** score of B minus score of A. **Vehicle:** control fish exposed to the carrier only. **Baseline:** a simple model a fancier one must beat. **Camera epoch:** a period with one zoom/framing; the real set has three. **Temporarily accepted:** unreviewed Part I output used as training data until reviewers Accept videos.
-- **Runbook** (GB10 over SSH, retrieving and reloading a model, home-PC fallback): [instructions.md](instructions.md), "Training on the GB10" and "Predicting new fish". It replaces the former Appendix B.
+- **Runbook** (GB10 over SSH, retrieving and reloading a model, home-PC fallback): [RUNBOOK.md](RUNBOOK.md), "Training on the GB10 (from a clone)" and `predict` in section 5. It replaces the former Appendix B.
 
 ---
 
@@ -1530,9 +1530,9 @@ Everything deferred, accepted as a known limit, or waiting on someone, collected
 
 ## III.3 Repository layout and test policy (standing rules)
 Goal: a cleaner, safer, more professional repo where touching one backend unit never costs a run of everything.
-1. **One folder per backend unit.** `backend/prepds/` (preprocessing) and `backend/dcs/` (classifier and chat) each hold their own `src/`, `tests/`, `config/`, `docs/` (and `scripts/` for prepds). `backend/shared/` holds what both use: `tests/fixtures` (synthetic data only), `tests/deployment`, `scripts/docker_app.py`, `scripts/changed_tests.py`. Cross-unit docs (this PRD, `instructions.md`, `how-to-start.md`, scope) stay in root `docs/`; unit-specific progress logs live in `backend/<unit>/docs/`. `frontend/`, Docker files and `start.sh`/`stop.sh` stay at the root.
+1. **One folder per backend unit.** `backend/prepds/` (preprocessing) and `backend/dcs/` (classifier and chat) each hold their own `src/`, `tests/`, `config/`, `docs/` (and `scripts/` for prepds). `backend/shared/` holds what both use: `tests/fixtures` (synthetic data only), `tests/deployment`, `scripts/docker_app.py`, `scripts/changed_tests.py`. Cross-unit docs (this PRD, `RUNBOOK.md`, `how-to-start.md`, scope) stay in root `docs/`; unit-specific progress logs live in `backend/<unit>/docs/`. `frontend/`, Docker files and `start.sh`/`stop.sh` stay at the root.
 2. **Units stay independent.** `dcs` never imports `prepds` and the reverse (classifier NFR-6, D-013). Do not add a cross-unit import; share data through files, shared fixtures through `backend/shared`.
 3. **New code goes in its unit.** A new module, test, config file or doc is placed in the unit that owns it, never in a root `src/`, `tests/`, `scripts/` or `config/` (those no longer exist). Tests mirror the area they cover (`backend/prepds/tests/<ingest|vision|behavior|review|annotation|output>`). Reference files by their `backend/...` path in docs and comments.
 4. **Run only what changed.** Locally: `python backend/shared/scripts/changed_tests.py` (add `--all` for everything, extra args go to pytest). CI does the same on pull requests: a unit's tests run only if that unit changed. A change in `backend/shared`, `pyproject.toml`, `uv.lock`, Docker files or `.github` selects every unit; docs-only changes select none. Pushes to master run everything. `CI passed` fails only on a failed or cancelled job, never on a skipped one. If a new unit or shared path is added, update `changed_tests.py` and its test in the same change.
-5. **Quality gates.** Each unit keeps its own coverage floor (85%, currently prepds 95%, dcs 97%); raise it, never lower it. No restricted data, models or `.env` in git (`test_dcs_privacy` enforces it). Remove unused code and docs when a unit is done (see `dcs unit close-out` in `instructions.md`).
+5. **Quality gates.** Each unit keeps its own coverage floor (85%, currently prepds 95%, dcs 97%); raise it, never lower it. No restricted data, models or `.env` in git (`test_dcs_privacy` enforces it). Remove unused code and docs when a unit is done (D-041 in classifier_progress.md).
 6. **Moves are mechanical.** When relocating files, use `git mv`, fix path references in code, tests, Docker, CI and docs in the same branch, and run the full suite once (`--all`) before opening the pull request.

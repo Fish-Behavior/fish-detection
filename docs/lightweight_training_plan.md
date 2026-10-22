@@ -56,7 +56,7 @@ CSV; a save/discard step that moves a kept session out of `temp/`; a Docker serv
 
 #### How to do Step 1 (your instructions)
 
-The base install is already written: "Training on the GB10" in `docs/instructions.md`, part 1. Follow it, then add the
+The base install is already written: "Training on the GB10 (from a clone)" in `docs/RUNBOOK.md`. Follow it, then add the
 extras below. Do all of it over SSH inside `tmux`. Paste the outputs into `backend/dcs/docs/classifier_progress.md` section 6
 (hardware record) when done. Real names, dates and results stay out of git.
 
@@ -112,7 +112,7 @@ Done on the GB10 (2026-10-22; decisions D-077 to D-079 in `backend/dcs/docs/clas
 
 Still to do:
 - [ ] Owner reads a sample of real answers in the app and adds `examples` to `chat_guidance.yaml` where the style is wrong.
-- [ ] After any guidance change, re-run the eval (command in `docs/instructions.md`, "Research chat") and compare with the
+- [ ] After any guidance change, re-run the eval (command in `docs/RUNBOOK.md`, "Research chat") and compare with the
       table above. Worked examples can backfire: a numeric example was once copied into an answer with no tool call.
 
 ### Step 3: Part B, vision (needs your labeling time)
