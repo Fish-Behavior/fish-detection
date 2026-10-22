@@ -70,7 +70,7 @@ def test_lab_guidance_reaches_the_system_prompt(data: ResearchData) -> None:
     engine = Scripted({"role": "assistant", "content": "ok"})
     ask(data, "hi", chat=CHAT, engine=engine)
     system = engine.sent[0][0][0]["content"]
-    assert "Answer layout" in system and "Bottom line" in system and "Example of a good answer" in system
+    assert "Answer layout" in system and "Bottom line" in system and "Example of the answer style only" in system
 
 
 def test_guidance_file_is_optional_and_checked(tmp_path: Path) -> None:

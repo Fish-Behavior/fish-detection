@@ -181,7 +181,7 @@ def load_guidance(path: Path = GUIDANCE_FILE) -> str:
     if guide.get("glossary"):
         parts.append("\nTerms researchers use:\n" + "\n".join(f"- {term}: {meaning}" for term, meaning in guide["glossary"].items()))
     for example in guide.get("examples") or []:
-        parts.append(f"\nExample of a good answer.\nQuestion: {example['question']}\nAnswer:\n{str(example['answer']).strip()}")
+        parts.append(f"\nExample of the answer style only (its names and numbers are made up; never reuse them).\nQuestion: {example['question']}\nAnswer:\n{str(example['answer']).strip()}")
     return "\n" + "\n".join(parts) if parts else ""
 
 
