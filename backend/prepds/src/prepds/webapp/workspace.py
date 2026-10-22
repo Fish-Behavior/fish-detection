@@ -644,7 +644,7 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
             class NoRedirect(urllib.request.HTTPRedirectHandler):
                 def redirect_request(self, *args, **kwargs):
                     return None
-            with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(request, timeout=90) as response:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(request, timeout=240) as response:
                 return Answer.model_validate(json.loads(response.read(2_000_000)))
         except (urllib.error.URLError, TimeoutError, OSError, ValueError, ValidationError):
             fail(503, 'chat_unavailable', 'Research chat failed or returned an invalid response. Check the DCS service and model.')
