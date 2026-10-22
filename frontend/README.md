@@ -2,7 +2,7 @@
 
 React/TypeScript interface for zebrafish behavior analysis: a **Dashboard** for exploring a session and a **Review** page for correcting tracking, scene, and behavior results. The interface connects to the existing prepds FastAPI service with file-backed correction persistence.
 
-> The backend inventories the configured video folder. No bundled research data exists. `npm start` starts the whole app. See [BACKEND_HANDOFF.md](BACKEND_HANDOFF.md) for setup, API contracts, persistence, analysis, DCS inference and chat.
+> The backend inventories the configured video folder. No bundled research data exists. `npm start` starts the whole app. Setup, persistence, analysis, DCS inference and the research chat: [docs/RUNBOOK.md](../docs/RUNBOOK.md). API contracts: `/docs` (Swagger) on the running app.
 
 ## Run
 
