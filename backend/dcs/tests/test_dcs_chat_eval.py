@@ -67,3 +67,5 @@ def test_numbers_inside_tool_text_and_compound_codes_are_not_invented() -> None:
     assert numbers({"scheme_A": "0.469 ± 0.022", "doses": ["0.03+0.01"]}) == [0.469, 0.022, 0.03, 0.01]
     assert invented("FD-2-67 and MTA-5-62 differ: 0.469 vs 0.022.", [0.469, 0.022]) == 0
     assert invented("FD-2-67 scored 0.512.", [0.469]) == 1
+    assert invented("| 0-30 | 79.2% | 40.2 |", [30, 0.7919, 40.154]) == 0  # a time range is not a negative number
+    assert invented("g = -1.36", [-1.36]) == 0

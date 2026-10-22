@@ -26,7 +26,7 @@ from dcs.featurize import BEHAVIOR_STATES
 from dcs.gold_rules import compound_label
 
 QUESTIONS_FILE = Path(__file__).resolve().parents[2] / "config" / "chat_eval_questions.yaml"
-NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e-?\d+)?", re.IGNORECASE)
+NUMBER = re.compile(r"(?<![\d.])-?\d+(?:\.\d+)?(?:e-?\d+)?", re.IGNORECASE)  # "0-30" is a range, not 0 and -30
 # Fish ids, dates, quartile names and compound codes (FD-2-67, MTA-5-62) are names, not numeric claims.
 NOISE = re.compile(r"\bF_\d+\b|\d{4}-\d{2}-\d{2}|\b[qQ]\d\b|\b[A-Za-z]+(?:-\d+)+\b")
 SMALL_INT = 10  # "top 3", "2 compounds": counted words, not data claims
