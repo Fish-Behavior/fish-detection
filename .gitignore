@@ -80,3 +80,4 @@ htmlcov/
 
 # Project-local Ollama model store (see docs/instructions.md chat setup)
 .ollama/
+my_training.yaml
