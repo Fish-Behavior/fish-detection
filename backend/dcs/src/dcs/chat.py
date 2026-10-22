@@ -14,8 +14,11 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+import yaml
 
 from dcs.chat_tools import ResearchData, call_tool, tool_schemas
 from dcs.config import ENV_CHAT_BASE_URL, ConfigError
@@ -23,6 +26,7 @@ from dcs.config_rules import SOURCE_PROCESSED
 from dcs.featurize import BEHAVIOR_STATES
 
 LOCAL_NAMES = ("localhost",)
+GUIDANCE_FILE = Path(__file__).resolve().parents[2] / "config" / "chat_guidance.yaml"
 FINAL_NUDGE = "Answer the question now from the tool results above; do not call more tools."
 SYSTEM_PROMPT = f"""You are the research assistant of a zebrafish drug-exposure behavior study. Researchers ask you, in \
 English, about how fish behaved under each compound and dose, about single fish, and about the classifier's results.
@@ -40,7 +44,7 @@ recognizing the date; date_only and the within-date permuted score are the basel
 reason.
 - Behavior states: {", ".join(BEHAVIOR_STATES)}. "Undetermined" is unknown time, not a behavior.
 - If a tool returns an error, correct the arguments using its message, or tell the researcher what is missing.
-- Answer in plain English for biologists: short paragraphs or small tables, the numbers first, then what they mean.
+- Answer in plain English for biologists, in the layout given under "Answer layout" below when it is present.
 """
 
 Engine = Callable[[Mapping[str, Any], list[dict[str, Any]], list[dict[str, Any]]], dict[str, Any]]
@@ -116,7 +120,7 @@ def ask(
     """Answer one question: the model calls tools until it can answer, at most `chat.max_tool_rounds` times."""
     engine = engine or complete  # looked up at call time, so tests can replace `chat.complete`
     turns = [{"role": t["role"], "content": t["content"]} for t in history]
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + _context(data)}, *turns, {"role": "user", "content": question}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + _context(data) + load_guidance()}, *turns, {"role": "user", "content": question}]
     calls: list[dict[str, Any]] = []
     tools = tool_schemas()
     for _ in range(chat["max_tool_rounds"]):
@@ -157,6 +161,28 @@ def print_answer(answer: Answer, show_tools: bool) -> None:
             status = f"error: {call['error']}" if call["error"] else "ok"
             print(f"  [tool] {call['tool']}({json.dumps(call['arguments']) if not isinstance(call['arguments'], str) else call['arguments']}) -> {status}")
     print(answer.text)
+
+
+def load_guidance(path: Path = GUIDANCE_FILE) -> str:
+    """The lab's behavior instructions (`config/chat_guidance.yaml`) as prompt text; read per question so edits apply at once."""
+    if not path.is_file():
+        return ""
+    try:
+        guide = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as error:
+        raise ConfigError(f"{path.name} is not valid YAML: {error}") from None
+    if not isinstance(guide, dict) or any(k not in ("format", "rules", "glossary", "examples") for k in guide):
+        raise ConfigError(f"{path.name} may only contain format, rules, glossary and examples.")
+    parts = []
+    if guide.get("format"):
+        parts.append("\nAnswer layout (follow it for every answer):\n" + "\n".join(f"- {line}" for line in guide["format"]))
+    if guide.get("rules"):
+        parts.append("\nInterpretation rules from the lab:\n" + "\n".join(f"- {line}" for line in guide["rules"]))
+    if guide.get("glossary"):
+        parts.append("\nTerms researchers use:\n" + "\n".join(f"- {term}: {meaning}" for term, meaning in guide["glossary"].items()))
+    for example in guide.get("examples") or []:
+        parts.append(f"\nExample of a good answer.\nQuestion: {example['question']}\nAnswer:\n{str(example['answer']).strip()}")
+    return "\n" + "\n".join(parts) if parts else ""
 
 
 def _answer(reply: Mapping[str, Any], question: str, turns: list[dict[str, str]], calls: list[dict[str, Any]]) -> Answer:

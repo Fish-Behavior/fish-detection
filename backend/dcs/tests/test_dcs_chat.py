@@ -66,6 +66,24 @@ def test_system_prompt_sets_the_rules_and_names_the_data(data: ResearchData) -> 
     assert "English" in SYSTEM_PROMPT and "tool" in SYSTEM_PROMPT and "24 fish" in system["content"]
 
 
+def test_lab_guidance_reaches_the_system_prompt(data: ResearchData) -> None:
+    engine = Scripted({"role": "assistant", "content": "ok"})
+    ask(data, "hi", chat=CHAT, engine=engine)
+    system = engine.sent[0][0][0]["content"]
+    assert "Answer layout" in system and "Bottom line" in system and "Example of a good answer" in system
+
+
+def test_guidance_file_is_optional_and_checked(tmp_path: Path) -> None:
+    assert chat.load_guidance(tmp_path / "missing.yaml") == ""
+    good = tmp_path / "good.yaml"
+    good.write_text(yaml.safe_dump({"rules": ["Say n."], "examples": [{"question": "Q?", "answer": "A."}]}))
+    assert "- Say n." in chat.load_guidance(good) and "Question: Q?" in chat.load_guidance(good)
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(yaml.safe_dump({"rulez": ["typo"]}))
+    with pytest.raises(ConfigError, match="may only contain"):
+        chat.load_guidance(bad)
+
+
 def test_history_carries_earlier_turns(data: ResearchData) -> None:
     engine = Scripted({"role": "assistant", "content": "second"})
     history = [{"role": "user", "content": "first?"}, {"role": "assistant", "content": "first"}]
