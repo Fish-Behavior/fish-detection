@@ -77,3 +77,6 @@ htmlcov/
 !tests/fixtures/synth_tiny.mp4
 !tests/fixtures/synth_db.xlsx
 !tests/fixtures/legend_swatches.png
+
+# Project-local Ollama model store (see docs/instructions.md chat setup)
+.ollama/

@@ -30,7 +30,7 @@ fail() {
         printf '\nFAILED: %s (exit %s). FishLab was not started successfully.\n' "$step" "$code" >&2
         if [ "$diagnostics" -eq 1 ]; then
             docker compose ps -a >&2 || true
-            docker compose logs --tail 60 prepare app >&2 || true
+            docker compose logs --tail 60 prepare app model >&2 || true
             if [ "$step" = "frontend + backend startup and health check" ]; then
                 docker compose stop app >&2 || true
             fi
@@ -85,7 +85,7 @@ FishLab startup workflow (stops at the first failed step and names it):
   3. Track      prepds run: track + label every video not yet processed
   4. Verify     every processed video has its output files
   5. DCS        featurize, check-config, audit, model (trains only if none is saved), predict
-  6. Chat       optional, only if enabled in .env
+  6. Chat       optional, only if enabled in .env; starts the model server container first
   7. Serve      start frontend + API, wait for health, print the link
 Two modes: ./start.sh --setup does steps 1-5 (slow, once per machine or after inputs change);
 plain ./start.sh builds if needed and runs step 7, and tells you to run --setup when it is required.
@@ -110,7 +110,7 @@ changed() { # changed STAMP PATH... : true if STAMP is missing or any existing P
     [ -f "$stamp" ] || return 0
     for path in "$@"; do
         [ -e "$path" ] || continue
-        [ -n "$(find "$path" -newer "$stamp" -type f ! -path '*/node_modules/*' ! -path '*/dist/*' -print -quit 2>/dev/null)" ] && return 0
+        [ -n "$(find "$path" -newer "$stamp" -type f ! -path '*/node_modules/*' ! -path '*/dist/*' ! -name chat_guidance.yaml -print -quit 2>/dev/null)" ] && return 0
     done
     return 1
 }
@@ -149,6 +149,12 @@ if [ "$need_build" -eq 1 ]; then
     touch "$build_stamp"
 else
     echo '[SKIP] Build: image is up to date.'
+fi
+# The chat model must be up before preparation (which checks it) and before the app (which serves it).
+if [ "$(envval FISHLAB_DCS_CHAT)" = 1 ] && [ "$(envval FISHLAB_MODEL_HOST)" != host.docker.internal ]; then
+    step="chat model server (Ollama in Docker, models in .ollama/models)"
+    mkdir -p .ollama/models
+    docker compose --profile chat up -d --wait --wait-timeout 120 model
 fi
 if [ "$need_prepare" -eq 1 ]; then
     rm -f "$ready_stamp"
