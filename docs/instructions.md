@@ -4,7 +4,7 @@ Turns each zebrafish drug-exposure trial video plus its trial-metadata row into 
 reviewed, per-subject 5-state ethogram strip and machine-readable labels — the
 labeled dataset a later, separate drug-classification project will train on. Full
 specification: [`PRD.md`](PRD.md). Build status/progress:
-[`progress.md`](progress.md).
+[`progress.md`](../backend/prepds/docs/progress.md).
 
 ## Run it: `./start.sh` and `./stop.sh`
 
@@ -88,7 +88,7 @@ CLI reference (the launcher runs the first four for you):
 
 The fine-tuned detector (`backend/prepds/scripts/phase15_finetune.py`, run `m3`, trained on ~330 human-labeled frames) replaces the
 classical tracker in `outputs_r3/` (328 videos: undetected frames median 21.5% -> 0.4%, Undetermined median 13.7% ->
-0.0%). Read [`progress.md`](progress.md) ("Review corrections") before relying on it: it is not human-reviewed, detection gain is
+0.0%). Read [`progress.md`](../backend/prepds/docs/progress.md) ("Review corrections") before relying on it: it is not human-reviewed, detection gain is
 not proof of track accuracy, it can report a fish on empty frames, and its calibration is weakly identified.
 Listing/LORR is still a manual label. `backend/prepds/scripts/phase15_flag_listing.py` writes advisory `listing_flags.json` hints
 (crop classifier, high recall, low precision) that the review app shows next to the video; they never change a state
@@ -148,7 +148,7 @@ revision) and select it via `PDS_CONFIG`. These scripts are not covered by the t
 - Agreement with a reference figure is a group-level proportion match, not per-frame accuracy: there is no per-frame
   ground truth until reviewers accept videos.
 - Frame rate is fixed by the recordings (~29.84 fps); a better tracker or pose model, not a higher frame rate, is the
-  route to fewer Undetermined frames (see Phase 15 in [`progress.md`](progress.md)).
+  route to fewer Undetermined frames (see Phase 15 in [`progress.md`](../backend/prepds/docs/progress.md)).
 
 ## Data handling
 
@@ -160,10 +160,10 @@ which also covers the raw-data extensions). Only synthetic fixtures under
 `.gitignore` — verified with `git check-ignore -v <path>` before each fixture is
 added, not assumed.
 
-Implementation is tracked task-by-task in [`progress.md`](progress.md) (PRD §12, Phase 0-15).
+Implementation is tracked task-by-task in [`progress.md`](../backend/prepds/docs/progress.md) (PRD §12, Phase 0-15).
 ## Status
 
-Implementation is tracked task-by-task in [`progress.md`](progress.md),
+Implementation is tracked task-by-task in [`progress.md`](../backend/prepds/docs/progress.md),
 mirroring the PRD §12 phase breakdown (Phase 0-15).
 
 ---
@@ -173,7 +173,7 @@ mirroring the PRD §12 phase breakdown (Phase 0-15).
 `dcs` reads what `prepds` wrote (labels per frame and per segment, one folder per fish) and learns to tell
 which compound, and which dose, a fish received from its behavior; a research chat answers questions about it. Specification:
 [`PRD.md`](PRD.md), Part II (cited in the code as "PRD §n" = `II.n`); open items and roadmap: Part III; status and
-decisions (D-nnn): [`classifier_progress.md`](classifier_progress.md). It never imports `prepds` and never changes its files.
+decisions (D-nnn): [`classifier_progress.md`](../backend/dcs/docs/classifier_progress.md). It never imports `prepds` and never changes its files.
 
 **Where it stands.** Everything in the plan except the optional 1D-CNN is built (U1-U20): the **training table**
 (one row per fish), the **audit**, the **training set** and shared **folds**, per-fold **preprocessing**, five
@@ -203,7 +203,7 @@ Same virtual environment as `prepds` (see [Setup](#setup)). Add the `DCS_*` line
 | `DCS_OUTPUT_DIR` | where `dcs` writes (default `outputs/dcs`, git-ignored) | everything |
 | `DCS_TABLE` | the training table (default `<DCS_OUTPUT_DIR>/training_table.parquet`) | `featurize` writes it; `audit`, `train` and the chat read it |
 | `DCS_CONFIG` | a YAML file overriding `backend/dcs/config/default_training.yaml` | optional |
-| `DCS_CHAT_BASE_URL` | the chat server's OpenAI-compatible address, e.g. Ollama on this machine (`http://127.0.0.1:11434/v1`); never in a YAML file | `ask`, `serve-chat` |
+| `DCS_CHAT_BASE_URL` | the chat model server's OpenAI-compatible address: `http://127.0.0.1:11435/v1` for the Docker `model` service, or your own server (e.g. `http://127.0.0.1:11434/v1`); never in a YAML file | `ask`, `serve-chat` |
 | `DCS_CHAT_API_KEY` | key for a hosted chat server; in your own `.env` (git-ignored) or the environment, never in `.env.example` or a YAML file; `check-config` shows it as `***` | `ask`, `serve-chat`, only for a hosted server |
 
 Settings come from the environment first, then `.env`, then the defaults. Check them before touching data:
@@ -737,27 +737,42 @@ facts, and answers built from tool results can be checked. Use an existing open-
 tool calling (for example a Qwen or Llama instruct model); larger models follow the rules better, and the GB10's
 128 GB of unified memory fits large ones.
 
-**1. Start a chat server on the box** (once). Any server that speaks the OpenAI chat-completions protocol with tools
-works: Ollama, a llama.cpp server, vLLM. With Ollama (check its install page for Linux ARM64):
+**1. The model server.** With `./start.sh` you do not run one yourself: when `FISHLAB_DCS_CHAT=1`, the launcher starts
+the Compose service `model` (Ollama, on the GPU) before preparing and serving. Its models live in `.ollama/models` in the
+repository (git-ignored, about 18 GB for `qwen3:30b-a3b`), so they survive rebuilds. It publishes no port; only the app
+container reaches it. Download a model into that folder once (needs internet):
 
 ```bash
-ollama serve &                      # listens on 127.0.0.1:11434
-ollama pull <model>                 # once; `ollama list` shows the exact name
+mkdir -p .ollama/models
+docker compose --profile chat up -d model                      # or just run ./start.sh with chat on
+docker compose exec model ollama pull qwen3:30b-a3b            # once; `docker compose exec model ollama list` shows names
 ```
 
-**2. Point `dcs` at the server and name the model.** The server's address is machine-specific, so it goes in `.env`
-(git-ignored), never in a YAML file (a `chat.base_url` there is refused):
+The `.env` settings for this (see `.env.example`):
 
 ```bash
-DCS_CHAT_BASE_URL=http://127.0.0.1:11434/v1   # Ollama on this machine; any http(s) address of an OpenAI-compatible server
+FISHLAB_DCS_CHAT=1
+FISHLAB_CHAT_URL=http://127.0.0.1:8010         # the chat service inside the app container (not the model server)
+DCS_CHAT_BASE_URL=http://127.0.0.1:11435/v1    # the model server, as the app sees it; 11435 is fixed in compose.yaml
 ```
 
-The model's name goes in your override file (`DCS_CONFIG`), next to the training settings:
+To use a model server you run on the host instead (Ollama, llama.cpp or vLLM, any OpenAI-compatible server with tool
+calling), set `FISHLAB_MODEL_HOST=host.docker.internal` and point `DCS_CHAT_BASE_URL` at its port. That server must
+listen on the Docker bridge (e.g. `OLLAMA_HOST=172.17.0.1:<port>`), not only on 127.0.0.1, or the container cannot reach
+it. For `dcs ask` without Docker, run a server on the host (`ollama serve`) and set `DCS_CHAT_BASE_URL` to it. The
+address is machine-specific, so it goes in `.env` (git-ignored), never in a YAML file (a `chat.base_url` there is refused).
+
+**2. Name the model** in your override file (`DCS_CONFIG`), next to the training settings:
 
 ```yaml
 chat:
-  model: <name as `ollama list` shows it>
+  model: qwen3:30b-a3b    # the name as `ollama list` shows it
 ```
+
+The lab's current choice is `qwen3:30b-a3b` (Apache-2.0; a mixture-of-experts model with about 3B parameters active per
+token). On the GB10 an answer takes about 15-60 s (median 16 s on the eval), because the model reasons for hundreds to
+thousands of hidden tokens before each tool call.
+The chat panel shows a "Querying" status while it waits; the app gives up after 240 s.
 
 **3. Ask.** `python -m dcs ask "question"` answers one question; `python -m dcs ask` starts a session that keeps the
 conversation (empty line or `exit` ends it); `--show-tools` prints every tool call and whether it worked;
@@ -792,10 +807,42 @@ box; set it only if your data agreement allows it. A hosted server's key goes in
 | `timeout_s` | 300 | Seconds to wait for one reply |
 | `allow_remote` | `false` | Allow a server that is not this machine |
 
-**Choosing a model.** `python -m dcs.chat_eval <model> [<model> ...] [--show-answers]` asks 27 fixed questions
-(`config/chat_eval_questions.yaml`) to each model and prints how many got the right tool, the right arguments and the
-right number (computed by calling the tool directly), how many answers invented a number, and the latency. Run it with
-a training run present so the run questions are included; read the failed answers yourself before choosing.
+**In the FishLab app.** The chat bubble (bottom right) shows your question at once, a "Querying the study data" status
+with a seconds counter, and the answer formatted (bold, lists, tables). Under each answer, "How this was answered" lists
+the data lookups behind it in plain words, so a reader can check where every number came from; a lookup that failed is
+marked. Starter questions are offered in an empty chat.
+
+**Correcting how it answers (`backend/dcs/config/chat_guidance.yaml`).** The lab's instructions to the model, added to
+its rules on every question. A saved edit applies to the next question; no restart and no `--setup` needed.
+
+| Section | What it holds | When to edit |
+|---|---|---|
+| `format` | The layout every answer follows: **Bottom line** (one sentence), **Evidence** (n, means, g, p/q), **How much to trust it** | To change the layout or length |
+| `rules` | How to read results: effect-size bands, "no reliable difference" vs "no effect", when to use q, refusing off-topic and dosing questions | When it misreads a statistic |
+| `glossary` | Words biologists use, mapped to the measure to look up | When it picks the wrong measure for a word |
+| `examples` | Question and the answer you wanted | **Whenever an answer is bad**: write the question and the ideal answer; it copies the style |
+
+Use placeholder names (`COMPOUND_A`, `VEHICLE`) and made-up numbers in this file: it is committed. Only these four
+sections are allowed; a misspelled section is an error. After a change, re-run the eval below to check nothing got worse.
+Prefer a rule over an example, and keep examples few and short: the model is told they are style only, but an example
+with numbers was once copied into an answer with no tool call, and a timeline example made it use the timeline tool for
+every fish question.
+
+**Choosing a model, checking a change.** `python -m dcs.chat_eval <model> [<model> ...] [--show-answers]` asks 27 fixed
+questions (`backend/dcs/config/chat_eval_questions.yaml`) to each model and prints how many got the right tool, the right
+arguments and the right number (computed by calling the tool directly), how many answers invented a number, and the
+latency. Run it with a training run present so the run questions are included; read the failed answers yourself before
+choosing. With the Docker setup, run it inside the app container, where the model server is reachable:
+
+```bash
+docker compose exec -T app env PYTHONPATH=/classifier/src python -m dcs.chat_eval qwen3:30b-a3b --show-answers \
+  > outputs/dcs/chat_eval_<model>.txt
+```
+
+"Invented numbers" also counts numbers the model derived correctly (a sum, a difference, "25% chance"), so read
+those answers before counting them as failures. Compound codes (FD-2-67), fish ids and dates are not counted, nor are
+numbers the tools report inside text (scores like "0.469 ± 0.022"); a `find_features` lookup before the comparison is
+not a wrong tool, because the system prompt asks for it.
 
 ## Training on the GB10 (temporarily accepted data)
 
@@ -871,8 +918,10 @@ Errors print one line starting with `Configuration error:` (exit code 2).
 | `DCS_CHAT_BASE_URL must be an http:// or https:// address` | Fix the address in `.env` or the environment |
 | `chat.base_url` / `chat.api_key in ... is not read from YAML` | Remove it from your override file and set `DCS_CHAT_BASE_URL` / `DCS_CHAT_API_KEY` in `.env` |
 | `chat.model is not set` | Put the model's name in your override file under `chat: model:` |
-| `Cannot reach the chat server at ...` | Start it (`ollama serve`, `ollama pull <model>`) or fix `DCS_CHAT_BASE_URL` |
-| `The chat server at ... answered 4xx/5xx` | Usually a wrong model name (`ollama list`) or a model without tool calling |
+| `Cannot reach the chat server at ...` | Docker: `docker compose ps model` must say healthy (`./start.sh` starts it when `FISHLAB_DCS_CHAT=1`). Own server: start it (`ollama serve`) or fix `DCS_CHAT_BASE_URL` |
+| `The chat server at ... answered 4xx/5xx` | Usually a wrong model name (`docker compose exec model ollama list`) or a model without tool calling |
+| `chat.model is not available on DCS_CHAT_BASE_URL` | The model is not in `.ollama/models` yet: `docker compose exec model ollama pull <model>` |
+| `chat_guidance.yaml may only contain format, rules, glossary and examples` | A misspelled section name in `backend/dcs/config/chat_guidance.yaml` |
 | `DCS_CHAT_BASE_URL ... is not this machine` | Use a local server, or set `chat.allow_remote: true` if your data agreement allows it |
 | `the chat API has no authentication: --host must be a loopback address` | Keep `serve-chat` on 127.0.0.1 and reach it through an SSH tunnel |
 | `--input ... does not exist` (predict) | Point `--input` at a table from `dcs featurize` |
@@ -913,7 +962,8 @@ python backend/shared/scripts/changed_tests.py   # only the units you changed (a
 | `test_dcs_predict.py` | `dcs predict` on the training table reproduces `reference_predictions.csv` and says so (AC-9); default output file and CSV input; missing columns stop with their names; version warnings printed; `featurize --videos` needs no index, marks unreviewed fish, leaves the date empty and the training table untouched; with the workbook the NTT values are kept; folders -> `featurize --videos` -> `predict` gives the same predictions as the reference (D-018) |
 | `test_dcs_privacy.py` | `git ls-files` holds no `.parquet`, `.csv`, `.xlsx`, `.pt`, `.joblib`, pickle, video or `.env` file outside the two named synthetic fixtures (AC-8); the outputs of `dcs` and `prepds` and the restricted inputs are git-ignored; the pattern itself catches what it should. Skipped outside a git checkout |
 | `test_dcs_chat_tools.py` | Tool schemas valid and unique; compounds and vehicle; feature search; `compare_to_vehicle` equals hand-computed n, mean, Hedges' g and Mann-Whitney p with the same-date control; fallback to all vehicle fish with a caveat; bad arguments return errors naming the choices; `top_differences` ordered with q >= p; fish profile percentiles and out-of-fold predictions; timeline bins cover the recording and shares sum to 1; model results, class scores, ablations and audit facts read from a real `dcs train` run; no run -> a hint; the latest run found from the settings; `fish_timeline` refuses a zero, negative, NaN, infinite, boolean, text or too-small `bin_s` with an error; a tool that crashes comes back as `{"error"}` instead of ending the chat |
-| `test_dcs_chat.py` | The answer is built from a tool result (scripted engine); the system prompt sets the rules and names the data; history carries earlier turns; dict arguments and tool errors go back to the model; too many tool rounds force an answer without tools; local servers allowed, a remote one only with `allow_remote`; no model name stops; the client speaks the OpenAI protocol to a local stub server (path, body, API key header); an unreachable server says how to start one; `dcs ask` one question; the terminal session keeps history; `serve-chat` refuses a public address; the API (`health`, `tools`, `ask`, `tool`) and a 503 on engine failure; the server address and key come only from `DCS_CHAT_BASE_URL` and `DCS_CHAT_API_KEY` (environment over `.env`; a non-http(s) address and a `chat.base_url` or `chat.api_key` in a YAML file are refused; no address stops with a hint; the key prints as `***` in `check-config`); a foreign `Host` (DNS rebinding) and a foreign `Origin` are refused; `/api/ask` refuses `system`/`tool` history turns, an empty or over-long question and too many turns |
+| `test_dcs_chat.py` | The answer is built from a tool result (scripted engine); the system prompt sets the rules and names the data; the lab guidance file reaches the prompt, is optional, and a misspelled section is refused; history carries earlier turns; dict arguments and tool errors go back to the model; too many tool rounds force an answer without tools; local servers allowed, a remote one only with `allow_remote`; no model name stops; the client speaks the OpenAI protocol to a local stub server (path, body, API key header); an unreachable server says how to start one; `dcs ask` one question; the terminal session keeps history; `serve-chat` refuses a public address; the API (`health`, `tools`, `ask`, `tool`) and a 503 on engine failure; the server address and key come only from `DCS_CHAT_BASE_URL` and `DCS_CHAT_API_KEY` (environment over `.env`; a non-http(s) address and a `chat.base_url` or `chat.api_key` in a YAML file are refused; no address stops with a hint; the key prints as `***` in `check-config`); a foreign `Host` (DNS rebinding) and a foreign `Origin` are refused; `/api/ask` refuses `system`/`tool` history turns, an empty or over-long question and too many turns |
+| `test_dcs_chat_eval.py` | Every eval question fills its placeholders and names a tool or a refusal; the scorer passes a scripted model that answers right and fails one that invents a number |
 | `test_dcs_report.py` | Baselines and the permuted score beside every model (AC-5); date effect = B − A on the fish scheme A scores (a date-confounded class is left out of B for this); no plain accuracy column; unreviewed data called temporarily accepted; very small and date-confounded classes named; dose-stage caveat; camera and FR-9 caveats; notes and skipped models shown; skipped scheme A; best model choice; confusion PNG |
 | `test_dcs_train.py` | `dcs train` on a synthetic table: run folder and files, `run_id` form, `run_info.json` fields, command-line values in `config_used.yaml`, `folds.csv` equals the folds, stage and scheme columns, `mlp` skipped with a message, same seed gives the same metrics (two runs in one second get two folders), bad values and an unbuildable lone stage stop with a message and write nothing, missing table |
 | `test_dcs_folds.py` | Single-date class pinned and flagged; scheme A skipped when every class is on one date; a two-date class's dates in different folds, and a note when that cannot be done; over 200 seeds no fish in two folds, no date in two scheme-A folds, no empty fold; same seed, same folds; fewer dates than folds; a synthetic set end to end |
@@ -925,4 +975,4 @@ Whoever changes `dcs` (a new unit or a small fix) also does these, in the same b
 - [ ] **Instructions:** the new or changed tool, command, setting, column or error message is described above (what it does, how to run it, what to do when it stops), and any new test file is in the Tests table.
 - [ ] **Unused code:** nothing left that no one calls or reads (functions, constants, settings, duplicated constants). Search by name in `backend/dcs/src/dcs` and `tests/dcs`; delete what is dead.
 - [ ] **Tests:** `pytest backend/dcs/tests -q` is green.
-- [ ] **Progress file:** [`classifier_progress.md`](classifier_progress.md) lists the unit, its decisions (D-nnn) and what was removed.
+- [ ] **Progress file:** [`classifier_progress.md`](../backend/dcs/docs/classifier_progress.md) lists the unit, its decisions (D-nnn) and what was removed.

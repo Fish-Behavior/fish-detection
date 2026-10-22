@@ -1,6 +1,6 @@
 # Preprocessing Dataset System — Implementation Progress
 
-**PRD:** [`docs/PRD.md`](PRD.md) (1141 lines, read in full before this
+**PRD:** [`docs/PRD.md`](../../../docs/PRD.md) (1141 lines, read in full before this
 plan was written). This plan's phase structure is PRD §12 verbatim — no phases invented, none
 reordered. Its exit criteria are PRD §13 (Review & Acceptance Checklist) + §8 (Success Criteria)
 read together with §7 (NFRs). Its test coverage is the `[P]`-marked test tasks already embedded in

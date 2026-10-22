@@ -45,16 +45,19 @@ Implied tasks: a `temp/output` session writer (CSV, append as it runs); a chat t
 CSV; a save/discard step that moves a kept session out of `temp/`; a Docker service for the model server.
 
 ### Step 1: GB10 environment (blocks everything)
-- [ ] Run the GB10 runbook in `docs/classifier_progress.md` (machine, GPU, CUDA, Python, torch table).
-- [ ] Install an aarch64 CUDA build of torch and torchvision. This is the likeliest snag; check `torch.cuda.is_available()`.
-- [ ] Install the `ml` extra, then run the test suite on the GB10.
-- [ ] Time one video through the detector on the GB10 and compare with 75 s on the 4070 Ti.
+- [x] Run the GB10 runbook in `backend/dcs/docs/classifier_progress.md` (machine, GPU, CUDA, Python, torch table).
+      Recorded in its section 6 (2026-10-22).
+- [x] Install an aarch64 CUDA build of torch and torchvision: the `cu130` wheels install directly (torch 2.14.1,
+      torchvision 0.29.1); `torch.cuda.is_available()` is True. No NVIDIA container needed.
+- [x] Install the `ml` extra, then run the test suite on the GB10: all tests pass.
+- [ ] Time one video through the detector on the GB10 and compare with 75 s on the 4070 Ti. **Blocked:** the trained
+      detector run folder (`--tracker model:<run dir>`) is not on the GB10 yet; copy it over first.
 - [ ] Repeat the check on the RTX workstation so the fallback is known to work.
 
 #### How to do Step 1 (your instructions)
 
 The base install is already written: "Training on the GB10" in `docs/instructions.md`, part 1. Follow it, then add the
-extras below. Do all of it over SSH inside `tmux`. Paste the outputs into `docs/classifier_progress.md` section 6
+extras below. Do all of it over SSH inside `tmux`. Paste the outputs into `backend/dcs/docs/classifier_progress.md` section 6
 (hardware record) when done. Real names, dates and results stay out of git.
 
 1. **Machine facts** (record them): `uname -m` (expect aarch64), `nvidia-smi`, `nvcc --version` (or the CUDA version
@@ -90,16 +93,27 @@ Prepared now:
 - [x] Expected tool and arguments per question; the right number is computed by calling the tool directly, not by the model.
 - [x] Scorer: right tool, right arguments, right number in the answer, invented numbers, latency (test: `backend/dcs/tests/test_dcs_chat_eval.py`).
 
-When the GB10 is available:
-- [ ] Install a model server on the GB10 (Ollama, llama.cpp or vLLM), loopback only; Docker per Step 0.
-- [ ] Pull 2-3 candidates (about 7-30B, instruct, tool calling). Starting list, **verify each licence and its tool-calling
-      support on the model card before use**: Qwen3 30B-A3B or 32B, gpt-oss-20b, Mistral Small 24B. A 70B (Llama 3.3)
-      fits in 128 GB memory but is slower; try it only if the small ones fail.
-- [ ] Set `DCS_CHAT_BASE_URL` in `.env` and `chat.model` in the override file; `allow_remote` stays false.
-- [ ] Run `python -m dcs.chat_eval <model1> <model2> --show-answers`, once with a training run present (so the 4 run
-      questions are included) and read the failed answers yourself.
-- [ ] Pick the model: most right tools and numbers, zero invented numbers, no refusal failures, acceptable latency.
-      Keep it untrained (D-071, W9); revisit only if tool use is poor.
+Done on the GB10 (2026-10-22; decisions D-077 to D-079 in `backend/dcs/docs/classifier_progress.md`):
+- [x] Model server: the Compose service `model` (Ollama on the GPU), started by `./start.sh` when `FISHLAB_DCS_CHAT=1`;
+      no published port; models in the git-ignored `.ollama/models`.
+- [x] Candidate: `qwen3:30b-a3b` (Apache-2.0, tool calling, ~3B active parameters), chosen by the owner after the licence
+      check. Other candidates were not run; compare them only if this one disappoints in use.
+- [x] `DCS_CHAT_BASE_URL` (`http://127.0.0.1:11435/v1`) in `.env`, `chat.model` in the override file; `allow_remote` false.
+- [x] Eval with a training run present, failed answers read. Four scorer bugs fixed on the way (D-079). The real failures
+      became rules and examples in `backend/dcs/config/chat_guidance.yaml` (D-078).
+
+| Run (27 questions, real unreviewed table) | Right tool | Right args | Right number | No invented numbers | Median |
+|---|---|---|---|---|---|
+| Before guidance and scorer fixes | 20 | 26 | 27 | 18 | 36 s |
+| With guidance and scorer fixes | 27 | 27 | 27 | 26 | 16 s |
+
+- [x] Model picked and kept untrained (D-071, W9). Known gap: it can still add an average that no tool gave in a
+      timeline's summary sentence (the table itself is exact). Watch it; add an example if it recurs.
+
+Still to do:
+- [ ] Owner reads a sample of real answers in the app and adds `examples` to `chat_guidance.yaml` where the style is wrong.
+- [ ] After any guidance change, re-run the eval (command in `docs/instructions.md`, "Research chat") and compare with the
+      table above. Worked examples can backfire: a numeric example was once copied into an answer with no tool call.
 
 ### Step 3: Part B, vision (needs your labeling time)
 - [ ] B1. Human-review a sample of the `outputs_r3` run (T085 is not done). Nothing downstream is trustworthy until this happens.
