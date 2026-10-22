@@ -27,7 +27,8 @@ from dcs.gold_rules import compound_label
 
 QUESTIONS_FILE = Path(__file__).resolve().parents[2] / "config" / "chat_eval_questions.yaml"
 NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e-?\d+)?", re.IGNORECASE)
-NOISE = re.compile(r"\bF_\d+\b|\d{4}-\d{2}-\d{2}|\b[qQ]\d\b")  # fish ids, dates, quartile names are not claims
+# Fish ids, dates, quartile names and compound codes (FD-2-67, MTA-5-62) are names, not numeric claims.
+NOISE = re.compile(r"\bF_\d+\b|\d{4}-\d{2}-\d{2}|\b[qQ]\d\b|\b[A-Za-z]+(?:-\d+)+\b")
 SMALL_INT = 10  # "top 3", "2 compounds": counted words, not data claims
 
 
@@ -61,6 +62,8 @@ def numbers(value: Any) -> list[float]:
         return [n for v in value for n in numbers(v)]
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return [float(value)]
+    if isinstance(value, str):  # tools also report numbers inside text, e.g. "0.469 ± 0.022" or a dose "0.03+0.01"
+        return [float(m) for m in NUMBER.findall(NOISE.sub(" ", value))]
     return []
 
 
@@ -93,7 +96,9 @@ def score(data: ResearchData, item: Mapping[str, Any], answer: chat.Answer, name
         row["invented"] = row["invented"] if not calls else row["invented"] + 1  # a refusal needs no tool and no numbers
         return row
     wanted = fill(item["tool"], names)
-    row["tool_ok"] = bool(calls) and calls[0]["tool"] in wanted
+    # The system prompt asks for find_features before a comparison, so a lookup first is not a wrong tool.
+    first = next((c for c in calls if c["tool"] != "find_features" or "find_features" in wanted), None)
+    row["tool_ok"] = first is not None and first["tool"] in wanted
     row["args_ok"] = all(_match(c, fill(item.get("args", {}), names)) for c in calls if c["tool"] in wanted and not c["error"]) and any(c["tool"] in wanted for c in calls)
     truth = item.get("truth")
     if truth:
