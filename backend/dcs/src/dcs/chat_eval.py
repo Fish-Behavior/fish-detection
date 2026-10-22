@@ -35,7 +35,7 @@ def placeholders(data: ResearchData) -> dict[str, str]:
     drugs = sorted(set(data.compound) - {data.vehicle})
     freeze = next(s for s in BEHAVIOR_STATES if "freez" in s.lower())
     return {"drug": drugs[0], "drug2": drugs[-1], "fish": str(data.table["video_id"].iloc[0]),
-            "speed": "velocity_mean", "freeze": f"state_{freeze.lower().replace(' ', '_')}_share"}  # fmt: skip
+            "speed": "velocity_mean", "freeze": f"state_{re.sub(r'[^a-z0-9]+', '_', freeze.lower())}_share"}  # fmt: skip
 
 
 def fill(value: Any, names: Mapping[str, str]) -> Any:
