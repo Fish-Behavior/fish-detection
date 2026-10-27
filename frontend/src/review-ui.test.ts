@@ -60,6 +60,20 @@ test('Research chat stays visible without a model and enables questions when con
     assert.match(offline.match(/<input[^>]*id="chat-question"[^>]*>/)![0], /disabled=""/)
     const connected = renderToStaticMarkup(createElement(Chat, { ...props, open: true, available: true }))
     assert.match(connected, /Ask about stored behavior data/)
+    assert.match(connected, /Which compounds are in the dataset/)
     assert.doesNotMatch(connected.match(/<input[^>]*id="chat-question"[^>]*>/)![0], /disabled=/)
+  } finally { await server.close() }
+})
+
+test('Chat answers render tables and bold text without passing HTML through', async () => {
+  const server = await createServer({ configFile: false, optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false, ws: false, watch: null } })
+  try {
+    const { default: ChatMarkdown } = await server.ssrLoadModule('/src/ChatMarkdown.tsx')
+    const text = '**Bottom line:** No change.\n\n| Group | n |\n|---|---|\n| A | 12 |\n\n- <img src=x onerror=alert(1)>'
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }))
+    assert.match(html, /<strong>Bottom line:<\/strong> No change\./)
+    assert.match(html, /<th>Group<\/th>.*<td>12<\/td>/s)
+    assert.match(html, /<li>&lt;img/)
+    assert.doesNotMatch(html, /<img/)
   } finally { await server.close() }
 })

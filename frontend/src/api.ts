@@ -42,4 +42,4 @@ export const predict = (session: SessionData, review: ReviewData, reviewer: stri
   request<SessionData>(`${path(session.video_id)}/predict`, { method: 'POST', body: JSON.stringify({ revision: review.revision, baseline: session.baseline, reviewer }) }, 260000)
 export const startProcessing = (id: string, reviewer: string) => request<{ status: string; message: string }>(`${path(id)}/process`, { method: 'POST', body: JSON.stringify({ reviewer }) })
 export const processingStatus = (id: string) => request<{ status: string; message: string }>(`${path(id)}/processing`)
-export const askChat = (q: ChatQuestion) => request<ChatAnswer>('/api/ask', { method: 'POST', body: JSON.stringify(q) }, 100000)
+export const askChat = (q: ChatQuestion) => request<ChatAnswer>('/api/ask', { method: 'POST', body: JSON.stringify(q) }, 250000)  // a local model answering with 2-3 tool rounds can take minutes; the backend gives up at 240 s

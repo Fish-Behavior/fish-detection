@@ -10,6 +10,11 @@ x-runtime: &runtime
   env_file: .env
   environment:
     FISHLAB_DCS_ENABLED: "${FISHLAB_DCS_ENABLED:-auto}"
+    FISHLAB_DCS_CHAT: "${FISHLAB_DCS_CHAT-}"
+    FISHLAB_CHAT_URL: "${FISHLAB_CHAT_URL-}"
+    # Where the loopback DCS_CHAT_BASE_URL is forwarded: the `model` service below, or host.docker.internal for a
+    # model server you run on the host yourself.
+    FISHLAB_MODEL_HOST: "${FISHLAB_MODEL_HOST:-model}"
     FISHLAB_CLASSIFIER_ROOT: /classifier
   volumes:
     # Preserve the host working directory so existing manifest paths still resolve.
@@ -21,7 +26,7 @@ x-runtime: &runtime
       target: "${FISHLAB_ROOT:-/workspace}/.env"
       read_only: true
     - type: bind
-      source: "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-.}}"
+      source: "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-./backend/dcs}}"
       target: /classifier
       read_only: true
       bind:
@@ -48,3 +53,33 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  # Research-chat model server (Ollama), started by ./start.sh only when FISHLAB_DCS_CHAT=1. Models live in
+  # ./.ollama/models (git-ignored) so they survive container rebuilds. No published port: only the app reaches it, on the
+  # Compose network, through the loopback bridge in backend/shared/scripts/docker_app.py (DCS_CHAT_BASE_URL=http://127.0.0.1:11435/v1).
+  model:
+    image: ollama/ollama:0.35.0
+    profiles: [chat]
+    init: true
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11435"
+      OLLAMA_MODELS: /models
+      OLLAMA_KEEP_ALIVE: 30m
+      # Qwen3's native window; the default (the model maximum) reserves far more GPU memory than the chat needs.
+      OLLAMA_CONTEXT_LENGTH: "32768"
+    volumes:
+      - type: bind
+        source: ./.ollama/models
+        target: /models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 3s
+      timeout: 5s
+      retries: 20

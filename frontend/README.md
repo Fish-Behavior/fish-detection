@@ -2,11 +2,12 @@
 
 React/TypeScript interface for zebrafish behavior analysis: a **Dashboard** for exploring a session and a **Review** page for correcting tracking, scene, and behavior results. The interface connects to the existing prepds FastAPI service with file-backed correction persistence.
 
-> The backend inventories the configured video folder. No bundled research data exists. `npm start` starts the whole app. See [BACKEND_HANDOFF.md](BACKEND_HANDOFF.md) for setup, API contracts, persistence, analysis, DCS inference and chat.
+> The backend inventories the configured video folder. No bundled research data exists. `npm start` starts the whole app. Setup, persistence, analysis, DCS inference and the research chat: [docs/RUNBOOK.md](../docs/RUNBOOK.md). API contracts: `/docs` (Swagger) on the running app.
 
 ## Run
 
-To use the whole app, run `./start.sh` (and `./stop.sh`) from the repository root; see the root README. The commands below are for frontend development only.
+To use the whole app, run `./start.sh` (or `./start.sh --with-model` when Ollama/chat is needed) and
+`./stop.sh` from the repository root; see the root README. The commands below are for frontend development only.
 
 Requires Node.js 22.18 or newer, npm, and the project's `.venv` with Python dependencies installed. Configure the repository-root `.env` first. From the repository root:
 

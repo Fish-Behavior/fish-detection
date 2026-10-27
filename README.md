@@ -29,28 +29,33 @@ plus Undetermined and Dead. Full scope:
 | **Preprocessing dataset system** (`prepds`): catalog, tracking, features, labeling, review app, gold-dataset export | Built; 328 of 352 trials processed from the 337 synced videos. Human review of the output is still to do. |
 | Model tracker (fine-tuned fish detector) | First model trained; detection is much better than the classical tracker, Listing is still unreliable. Full re-run not done. |
 | Listing/LORR and Dead | Not detected automatically; they come from reviewers. |
-| **Compound/dose classifier** (`dcs`): training table, audit, baselines and MLP with date-held-out validation, ablations, dose models, saved model, `predict`, research chat (`dcs ask`) | Built and tested on synthetic data. On the unreviewed real output no model yet names the compound better than the recording date does; behavior does separate vehicle from drug. Status and decisions: [docs/classifier_progress.md](docs/classifier_progress.md). |
+| **Compound/dose classifier** (`dcs`): training table, audit, baselines and MLP with date-held-out validation, ablations, dose models, saved model, `predict`, research chat (`dcs ask`) | Built and tested on synthetic data. On the unreviewed real output no model yet names the compound better than the recording date does; behavior does separate vehicle from drug. Status and decisions: [backend/dcs/docs/classifier_progress.md](backend/dcs/docs/classifier_progress.md). |
+| **Research chat** in the app: local `qwen3:30b-a3b` in Docker, answers built from query tools | Working on the GB10 on unreviewed data; answers follow a lab-editable layout ([backend/dcs/config/chat_guidance.yaml](backend/dcs/config/chat_guidance.yaml)) and show the data lookups behind them. About 15-60 s per answer. |
 | Anomaly detection, reporting, live (Phase 2) camera | Not started. |
 
 Model strategy: a **lightweight, pre-trained, local language model** does the reasoning and wording for the research
 chat (nothing is trained; every number comes from deterministic query tools), and a **better vision model** is planned
 once more reviewed data exists (more labeled frames for the detector, then a clip-level behavior model).
 
-Details and the task-by-task log: [docs/progress.md](docs/progress.md). Requirements, watch list and roadmap, all in one
+Details and the task-by-task log: [backend/prepds/docs/progress.md](backend/prepds/docs/progress.md). Requirements, watch list and roadmap, all in one
 file: [docs/PRD.md](docs/PRD.md) (Part I preprocessing, Part II classifier and chat, Part III open items).
 
 ## Quick Start
 
-Everyone uses the same two commands. Only Docker (with Compose) is needed.
+Everyone uses the same commands. Only Docker (with Compose) is needed.
 
 ```sh
 cp .env.example .env    # once: set PDS_VIDEO_DIR, PDS_DB_PATH, FISHLAB_HOST, FISHLAB_PORT
-./start.sh              # build, prepare, start the app, print the local link
+./start.sh --setup      # once per machine, and again when inputs change: build + prepare the data, then stop
+./start.sh              # start the app and print the local link (fast; asks for --setup when it is needed)
+./start.sh --with-model  # start with Ollama and enable the research chat for this launch
 ./stop.sh               # shut down
 ```
 
-If `.env` is not set up, `./start.sh` says what is missing and starts nothing. When it runs it prints
-this workflow and stops at the first failed step:
+If `.env` is not set up, `./start.sh` says what is missing and starts nothing. Plain `./start.sh` keeps Ollama and the research chat disabled even if `.env` enables them. Use
+`--with-model` only when Ollama and the research chat are needed; this does not change `.env`. It prints this workflow and stops
+at the first failed step; `--setup` runs steps 1-5, plain `./start.sh` builds if needed and runs step 7 without chat, `--with-model` enables the model and chat,
+and `--full` redoes everything:
 
 1. **Build** the Docker image (frontend and Python): a few minutes the first time.
 2. **Check** the configuration and **catalog** trials against videos.
@@ -58,16 +63,14 @@ this workflow and stops at the first failed step:
    worker; 328 videos took about 50 minutes on 22 workers. Finished videos are skipped on reruns.
 4. **Verify** every video has its outputs.
 5. **DCS** feature extraction, audit, model (trains only if none is saved) and predictions.
-6. Optional research **chat**.
+6. Optional research **chat** (`FISHLAB_DCS_CHAT=1`): starts the local model server container (Ollama on the GPU,
+   models kept in `.ollama/models`). Pass `./start.sh --with-model` to enable this step. Download the model once:
+   `docker compose --profile chat up -d model && docker compose exec model ollama pull qwen3:30b-a3b`.
 7. **Serve** the frontend and API and print one local link.
 
-Review and accept videos in the browser, then `./stop.sh` stops the app and removes the containers. Details, the review UI, outputs, calibration and what to trust
-in the labels: **[docs/instructions.md](docs/instructions.md)**. Contributors who need to run the code or
-tests without Docker: see "Development without Docker" there.
-Then `catalog`, `run`, `review`, `export-index`. Setup, every command, the review
-UI, outputs, calibration and what to trust in the labels are in
-**[docs/instructions.md](docs/instructions.md)**. The classifier (`python -m dcs featurize`,
-`audit`, `train`, `predict`, `ask`), including the GB10 runbook, is the last part of that file.
+Review and accept videos in the browser, then `./stop.sh` stops the app and removes the containers. Every command, why it
+exists and how it works (prepds, dcs, the research chat, the GB10 runbook, what to trust, error fixes), plus the reviewer steps:
+**[docs/RUNBOOK.md](docs/RUNBOOK.md)**. Running without Docker: section 4 there.
 
 ```bash
 pip install -e ".[dev,train]"   # adds PyTorch for the classifier's MLP (optional)
@@ -78,14 +81,14 @@ python -m dcs check-config
 
 ```text
 fish-detection/
-├── src/prepds/        # the pipeline package (catalog, tracking, features, labeling, webapp, ...)
-├── src/dcs/           # the compound/dose classifier and research chat (reads prepds output, never imports it)
-├── scripts/           # calibration and detector fine-tuning scripts
-├── config/            # default thresholds, frozen calibration profiles, classifier defaults (default_training.yaml)
-├── tests/             # automated tests (synthetic fixtures only)
-├── docs/              # instructions, PRD, progress log, scope, contribution workflow
+├── backend/
+│   ├── prepds/        # preprocessing pipeline: src/, tests/, config/ (thresholds, calibration profiles), scripts/, docs/
+│   ├── dcs/           # compound/dose classifier and research chat (reads prepds output, never imports it): src/, tests/, config/, docs/
+│   └── shared/        # used by both: tests/fixtures (synthetic data), tests/deployment, scripts/ (docker_app.py, changed_tests.py)
+├── frontend/          # React review UI
+├── docs/              # RUNBOOK, PRD, scope, contribution workflow (cross-unit docs; unit docs live in backend/<unit>/docs)
 ├── start.sh, stop.sh  # the way everyone runs the project (Docker)
-├── Dockerfile, compose.yaml, scripts/docker_app.py   # launcher internals
+├── Dockerfile, compose.yaml   # launcher internals
 ├── .env.example       # template for your local .env; never commit .env
 ├── pyproject.toml, requirements.txt, uv.lock
 └── data/, outputs/, accepted/   # local only, git-ignored (restricted research data)
