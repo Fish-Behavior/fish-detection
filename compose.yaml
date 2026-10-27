@@ -10,6 +10,8 @@ x-runtime: &runtime
   env_file: .env
   environment:
     FISHLAB_DCS_ENABLED: "${FISHLAB_DCS_ENABLED:-auto}"
+    FISHLAB_DCS_CHAT: "${FISHLAB_DCS_CHAT-}"
+    FISHLAB_CHAT_URL: "${FISHLAB_CHAT_URL-}"
     # Where the loopback DCS_CHAT_BASE_URL is forwarded: the `model` service below, or host.docker.internal for a
     # model server you run on the host yourself.
     FISHLAB_MODEL_HOST: "${FISHLAB_MODEL_HOST:-model}"

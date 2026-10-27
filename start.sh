@@ -3,14 +3,17 @@ set -eu
 
 full=0
 setup=0
+without_model=0
 for arg in "$@"; do
     case "$arg" in
         --setup) setup=1 ;;
         --full) full=1; setup=1 ;;
-        *) echo 'Usage: ./start.sh [--setup | --full]
+        --without-model) without_model=1 ;;
+        *) echo 'Usage: ./start.sh [--setup] [--full] [--without-model]
   (no flag)  build if needed, start the app; needs a finished setup
   --setup    build + prepare data (check, catalog, track, DCS) when needed, then stop
-  --full     like --setup but redo every step' >&2; exit 2 ;;
+  --full     like --setup but redo every step
+  --without-model  skip the Ollama model and disable research chat for this launch' >&2; exit 2 ;;
     esac
 done
 
@@ -69,6 +72,12 @@ if [ -n "$missing" ]; then
     printf 'FishLab is not configured yet. Please set up:%s\n\nThen run ./start.sh again. Nothing was started.\n' "$missing" >&2
     exit 1
 fi
+# Compose imports .env, so explicitly override both chat settings in its
+# container environment when the model is excluded for this launch.
+if [ "$without_model" -eq 1 ]; then
+    export FISHLAB_DCS_CHAT=0
+    export FISHLAB_CHAT_URL=
+fi
 # Compose publishes these exact values, so the printed link always matches .env.
 export FISHLAB_HOST="$(envval FISHLAB_HOST)" FISHLAB_PORT="$(envval FISHLAB_PORT)"
 step="startup lock"
@@ -85,7 +94,7 @@ FishLab startup workflow (stops at the first failed step and names it):
   3. Track      prepds run: track + label every video not yet processed
   4. Verify     every processed video has its output files
   5. DCS        featurize, check-config, audit, model (trains only if none is saved), predict
-  6. Chat       optional, only if enabled in .env; starts the model server container first
+  6. Chat       optional, only if enabled in .env (unless --without-model); starts the model server first
   7. Serve      start frontend + API, wait for health, print the link
 Two modes: ./start.sh --setup does steps 1-5 (slow, once per machine or after inputs change);
 plain ./start.sh builds if needed and runs step 7, and tells you to run --setup when it is required.
@@ -151,7 +160,9 @@ else
     echo '[SKIP] Build: image is up to date.'
 fi
 # The chat model must be up before preparation (which checks it) and before the app (which serves it).
-if [ "$(envval FISHLAB_DCS_CHAT)" = 1 ] && [ "$(envval FISHLAB_MODEL_HOST)" != host.docker.internal ]; then
+if [ "$without_model" -eq 0 ] \
+    && [ "$(envval FISHLAB_DCS_CHAT)" = 1 ] \
+    && [ "$(envval FISHLAB_MODEL_HOST)" != host.docker.internal ]; then
     step="chat model server (Ollama in Docker, models in .ollama/models)"
     mkdir -p .ollama/models
     docker compose --profile chat up -d --wait --wait-timeout 120 model
