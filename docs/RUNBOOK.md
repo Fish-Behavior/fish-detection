@@ -28,13 +28,14 @@ You need Docker with Compose. No Python or Node on the host.
 cp .env.example .env    # once. Set PDS_VIDEO_DIR, PDS_DB_PATH, FISHLAB_HOST=127.0.0.1, FISHLAB_PORT=<free port>
 ./start.sh --setup      # once per machine, and again when videos or the workbook change; then it stops
 ./start.sh              # start the app and print the link to open
-./start.sh --without-model  # start without Ollama and disable the research chat for this launch
+./start.sh --with-model  # start with Ollama and enable the research chat for this launch
 ./stop.sh               # stop the app and remove the containers (saved work stays on disk)
 ```
 
 `./start.sh` lists what is missing from `.env` and starts nothing until it is fixed. `--full` redoes every step.
-`--without-model` skips Ollama and disables the research chat without editing `.env`; pass it each time that
-mode is desired. Use it with `--setup` when preparing data without the model server.
+Plain `./start.sh` keeps Ollama and the research chat disabled, even if `.env` enables them.
+`--with-model` starts Ollama and enables the research chat without editing `.env`; use it with `--setup` when
+preparing data with the model server.
 Do not run `prepds` commands by hand while the app is running: two `run`s at once overwrite each other.
 
 ### Reviewing a video (what the pharmacy/lab reviewer does)
@@ -77,9 +78,9 @@ Docker users only need the first four rows. Everything else is for developers an
 | Command | What it does | When |
 |---|---|---|
 | `./start.sh --setup` | Build, check config, catalog, track every new video, extract features, train if no model, then stop | first time, or new inputs |
-| `./start.sh --setup --without-model` | Same setup without starting Ollama or enabling research chat | when the model is unavailable |
-| `./start.sh` | Start the app, print the link; starts Ollama when chat is enabled | every day |
-| `./start.sh --without-model` | Start the app without Ollama or the research chat | when chat is not needed |
+| `./start.sh --setup --with-model` | Same setup with Ollama and research chat enabled | when chat is needed during setup |
+| `./start.sh` | Start the app without Ollama/chat, print the link | every day |
+| `./start.sh --with-model` | Start the app with Ollama and the research chat | when chat is enabled |
 | `./stop.sh` | Stop the app | when done |
 | `python -m prepds check-config` | Print resolved paths and settings; exit 1 if a path is missing | first sign of trouble |
 | `python -m prepds catalog` | Match workbook trial rows to video files | after new videos or workbook |
@@ -149,7 +150,7 @@ Accepting copies them to `accepted/<video>/` and updates `accepted/accepted_inde
 | 3 | Track | `prepds run`, ~35 s per 20-min video per worker (328 videos ≈ 50 min on 22 workers); resumable; edited or accepted videos are never regenerated |
 | 4 | Verify | every video has its output files |
 | 5 | DCS | `featurize`, `check-config`, `audit`, train only if no saved model, `predict` |
-| 6 | Chat | only if `FISHLAB_DCS_CHAT=1` and `--without-model` was not passed: start the local model server |
+| 6 | Chat | only when `--with-model` is passed: start the local model server |
 | 7 | Serve | start app, wait for health, print the link |
 
 It stops at the first failed step and names it; details in `<PDS_OUTPUT_DIR>/docker/startup.json`.

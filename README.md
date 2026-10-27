@@ -48,14 +48,13 @@ Everyone uses the same commands. Only Docker (with Compose) is needed.
 cp .env.example .env    # once: set PDS_VIDEO_DIR, PDS_DB_PATH, FISHLAB_HOST, FISHLAB_PORT
 ./start.sh --setup      # once per machine, and again when inputs change: build + prepare the data, then stop
 ./start.sh              # start the app and print the local link (fast; asks for --setup when it is needed)
-./start.sh --without-model  # start without Ollama and disable the research chat for this launch
+./start.sh --with-model  # start with Ollama and enable the research chat for this launch
 ./stop.sh               # shut down
 ```
 
-If `.env` is not set up, `./start.sh` says what is missing and starts nothing. Use `--without-model` when Ollama
-is unavailable or the research chat is not needed; this does not change `.env`. It prints this workflow and stops
-at the first failed step; `--setup` runs steps 1-5, plain `./start.sh` builds if needed and runs 6-7 (with chat
-on, both start the model server first, since preparation checks it), `--without-model` skips the model and chat,
+If `.env` is not set up, `./start.sh` says what is missing and starts nothing. Plain `./start.sh` keeps Ollama and the research chat disabled even if `.env` enables them. Use
+`--with-model` only when Ollama and the research chat are needed; this does not change `.env`. It prints this workflow and stops
+at the first failed step; `--setup` runs steps 1-5, plain `./start.sh` builds if needed and runs step 7 without chat, `--with-model` enables the model and chat,
 and `--full` redoes everything:
 
 1. **Build** the Docker image (frontend and Python): a few minutes the first time.
@@ -65,8 +64,7 @@ and `--full` redoes everything:
 4. **Verify** every video has its outputs.
 5. **DCS** feature extraction, audit, model (trains only if none is saved) and predictions.
 6. Optional research **chat** (`FISHLAB_DCS_CHAT=1`): starts the local model server container (Ollama on the GPU,
-   models kept in `.ollama/models`). Download the model once. Pass `./start.sh --without-model` to skip this step
-   and run the app without the research chat:
+   models kept in `.ollama/models`). Pass `./start.sh --with-model` to enable this step. Download the model once:
    `docker compose --profile chat up -d model && docker compose exec model ollama pull qwen3:30b-a3b`.
 7. **Serve** the frontend and API and print one local link.
 

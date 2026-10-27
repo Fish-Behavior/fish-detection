@@ -6,7 +6,7 @@ React/TypeScript interface for zebrafish behavior analysis: a **Dashboard** for 
 
 ## Run
 
-To use the whole app, run `./start.sh` (or `./start.sh --without-model` when Ollama/chat is not needed) and
+To use the whole app, run `./start.sh` (or `./start.sh --with-model` when Ollama/chat is needed) and
 `./stop.sh` from the repository root; see the root README. The commands below are for frontend development only.
 
 Requires Node.js 22.18 or newer, npm, and the project's `.venv` with Python dependencies installed. Configure the repository-root `.env` first. From the repository root:

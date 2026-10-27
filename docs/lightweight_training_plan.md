@@ -94,7 +94,7 @@ Prepared now:
 - [x] Scorer: right tool, right arguments, right number in the answer, invented numbers, latency (test: `backend/dcs/tests/test_dcs_chat_eval.py`).
 
 Done on the GB10 (2026-10-22; decisions D-077 to D-079 in `backend/dcs/docs/classifier_progress.md`):
-- [x] Model server: the Compose service `model` (Ollama on the GPU), started by `./start.sh` when `FISHLAB_DCS_CHAT=1`;
+- [x] Model server: the Compose service `model` (Ollama on the GPU), started by `./start.sh --with-model`;
       no published port; models in the git-ignored `.ollama/models`.
 - [x] Candidate: `qwen3:30b-a3b` (Apache-2.0, tool calling, ~3B active parameters), chosen by the owner after the licence
       check. Other candidates were not run; compare them only if this one disappoints in use.
