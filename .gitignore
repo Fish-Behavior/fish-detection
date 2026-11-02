@@ -10,6 +10,7 @@ data/
 outputs/
 .claude/
 .codex/
+.claude-flow/
 # Raw inputs by type, in case they are placed somewhere else in the repo
 *.mp4
 *.avi
@@ -41,6 +42,7 @@ graphify-out/
 .fishlab-launch.lock/
 .fishlab-build.stamp
 .fishlab-ready.stamp
+
 # Editors / OS
 .vscode/
 .idea/
@@ -63,6 +65,7 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+
 
 # ---------------------------------------------------------------------------
 # Narrow, explicit exceptions: exactly the named synthetic test fixtures, never
