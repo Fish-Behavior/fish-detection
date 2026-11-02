@@ -10,6 +10,10 @@ import {
   adjacentFrameTime,
   trailRuns,
   videoPoint,
+  boxHandle,
+  dragBox,
+  parseDraft,
+  draftJSON,
   validateScene,
   validateFrame,
   validateInterval,
@@ -224,4 +228,48 @@ test('windowed overlays use absolute frame indices and never clamp missing frame
   s.overlay.t = [30.02, 30.055]
   assert.equal(frameIndexAt(s, 30.02), 900)
   assert.equal(frameIndexAt(s, 30.055), 901)
+})
+
+test('rectangle drags pick a corner, the inside or a new box, and stay inside the frame', () => {
+  const roi: [number, number, number, number] = [100, 100, 300, 200]
+  assert.equal(boxHandle([102, 98], roi, 6), 'nw')
+  assert.equal(boxHandle([300, 205], roi, 6), 'se')
+  assert.equal(boxHandle([200, 150], roi, 6), 'move')
+  assert.equal(boxHandle([20, 20], roi, 6), 'new')
+  assert.equal(boxHandle([200, 150], null, 6), 'new')
+  // On a box smaller than the reach, the nearest corner wins.
+  assert.equal(boxHandle([20, 10], [0, 0, 20, 10], 12), 'se')
+  // Moving keeps the size and stops at the frame edge.
+  assert.deepEqual(dragBox('move', roi, [200, 150], [600, 150], 640, 360), [440, 100, 640, 200])
+  // A corner pins the opposite corner, and dragging past it flips cleanly.
+  assert.deepEqual(dragBox('se', roi, [300, 200], [350, 260], 640, 360), [100, 100, 350, 260])
+  assert.deepEqual(dragBox('nw', roi, [100, 100], [400, 250], 640, 360), [300, 200, 400, 250])
+  // A new box spans the drag, clamped to the frame.
+  assert.deepEqual(dragBox('new', roi, [50, 60], [-10, 400], 640, 360), [0, 60, 50, 360])
+  // Off-picture drags clamp to the edge instead of dropping the point.
+  const rect = { left: 100, top: 100, width: 640, height: 360 }
+  assert.deepEqual(videoPoint([0, 50], rect, 640, 360, true), [0, 0])
+})
+
+test('autosaved drafts restore only for the same baseline and the expected shape', () => {
+  const draft = {
+    baseline: 'b1', revision: 3, saved_at: '2026-11-02T10:00:00.000Z', reviewer: 'R',
+    scene: { roi: [0, 0, 10, 10], waterline: null },
+    frames: { 12: { x: 1, y: 2, detected: true, box: null, keypoints: { snout: [1, 2, 0.9] } } },
+    labels: [{ start_s: 0, end_s: 1, state: 'Dead', reviewer: 'R' }],
+  }
+  assert.deepEqual(parseDraft(JSON.stringify(draft), 'b1'), draft)
+  assert.equal(parseDraft(JSON.stringify(draft), 'b2'), null)
+  assert.equal(parseDraft(null, 'b1'), null)
+  // A field cleared mid-edit (NaN) survives the round trip instead of voiding the whole draft.
+  const cleared = { ...draft, scene: { roi: [NaN, 0, 10, 10], waterline: NaN } }
+  const back = parseDraft(draftJSON(cleared as never), 'b1')!
+  assert.ok(Number.isNaN(back.scene!.roi[0]) && Number.isNaN(back.scene!.waterline))
+  assert.deepEqual(back.frames, draft.frames)
+  // A reviewer literally named "NaN" stays a name.
+  assert.equal(parseDraft(draftJSON({ ...draft, reviewer: 'NaN' } as never), 'b1')?.reviewer, 'NaN')
+  assert.equal(parseDraft('{not json', 'b1'), null)
+  assert.equal(parseDraft(JSON.stringify({ ...draft, labels: [{ ...draft.labels[0], state: 'Flying' }] }), 'b1'), null)
+  assert.equal(parseDraft(JSON.stringify({ ...draft, frames: { x: draft.frames[12] } }), 'b1'), null)
+  assert.equal(parseDraft(JSON.stringify({ ...draft, frames: { 3: { x: 'a', y: 2, detected: true, box: null, keypoints: {} } } }), 'b1'), null)
 })

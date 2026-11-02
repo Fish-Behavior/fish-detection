@@ -357,11 +357,15 @@ export function videoPoint(
   rect: { left: number; top: number; width: number; height: number },
   width: number,
   height: number,
+  clamp = false,
 ): Point | null {
   const scale = Math.min(rect.width / width, rect.height / height)
   const left = rect.left + (rect.width - width * scale) / 2,
     top = rect.top + (rect.height - height * scale) / 2
   const point: Point = [(client[0] - left) / scale, (client[1] - top) / scale]
+  // A drag that leaves the picture keeps tracking along its edge.
+  if (clamp && point.every(Number.isFinite))
+    return [Math.max(0, Math.min(width, point[0])), Math.max(0, Math.min(height, point[1]))]
   return point.every(Number.isFinite) &&
     point[0] >= 0 &&
     point[0] <= width &&
@@ -369,4 +373,71 @@ export function videoPoint(
     point[1] <= height
     ? point
     : null
+}
+
+export type BoxHandle = 'new' | 'move' | 'nw' | 'ne' | 'sw' | 'se'
+// Which part of an existing rectangle a pointer grabs; `reach` is the corner grab distance in video pixels.
+export function boxHandle(p: Point, box: Box | null, reach: number): BoxHandle {
+  if (!box || !box.every(Number.isFinite)) return 'new'
+  const [l, t, r, b] = box
+  // The nearest corner within reach wins, so a small box never grabs the opposite one.
+  const corners: [BoxHandle, number, number][] = [['nw', l, t], ['ne', r, t], ['sw', l, b], ['se', r, b]]
+  const [nearest] = corners
+    .map(([h, x, y]) => [h, Math.max(Math.abs(p[0] - x), Math.abs(p[1] - y))] as const)
+    .filter(([, d]) => d <= reach)
+    .sort((a, c) => a[1] - c[1])
+  if (nearest) return nearest[0]
+  return p[0] > l && p[0] < r && p[1] > t && p[1] < b ? 'move' : 'new'
+}
+// The rectangle a drag produces: a move keeps the size inside the frame, a corner pins the opposite one, a new box pins the start.
+export function dragBox(handle: BoxHandle, origin: Box | null, start: Point, now: Point, width: number, height: number): Box {
+  if (handle === 'move' && origin) {
+    const x = Math.max(-origin[0], Math.min(width - origin[2], now[0] - start[0])),
+      y = Math.max(-origin[1], Math.min(height - origin[3], now[1] - start[1]))
+    return [origin[0] + x, origin[1] + y, origin[2] + x, origin[3] + y]
+  }
+  const anchor: Point = handle === 'new' || handle === 'move' || !origin ? start
+    : [handle.includes('w') ? origin[2] : origin[0], handle.includes('n') ? origin[3] : origin[1]]
+  const q: Point = [Math.max(0, Math.min(width, now[0])), Math.max(0, Math.min(height, now[1]))]
+  return [Math.min(anchor[0], q[0]), Math.min(anchor[1], q[1]), Math.max(anchor[0], q[0]), Math.max(anchor[1], q[1])]
+}
+
+// Unsaved Review work kept in the browser between reloads; Save all sends it to the backend.
+export interface ReviewDraft {
+  tab?: string
+  baseline: string | null
+  revision: number
+  saved_at: string
+  reviewer: string
+  scene: Scene | null
+  frames: Record<number, FrameValue>
+  labels: LabelEdit[]
+}
+const isNum = (v: unknown) => typeof v === 'number' || v === null
+const isBox = (v: unknown): v is Box => Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === 'number')
+const isFrame = (v: unknown): v is FrameValue => {
+  const f = v as FrameValue
+  return !!f && typeof f === 'object' && isNum(f.x) && isNum(f.y) && typeof f.detected === 'boolean' &&
+    (f.box === null || isBox(f.box)) && !!f.keypoints && typeof f.keypoints === 'object' &&
+    Object.values(f.keypoints).every((k) => Array.isArray(k) && k.length === 3 && k.every((n) => typeof n === 'number'))
+}
+// A field cleared mid-edit holds NaN, which plain JSON would turn into null ("no value"); keep it as NaN.
+// The marker is an object, so no string a reviewer types (even "NaN") can be mistaken for it.
+export const draftJSON = (draft: ReviewDraft) =>
+  JSON.stringify(draft, (_, v) => (typeof v === 'number' && !Number.isFinite(v) ? { $nan: 1 } : v))
+// Stored text is untrusted: a draft for another baseline, or one of the wrong shape, is dropped whole.
+export function parseDraft(raw: string | null, baseline: string | null): ReviewDraft | null {
+  if (!raw) return null
+  try {
+    const d = JSON.parse(raw, (_, v) => (v && typeof v === 'object' && v.$nan === 1 && Object.keys(v).length === 1 ? NaN : v)) as ReviewDraft
+    const sceneOk = d.scene === null || (!!d.scene && isBox(d.scene.roi) && isNum(d.scene.waterline))
+    const framesOk = !!d.frames && typeof d.frames === 'object' &&
+      Object.entries(d.frames).every(([k, f]) => /^\d+$/.test(k) && isFrame(f))
+    const labelsOk = Array.isArray(d.labels) && d.labels.every((l) =>
+      typeof l.start_s === 'number' && typeof l.end_s === 'number' && STATES.includes(l.state) && typeof l.reviewer === 'string')
+    if (d.baseline !== baseline || typeof d.revision !== 'number' || typeof d.saved_at !== 'string' || typeof d.reviewer !== 'string' || !sceneOk || !framesOk || !labelsOk) return null
+    return d
+  } catch {
+    return null
+  }
 }

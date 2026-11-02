@@ -9,7 +9,6 @@ import type {
   LabelEdit,
   Scene,
 } from './model.ts'
-import type { EditTool } from './VideoPanel.tsx'
 import { Card, Icon } from './ui.tsx'
 
 function NumberField({
@@ -75,8 +74,6 @@ export interface EditorProps {
   edits: Edits
   reviewer: string
   setReviewer: (s: string) => void
-  tool: EditTool
-  setTool: (t: EditTool) => void
   keypoint: string
   setKeypoint: (k: string) => void
   scene: Scene
@@ -113,7 +110,7 @@ export default function Editors(
     }))
   return (
     <div className="editors">
-      <Card title="Review controls" eyebrow="Human corrections">
+      <Card title="Reviewer">
         <label className="field">
           Reviewer name
           <input
@@ -124,31 +121,16 @@ export default function Editors(
             autoComplete="name"
           />
         </label>
-        <label className="field">
-          Video interaction
-          <select
-            aria-label="Video interaction"
-            value={p.tool}
-            onChange={(e) => p.setTool(e.target.value as EditTool)}
-          >
-            <option value="inspect">Inspect / playback</option>
-            <option value="waterline">Click: waterline</option>
-            <option value="roi">Drag: ROI</option>
-            <option value="point">Click: tracking point</option>
-            <option value="box">Drag: detector box</option>
-            <option value="keypoint">Click: selected keypoint</option>
-          </select>
-        </label>
         <p className="small muted">
-          Changes preview instantly in purple on the video and timeline. Draw on
-          the video, nudge with arrow keys, or edit the fields; nothing is saved
-          until you apply it. Changing frames discards unsaved frame drafts.
+          Pick a tool above the video, then click or drag on it, or edit the
+          fields below. Purple previews are unsaved: they autosave in this
+          browser, frame by frame, until you save them to the backend.
         </p>
       </Card>
       <Card
         title="Scene settings"
-        eyebrow={
-          p.edits.scene ? 'Manual correction saved' : 'Automatic baseline'
+        accessory={
+          p.edits.scene && <span className="badge manual">Corrected</span>
         }
       >
         <NumberField
@@ -182,7 +164,6 @@ export default function Editors(
       {session.overlay.t.length > 0 && (
         <Card
           title={`Frame ${p.frameIndex} correction`}
-          eyebrow="Tracking point + detector output"
         >
           <label className="checkbox-field">
             <input
@@ -323,7 +304,7 @@ export function LabelEditor(
 ) {
   const { session } = p
   return (
-    <Card title="Relabel a time range" eyebrow="Behavior override">
+    <Card title="Relabel a time range">
       <div className="field-grid">
         <NumberField
           label="From (s)"
