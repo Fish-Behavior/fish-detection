@@ -78,14 +78,14 @@ python -m dcs check-config
 
 ```text
 fish-detection/
-├── src/prepds/        # the pipeline package (catalog, tracking, features, labeling, webapp, ...)
-├── src/dcs/           # the compound/dose classifier and research chat (reads prepds output, never imports it)
-├── scripts/           # calibration and detector fine-tuning scripts
-├── config/            # default thresholds, frozen calibration profiles, classifier defaults (default_training.yaml)
-├── tests/             # automated tests (synthetic fixtures only)
-├── docs/              # instructions, PRD, progress log, scope, contribution workflow
+├── backend/
+│   ├── prepds/        # preprocessing pipeline: src/, tests/, config/ (thresholds, calibration profiles), scripts/, docs/
+│   ├── dcs/           # compound/dose classifier and research chat (reads prepds output, never imports it): src/, tests/, config/, docs/
+│   └── shared/        # used by both: tests/fixtures (synthetic data), tests/deployment, scripts/ (docker_app.py, changed_tests.py)
+├── frontend/          # React review UI
+├── docs/              # instructions, PRD, scope, contribution workflow (cross-unit docs; unit docs live in backend/<unit>/docs)
 ├── start.sh, stop.sh  # the way everyone runs the project (Docker)
-├── Dockerfile, compose.yaml, scripts/docker_app.py   # launcher internals
+├── Dockerfile, compose.yaml   # launcher internals
 ├── .env.example       # template for your local .env; never commit .env
 ├── pyproject.toml, requirements.txt, uv.lock
 └── data/, outputs/, accepted/   # local only, git-ignored (restricted research data)

@@ -41,12 +41,12 @@ prepds = "prepds.cli:main"
 dcs = "dcs.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["backend/prepds/src", "backend/dcs/src"]
 
 [tool.setuptools.package-data]
 "prepds.webapp" = ["static/*"]
 "prepds.annotation" = ["static/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
+testpaths = ["backend"]
+pythonpath = [".", "backend/prepds/src", "backend/dcs/src"]

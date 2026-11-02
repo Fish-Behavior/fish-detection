@@ -122,7 +122,7 @@ output_dir="$(envval PDS_OUTPUT_DIR)"; output_dir="${output_dir:-outputs}"
 
 need_build=1
 if [ "$full" -eq 0 ] && docker image inspect fishlab:local >/dev/null 2>&1 \
-    && ! changed "$build_stamp" Dockerfile pyproject.toml uv.lock README.md src/prepds config scripts/docker_app.py frontend; then
+    && ! changed "$build_stamp" Dockerfile pyproject.toml uv.lock README.md backend/prepds/src backend/prepds/config backend/shared/scripts/docker_app.py frontend; then
     need_build=0
 fi
 
@@ -131,7 +131,7 @@ if [ "$full" -eq 0 ] && [ -f "$output_dir/docker/startup.json" ] \
     && grep -q '"ok": true' "$output_dir/docker/startup.json" \
     && [ "$(cat "$ready_stamp" 2>/dev/null)" = "$(video_count)" ] \
     && ! videos_changed \
-    && ! changed "$ready_stamp" .env "$(envval PDS_DB_PATH)" config \
+    && ! changed "$ready_stamp" .env "$(envval PDS_DB_PATH)" backend/prepds/config backend/dcs/config \
         "${FISHLAB_DCS_ROOT:-${FISHLAB_DEFAULT_DCS_ROOT:-}}"; then
     need_prepare=0
 fi
