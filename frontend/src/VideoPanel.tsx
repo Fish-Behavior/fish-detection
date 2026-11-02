@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { adjacentFrameTime, frameAt, frameIndexAt, trailRuns, videoPoint } from './model.ts'
+import { adjacentFrameTime, boxHandle, dragBox, frameAt, frameIndexAt, trailRuns, videoPoint } from './model.ts'
 import type {
   Box,
+  BoxHandle,
   SessionData,
   Edits,
   FrameValue,
@@ -27,6 +28,7 @@ export interface VideoProps {
   videoRef: RefObject<HTMLVideoElement | null>
   seek: (t: number) => void
   tool: EditTool
+  setTool?: (t: EditTool) => void
   keypoint: string
   sceneDraft: Scene
   frameDraft: FrameValue
@@ -34,6 +36,16 @@ export interface VideoProps {
   nudge: (tool: EditTool, dx: number, dy: number) => void
 }
 const PREVIEW = '#c6b4ff'
+const RECT_HINT = 'drag a new one, drag inside to move it, or drag a corner to resize.'
+const TOOLS: { id: EditTool; label: string; key: string; hint: string; detector?: boolean }[] = [
+  { id: 'inspect', label: 'Inspect', key: 'v', hint: 'Play and scrub. Pick a tool to correct what you see.' },
+  { id: 'point', label: 'Re-point fish', key: 'p', hint: 'Click the fish to move the track point; drag to fine-tune.' },
+  { id: 'box', label: 'Box', key: 'b', hint: `Detector box: ${RECT_HINT}`, detector: true },
+  { id: 'keypoint', label: 'Keypoint', key: 'k', hint: 'Click where the selected keypoint belongs (choose it in Frame correction).', detector: true },
+  { id: 'roi', label: 'ROI', key: 'r', hint: `Region of interest: ${RECT_HINT}` },
+  { id: 'waterline', label: 'Waterline', key: 'w', hint: 'Click or drag at the water surface.' },
+]
+const CURSORS: Record<BoxHandle, string> = { new: 'crosshair', move: 'move', nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize' }
 export default function VideoPanel(p: VideoProps) {
   const { session, edits, src, title, time, duration, videoRef, seek, reviewMode } = p
   const tool = reviewMode ? p.tool : 'inspect'
@@ -50,7 +62,8 @@ export default function VideoPanel(p: VideoProps) {
   }
   const [reviewLayers, setLayers] = useState(defaultLayers)
   const layers = reviewMode ? reviewLayers : defaultLayers
-  const drag = useRef<Point | null>(null)
+  const stage = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ start: Point; handle: BoxHandle; origin: Box | null; slack: number } | null>(null)
   const index = frameIndexAt(session, time)
   const hasTracking = session.overlay.t.length > 0
   const frame = frameAt(session, index, edits),
@@ -101,13 +114,31 @@ export default function VideoPanel(p: VideoProps) {
   useEffect(() => {
     if (tool !== 'inspect') videoRef.current?.pause()
   }, [tool, videoRef])
-  const locate = (e: React.PointerEvent<SVGSVGElement>) =>
+  // A drag never carries over to another tool or frame.
+  useEffect(() => {
+    drag.current = null
+  }, [tool, index])
+  const locate = (e: React.PointerEvent<SVGSVGElement>, clamp = false) =>
     videoPoint(
       [e.clientX, e.clientY],
       e.currentTarget.getBoundingClientRect(),
       session.overlay.width,
       session.overlay.height,
+      clamp,
     )
+  const rectTool = tool === 'roi' || tool === 'box'
+  // The rectangle the ROI and Box tools reshape: the draft, which starts as the saved value.
+  const editable = tool === 'roi' ? p.sceneDraft.roi : tool === 'box' ? p.frameDraft.box : null
+  const handleSize = Math.max(session.overlay.width, session.overlay.height) / 90
+  // Corner grab distance: 12 screen pixels, in video pixels.
+  const reach = (e: React.PointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    return 12 / (Math.min(r.width / session.overlay.width, r.height / session.overlay.height) || 1)
+  }
+  const stepFrame = (direction: -1 | 1) => {
+    videoRef.current?.pause()
+    seek(adjacentFrameTime(session, time, direction))
+  }
   const rectangle = (b: Box) => ({
     x: b[0],
     y: b[1],
@@ -116,20 +147,45 @@ export default function VideoPanel(p: VideoProps) {
   })
   return (
     <Card
-      title={reviewMode ? 'Tracking review workspace' : 'Fish tracker'}
-      eyebrow={reviewMode ? 'Inspect, correct and relabel' : 'Video + tracking overlays'}
-      accessory={<span className="badge success">Session video</span>}
+      title={reviewMode ? 'Correct the tracking' : 'Recording'}
       className="video-card"
     >
-      <div className="video-stage" tabIndex={reviewMode ? 0 : undefined}
-        role="group" aria-label={reviewMode ? 'Review player. Arrow keys seek; brackets mark the range.' : 'Session player'}
+      {reviewMode && <div className="tool-bar">
+        <div role="toolbar" aria-label="Correction tools" className="tool-buttons">
+          {TOOLS.filter((t) => !t.detector || session.overlay.has_detector).map((t) => (
+            <button type="button" key={t.id} aria-pressed={tool === t.id} onClick={() => {
+              p.setTool?.(t.id)
+              // Hand the keyboard to the player, where shortcuts and nudges work.
+              stage.current?.focus({ preventScroll: true })
+            }}>
+              {t.label}
+              <kbd aria-hidden="true">{t.key.toUpperCase()}</kbd>
+            </button>
+          ))}
+        </div>
+        <p className="tool-hint" aria-live="polite">
+          {TOOLS.find((t) => t.id === tool)?.hint}
+          {tool !== 'inspect' && ' Purple is unsaved and autosaves in this browser.'}
+        </p>
+      </div>}
+      <div className="video-stage" ref={stage} tabIndex={reviewMode ? 0 : undefined}
+        role="group" aria-label={reviewMode ? 'Review player. Letter keys pick a tool, comma and period step frames, arrow keys seek or nudge, brackets mark the range.' : 'Session player'}
         onKeyDown={(e) => {
           if (!reviewMode || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey ||
             (e.target as Element).closest('input, select, textarea, button, [contenteditable="true"]')) return
+          const shortcut = TOOLS.find((t) => t.key === e.key.toLowerCase() && (!t.detector || session.overlay.has_detector))
           if (e.key === '[' || e.key === ']') {
             e.preventDefault(); p.markRange(e.key === '[' ? 'start' : 'end')
+          } else if (e.key === ',' || e.key === '.') {
+            e.preventDefault(); stepFrame(e.key === ',' ? -1 : 1)
+          } else if (p.setTool && (shortcut || e.key === 'Escape')) {
+            e.preventDefault(); p.setTool(shortcut?.id ?? 'inspect')
           } else if (tool === 'inspect' && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault(); seek(time + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1))
+          } else if (tool !== 'inspect' && e.key.startsWith('Arrow')) {
+            const step = e.shiftKey ? 10 : 1
+            const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0]
+            e.preventDefault(); p.nudge(tool, dx, dy)
           }
         }}>
         <video
@@ -161,52 +217,43 @@ export default function VideoPanel(p: VideoProps) {
             viewBox={`0 0 ${session.overlay.width} ${session.overlay.height}`}
             className={`video-overlay ${tool !== 'inspect' ? 'editing' : ''}`}
             role="img"
-            aria-label="Fish overlays. With an edit tool selected, focus here and use arrow keys (Shift for 10 px) to move the draft."
-            tabIndex={tool !== 'inspect' ? 0 : undefined}
-            onKeyDown={(e) => {
-              const step = e.shiftKey ? 10 : 1,
-                move = {
-                  ArrowLeft: [-step, 0],
-                  ArrowRight: [step, 0],
-                  ArrowUp: [0, -step],
-                  ArrowDown: [0, step],
-                }[e.key]
-              if (tool === 'inspect' || !move || e.ctrlKey || e.metaKey || e.altKey) return
-              e.preventDefault()
-              p.nudge(tool, move[0], move[1])
-            }}
+            aria-label="Fish overlays. With an edit tool selected, arrow keys on the player move the draft (Shift for 10 px)."
             onPointerDown={(e) => {
-              if (tool === 'inspect') return
-              const q = locate(e)
+              if (tool === 'inspect' || e.button !== 0) return
+              // Rectangle corners often sit on the picture edge, so a press just outside it still grabs them.
+              const q = locate(e, rectTool)
               if (!q) return
-              drag.current = q
+              const handle = rectTool ? boxHandle(q, editable, reach(e)) : 'new'
+              // Movement under 4 screen pixels is click jitter, not a drag.
+              drag.current = { start: q, handle, origin: editable && [...editable], slack: reach(e) / 3 }
               e.currentTarget.setPointerCapture(e.pointerId)
-              if (!['roi', 'box'].includes(tool)) p.sketch(tool, q)
+              // A rectangle waits for movement, so a stray click never collapses it.
+              if (!rectTool) p.sketch(tool, q)
             }}
             onPointerMove={(e) => {
-              if (drag.current && !['roi', 'box'].includes(tool)) {
-                const q = locate(e)
-                if (q) p.sketch(tool, q)
+              const d = drag.current
+              if (!d) {
+                const q = rectTool && locate(e, true)
+                e.currentTarget.style.cursor = rectTool ? CURSORS[q ? boxHandle(q, editable, reach(e)) : 'new'] : ''
+                return
+              }
+              const q = locate(e, true)
+              if (!q) return
+              if (!rectTool) p.sketch(tool, q)
+              else if (Math.hypot(q[0] - d.start[0], q[1] - d.start[1]) >= d.slack) {
+                const box = dragBox(d.handle, d.origin, d.start, q, session.overlay.width, session.overlay.height)
+                // A flat rectangle (dragged along an edge) is never a usable ROI or box.
+                if (box[2] - box[0] >= 1 && box[3] - box[1] >= 1) p.sketch(tool, box)
               }
             }}
-            onPointerUp={(e) => {
-              if (drag.current && ['roi', 'box'].includes(tool)) {
-                const q = locate(e)
-                if (q)
-                  p.sketch(tool, [
-                    Math.min(drag.current[0], q[0]),
-                    Math.min(drag.current[1], q[1]),
-                    Math.max(drag.current[0], q[0]),
-                    Math.max(drag.current[1], q[1]),
-                  ])
-              }
+            onPointerUp={() => {
               drag.current = null
             }}
             onPointerCancel={() => {
               drag.current = null
             }}
           >
-            {layers.roi && (
+            {(layers.roi || tool === 'roi') && (
               <rect
                 {...rectangle(scene.roi)}
                 fill="none"
@@ -293,7 +340,7 @@ export default function VideoPanel(p: VideoProps) {
                 )}
               </>
             )}
-            {hasTracking && !frame.detected && (
+            {hasTracking && !frame.detected && !draft.point && (
               <text x="45" y="94" fill="white" fontSize="12">
                 Fish not detected
               </text>
@@ -353,9 +400,19 @@ export default function VideoPanel(p: VideoProps) {
                 Draft: fish marked missing
               </text>
             )}
+            {rectTool && editable && editable.every(Number.isFinite) &&
+              [[0, 1], [2, 1], [0, 3], [2, 3]].map(([xi, yi]) => (
+                <rect
+                  key={`${xi}${yi}`}
+                  className="box-handle"
+                  x={editable[xi] - handleSize / 2}
+                  y={editable[yi] - handleSize / 2}
+                  width={handleSize}
+                  height={handleSize}
+                />
+              ))}
           </svg>
         }
-        <span className="video-stamp">TRACKING OVERLAYS</span>
       </div>
       <div className="playback">
         <button
@@ -404,12 +461,7 @@ export default function VideoPanel(p: VideoProps) {
         </select>
       </div>
       {reviewMode && <div className="frame-control">
-        <button
-          onClick={() => {
-            videoRef.current?.pause()
-            seek(adjacentFrameTime(session, time, -1))
-          }}
-        >
+        <button onClick={() => stepFrame(-1)}>
           Previous frame
         </button>
         <label>
@@ -424,12 +476,7 @@ export default function VideoPanel(p: VideoProps) {
             onChange={(e) => seek(Number(e.target.value))}
           />
         </label>
-        <button
-          onClick={() => {
-            videoRef.current?.pause()
-            seek(adjacentFrameTime(session, time, 1))
-          }}
-        >
+        <button onClick={() => stepFrame(1)}>
           Next frame
         </button>
         <span className="small muted">
@@ -440,8 +487,18 @@ export default function VideoPanel(p: VideoProps) {
       {reviewMode && <div className="button-row range-markers">
         <button onClick={() => p.markRange('start')}>Mark range start [</button>
         <button onClick={() => p.markRange('end')}>Mark range end ]</button>
-        <span className="small muted">Focus the player: ←/→ seek 1 s; Shift seeks 10 s. Browser frame seeking is approximate.</span>
       </div>}
+      {reviewMode && <details className="shortcut-help">
+        <summary>Keyboard shortcuts</summary>
+        <dl>
+          <dt>{TOOLS.filter((t) => !t.detector || session.overlay.has_detector).map((t) => t.key.toUpperCase()).join(' ')}</dt>
+          <dd>Pick a tool; Esc returns to Inspect</dd>
+          <dt>, and .</dt><dd>Previous or next frame</dd>
+          <dt>Arrow keys</dt><dd>Inspect: seek 1 s (Shift 10 s). With a tool: nudge the draft 1 px (Shift 10 px)</dd>
+          <dt>[ and ]</dt><dd>Mark range start or end</dd>
+        </dl>
+        <p className="small muted">Click the video first so it has keyboard focus. Browser frame seeking is approximate.</p>
+      </details>}
       {error && (
         <p className="inline-error" role="alert">
           {error}
@@ -462,12 +519,12 @@ export default function VideoPanel(p: VideoProps) {
               {
                 (
                   {
-                    point: 'Track point',
-                    trail: '2 s trail',
-                    box: 'Box',
-                    keypoints: 'Keypoints',
-                    waterline: 'Waterline',
-                    roi: 'ROI',
+                    point: 'Fish position',
+                    trail: 'Path, last 2 s',
+                    box: 'Detection box',
+                    keypoints: 'Body points',
+                    waterline: 'Water surface',
+                    roi: 'Region of interest',
                   } as Record<string, string>
                 )[key]
               }
@@ -475,11 +532,13 @@ export default function VideoPanel(p: VideoProps) {
           ))}
         </div>
       }
-      <p className="video-note">
-        {tool === 'inspect'
-          ? 'Stored x/y point + optional detector overlays, using prepds field conventions.'
-          : `Edit ${tool}: ${['box', 'roi'].includes(tool) ? 'drag a rectangle' : 'click or drag on the video'}, or focus the video and use arrow keys (Shift = 10 px). Purple shows the unsaved draft; Apply in the review panel to save.`}
-      </p>
+      {!reviewMode && hasTracking && <div className="legend overlay-legend" aria-label="What the marks on the video show">
+        <span><i className="layer-dot point" />Fish position</span>
+        <span><i className="layer-dot trail" />Path, last 2 seconds</span>
+        {session.overlay.has_detector && <span><i className="layer-dot box" />Detection box</span>}
+        {session.overlay.has_detector && <span><i className="layer-dot keypoints" />Body points</span>}
+        <span><i className="layer-dot waterline" />Water surface</span>
+      </div>}
     </Card>
   )
 }

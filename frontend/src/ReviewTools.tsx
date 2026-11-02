@@ -35,7 +35,7 @@ export default function ReviewTools({ session, time, corrected, selectRange }: {
     return () => { alive = false; clearTimeout(timer) }
   }, [session.video_id, session.baseline, second])
   return <div className="prepds-review-tools">
-    <Card title="Prepds review flags" eyebrow="Original pipeline output">
+    <Card title="Flagged moments">
       {toolsError && <p className="inline-error" role="alert">{toolsError}</p>}
       {!tools && !toolsError && <p className="muted" role="status">Loading review data…</p>}
       {tools && <>
@@ -44,7 +44,7 @@ export default function ReviewTools({ session, time, corrected, selectRange }: {
           <dt>Exposure</dt><dd>{tools.manifest.compound} · {tools.manifest.concentration_mM} mM</dd>
           <dt>Calibration</dt><dd>{tools.manifest.calibration_profile_version}</dd>
           <dt>Pipeline</dt><dd>{tools.manifest.pipeline_version} · {tools.manifest.processed_at}</dd>
-          <dt>Prepds status</dt><dd>{tools.manifest.review_status} · {tools.manifest.edit_count} legacy edits{tools.manifest.reviewer && ` · ${tools.manifest.reviewer}`}</dd>
+          <dt>Earlier review</dt><dd>{tools.manifest.review_status} · {tools.manifest.edit_count} legacy edits{tools.manifest.reviewer && ` · ${tools.manifest.reviewer}`}</dd>
         </dl>
         <ul className="review-hints">
           {tools.manifest.review_flags.map((flag, i) => <li key={`flag-${i}`}>
@@ -54,7 +54,7 @@ export default function ReviewTools({ session, time, corrected, selectRange }: {
             <span>{flag.kind}: {flag.message}</span>
           </li>)}
         </ul>
-        {tools.manifest.review_flags.length === 0 && <p className="small muted">No pipeline review flags.</p>}
+        {tools.manifest.review_flags.length === 0 && <p className="small muted">Nothing was flagged for this recording.</p>}
         <h3>Possible Listing/LORR</h3>
         <p className="small muted">Advisory hints from the original crop classifier, not confirmed labels.{corrected && ' These hints do not reflect your corrections.'}</p>
         {tools.listing_flags_error && <p className="inline-error" role="alert">Listing hints unavailable: {tools.listing_flags_error}</p>}
@@ -69,7 +69,7 @@ export default function ReviewTools({ session, time, corrected, selectRange }: {
         {!tools.listing_flags_error && tools.listing_flags.length === 0 && <p className="small muted">No Listing hints available.</p>}
       </>}
     </Card>
-    <Card title="Why this label?" eyebrow="Original pipeline label explanation" accessory={<span className="small muted">Second {second}</span>}>
+    <Card title="Why this label?" accessory={<span className="small muted">Second {second}</span>}>
       <p className="small muted">This replays the stored track with its calibration profile.{corrected && ' It does not explain saved corrections or staged labels.'}</p>
       {whyError && <p className="inline-error" role="alert">{whyError}</p>}
       {!explanation && !whyError && <p className="muted" role="status">Loading explanation…</p>}

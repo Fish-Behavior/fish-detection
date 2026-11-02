@@ -38,13 +38,11 @@ export function Icon({
 }
 export function Card({
   title,
-  eyebrow,
   accessory,
   children,
   className = '',
 }: {
   title: string
-  eyebrow?: string
   accessory?: ReactNode
   children: ReactNode
   className?: string
@@ -52,10 +50,7 @@ export function Card({
   return (
     <section className={`card ${className}`}>
       <div className="card-heading">
-        <div>
-          {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-          <h2>{title}</h2>
-        </div>
+        <h2>{title}</h2>
         {accessory}
       </div>
       {children}

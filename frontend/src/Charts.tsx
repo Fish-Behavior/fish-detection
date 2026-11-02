@@ -15,11 +15,7 @@ export function StateSummary({
   const sums = totals(segments)
   return (
     <Card
-      title="Time per state"
-      eyebrow="Behavior distribution"
-      accessory={
-        <span className="small muted">{duration.toFixed(1)} s total</span>
-      }
+      title="Time in each behavior"
     >
       <div className="state-bars">
         {STATES.filter((s) => sums[s] > 0).map((s) => (
@@ -29,7 +25,7 @@ export function StateSummary({
                 <i style={{ background: COLORS[s] }} />
                 {s}
               </span>
-              <b>{sums[s].toFixed(1)} s{detailed && ` · ${(duration ? sums[s] / duration * 100 : 0).toFixed(1)}% · ${segments.filter((segment) => segment.state === s).length} bouts`}</b>
+              <b>{(duration ? sums[s] / duration * 100 : 0).toFixed(0)}%{detailed && `, ${sums[s].toFixed(1)} s in ${segments.filter((segment) => segment.state === s).length} bouts`}</b>
             </div>
             <div className="bar-track">
               <div
@@ -56,6 +52,7 @@ export function Ethogram({
   seek,
   stale,
   draft,
+  editing = false,
 }: {
   original: Segment[]
   segments: Segment[]
@@ -66,6 +63,7 @@ export function Ethogram({
   seek: (t: number) => void
   stale: boolean
   draft?: Behavior
+  editing?: boolean
 }) {
   const start = useRef<number | null>(null)
   const getTime = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -78,17 +76,16 @@ export function Ethogram({
   return (
     <Card
       title="Behavior timeline"
-      eyebrow="Ethogram"
       accessory={
         stale ? (
-          <span className="badge warning">Automatic labels stale</span>
+          <span className="badge warning">Out of date</span>
         ) : (
-          <span className="small muted">Drag to select a range</span>
+          <span className="small muted">{editing ? 'Drag to select a time range' : 'Click to jump to a moment'}</span>
         )
       }
     >
       <div className="ethogram-label">
-        <span>Automatic</span>
+        <span>Original</span>
         <span>Reviewed</span>
       </div>
       <svg
@@ -185,12 +182,12 @@ export function Ethogram({
           </span>
         ))}
       </div>
-      <p className="small muted">
-        Selection: {range[0].toFixed(2)}–{range[1].toFixed(2)} s.{' '}
+      {editing && <p className="small muted">
+        Selected {range[0].toFixed(2)}–{range[1].toFixed(2)} s.{' '}
         {draft
-          ? `The reviewed row previews ${draft} here until you apply it.`
-          : 'The reviewed row includes manual labels.'}
-      </p>
+          ? `The lower row previews ${draft} here until you save it.`
+          : 'The lower row includes reviewer corrections.'}
+      </p>}
     </Card>
   )
 }
@@ -207,16 +204,15 @@ export function Traces({
   stale: boolean
 }) {
   const specs = [
-    ['speed', 'Speed', 'px/s', 120, '#277bb2'],
-    ['turning', 'Turning', '°/s', 40, '#9673b7'],
-    ['depth', 'Depth', 'px', 220, '#74a79b'],
+    ['speed', 'Speed', 'pixels/s', 120, '#277bb2'],
+    ['turning', 'Turning', 'degrees/s', 40, '#9673b7'],
+    ['depth', 'Depth', 'pixels below water', 220, '#74a79b'],
   ] as const
   return (
     <Card
-      title="Movement traces"
-      eyebrow="Measurements · read-only"
+      title="Movement over time"
       accessory={
-        stale && <span className="badge warning">Measurements stale</span>
+        stale && <span className="badge warning">Out of date</span>
       }
     >
       <div className="traces">
@@ -268,10 +264,10 @@ export function Traces({
       </div>
       <div className="time-axis">
         <span>0 s</span>
-        <span>{session.duration} s</span>
+        <span>{session.duration.toFixed(0)} s</span>
       </div>
       <details className="measurement-table">
-        <summary>View numerical measurements</summary>
+        <summary>Show the numbers</summary>
         <div className="table-scroll">
           <table>
             <thead>

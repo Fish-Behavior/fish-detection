@@ -27,13 +27,23 @@ test('Review exposes advanced controls and staged labels; Dashboard hides unsave
       sketch: noop, nudge: noop, markRange: noop }
     const dashboard = renderToStaticMarkup(createElement(VideoPanel, { ...props, reviewMode: false }))
     const review = renderToStaticMarkup(createElement(VideoPanel, { ...props, reviewMode: true }))
-    assert.match(dashboard, /Fish tracker/)
+    assert.match(dashboard, />Recording</)
+    assert.match(dashboard, /Fish position.*Water surface/)
     assert.doesNotMatch(dashboard, /Previous frame|Mark range start|overlay-toggles|Draft:|video-overlay editing/)
-    assert.match(review, /Tracking review workspace/)
+    assert.match(review, /Correct the tracking/)
     assert.match(review, /Previous frame/)
     assert.match(review, /Mark range start/)
     assert.match(review, /Draft: fish marked missing/)
     assert.match(review, /Draft: waterline cleared/)
+    assert.match(dashboard + review, /role="toolbar"/)
+    assert.doesNotMatch(dashboard, /role="toolbar"|Keyboard shortcuts/)
+    assert.match(review, /aria-pressed="true">Re-point fish/)
+    assert.match(review, /Click the fish to move the track point/)
+    assert.match(review, /Keyboard shortcuts/)
+    // Detector tools appear only when the session has detector output.
+    assert.doesNotMatch(review, />Box<kbd|>Keypoint<kbd/)
+    const roi = renderToStaticMarkup(createElement(VideoPanel, { ...props, reviewMode: true, tool: 'roi' }))
+    assert.equal(roi.match(/class="box-handle"/g)?.length, 4)
     const pending = [{ start_s: 0, end_s: 1, state: 'Listing/LORR', reviewer: 'R' }]
     const editor = renderToStaticMarkup(createElement(LabelEditor, {
       session, edits, range: [0, 1], setRange: noop, state: 'Listing/LORR', setState: noop,
