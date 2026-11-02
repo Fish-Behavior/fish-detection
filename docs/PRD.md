@@ -15,7 +15,7 @@ model roadmap (lightweight reasoning model now, a better vision model once there
 
 **Project:** Zebrafish Drug-Response Detection System — early-stage labeling pipeline
 **Location:** `fish-detection/src/prepds/`
-**Status:** Built (Phases 0-15 in [progress.md](progress.md)); see Part III for open items
+**Status:** Built (Phases 0-15 in [progress.md](../backend/prepds/docs/progress.md)); see Part III for open items
 **Created:** 2026-09-22
 **Origin:** Owner request — build an early-stage, semi-autonomous pipeline that turns
 each raw drug-exposure video plus its trial-metadata row into a reviewed, per-subject
@@ -1160,11 +1160,11 @@ T052                          — sequential, depends on all five above being wr
 | | |
 |---|---|
 | **Status** | Built (U1-U20, 2026-10-02 to 2026-10-08) and tested on synthetic data; run once on the unreviewed real output. Not yet run on the lab GPU box; no result is a claim about drug identity |
-| **Merged into this file** | 2026-10-08, from the former `classifier_PRD.md` v0.3 (now removed; it is in git history). Facts that changed during the build are applied here (the former plan's change list C1-C24; the decisions D-nnn are in [classifier_progress.md](classifier_progress.md)) |
+| **Merged into this file** | 2026-10-08, from the former `classifier_PRD.md` v0.3 (now removed; it is in git history). Facts that changed during the build are applied here (the former plan's change list C1-C24; the decisions D-nnn are in [classifier_progress.md](../backend/dcs/docs/classifier_progress.md)) |
 | **Advisor / collaborator** | Dr. Ashish Kharel / Dr. Scott Hall |
 | **Privacy rule** | This file and every file added to `docs/` use placeholders (`COMPOUND_A`, `F_0042`). Never write real compound names, subject IDs, dates, data files or local paths here. The README forbids committing restricted data; this PRD applies the same rule to names and dates voluntarily |
 
-**Numbering.** Part II sections are written `II.n`. The code (`backend/dcs/src/dcs`, `tests/dcs`), `backend/dcs/config/default_training.yaml` and [instructions.md](instructions.md) cite them as "PRD §n.m" without the `II.` (for example "PRD §6.4" = **II.6.4**). Requirement ids (FR-1..FR-11, NFR-1..6, AC-1..11, EC-1..31, Q1..Q17, D-nnn) belong to Part II and do not collide with Part I's three-digit ids (FR-001...).
+**Numbering.** Part II sections are written `II.n`. The code (`backend/dcs/src/dcs`, `tests/dcs`), `backend/dcs/config/default_training.yaml` and [RUNBOOK.md](RUNBOOK.md) cite them as "PRD §n.m" without the `II.` (for example "PRD §6.4" = **II.6.4**). Requirement ids (FR-1..FR-11, NFR-1..6, AC-1..11, EC-1..31, Q1..Q17, D-nnn) belong to Part II and do not collide with Part I's three-digit ids (FR-001...).
 
 ## II.1 Executive summary
 
@@ -1300,11 +1300,11 @@ FR-1 to FR-6 on one machine, producing one reviewed report and one loadable mode
 
 ### II.5.1 Input and the two-step flow
 - **Source (read-only), two kinds, chosen by `training.gold_source`:** `accepted` reads `<DCS_ACCEPTED_DIR>` (the reviewed gold folder); `processed` (current default) reads the unreviewed Part I output (`DCS_PROCESSED_DIR`: `trials_catalog.parquet` plus `processed/<video_id>/`), allows `Undetermined` (measured per fish, never a behavior), drops `REJECTED`/`NOT_PROCESSED` fish with a reason, and marks every row unreviewed.
-- **Step 1, `featurize`** runs where the data lives; **step 2, `train`** reads only the table. The original plan was to copy the table to the GB10; because copying onto the box may be blocked by least-privilege rules, the box instead **clones the repository, re-runs `prepds` on the raw videos and trains on that output** (D-057). Runbook: [instructions.md](instructions.md), "Training on the GB10".
+- **Step 1, `featurize`** runs where the data lives; **step 2, `train`** reads only the table. The original plan was to copy the table to the GB10; because copying onto the box may be blocked by least-privilege rules, the box instead **clones the repository, re-runs `prepds` on the raw videos and trains on that output** (D-057). Runbook: [RUNBOOK.md](RUNBOOK.md), "Training on the GB10 (from a clone)".
 
 ### II.5.2 Eligible rows
 1. Review status Accepted (source `accepted`), or any processed non-rejected fish (source `processed`, flagged).
-2. **One tracker and one calibration profile per training set.** The gold folder carries no tracker field; it is inferred from the profile name (`-model` marker, configurable) and cross-checked against a `detections.parquet` where the processed folder exists. A mixed set is an error unless `--profile` selects one (D-003, D-034, EC-21). An upstream request to record the tracker, resolution and camera setup in the manifest is drafted: [upstream_request_prepds.md](upstream_request_prepds.md).
+2. **One tracker and one calibration profile per training set.** The gold folder carries no tracker field; it is inferred from the profile name (`-model` marker, configurable) and cross-checked against a `detections.parquet` where the processed folder exists. A mixed set is an error unless `--profile` selects one (D-003, D-034, EC-21). An upstream request to record the tracker, resolution and camera setup in the manifest is drafted: [upstream_request_prepds.md](../backend/prepds/docs/upstream_request_prepds.md).
 3. One row per subject (EC-10).
 4. Low detected-frame share or odd video duration: **kept but flagged** (Q6, D-021).
 5. Small classes are removed by the class filter (II.5.6).
@@ -1377,10 +1377,10 @@ Input: each video's frames resampled to 1 s (about 1200 steps x 8 channels, unde
 ## II.7 Technical specification
 
 ### II.7.1 Code layout (as built)
-`backend/dcs/src/dcs/`, a second package in the same repository and `pyproject.toml`: `schema`, `config`, `config_rules`, `gold`/`gold_checks`/`gold_rules` (readers), `workbook`, `featurize`, `trainset`, `folds`, `audit`, `preprocess`, `models`, `mlp`, `evaluate`, `ablations`, `stage2`, `report`, `train`, `artifact`, `chat_tools`, `chat`, `chat_server`, `synthetic*` (synthetic gold data), `cli`. One step per module, under the harness limit of 400 lines per file (D-009). Defaults: `backend/dcs/config/default_training.yaml`. Tests: `backend/dcs/tests/` with synthetic data only (975 tests in about 54 s). Per-module documentation: [instructions.md](instructions.md), part "Classifier (`dcs`)".
+`backend/dcs/src/dcs/`, a second package in the same repository and `pyproject.toml`: `schema`, `config`, `config_rules`, `gold`/`gold_checks`/`gold_rules` (readers), `workbook`, `featurize`, `trainset`, `folds`, `audit`, `preprocess`, `models`, `mlp`, `evaluate`, `ablations`, `stage2`, `report`, `train`, `artifact`, `chat_tools`, `chat`, `chat_server`, `synthetic*` (synthetic gold data), `cli`. One step per module, under the harness limit of 400 lines per file (D-009). Defaults: `backend/dcs/config/default_training.yaml`. Tests: `backend/dcs/tests/` with synthetic data only (975 tests in about 54 s). Per-module documentation: [RUNBOOK.md](RUNBOOK.md), section 5 (dcs).
 
 ### II.7.2 CLI
-`check-config`, `synth`, `featurize [--videos] [--profile]`, `audit`, `train [--stage --models --seed --repeats --device --no-ablations]`, `predict`, `ask`, `serve-chat`. Full table: [instructions.md](instructions.md), "Commands".
+`check-config`, `synth`, `featurize [--videos] [--profile]`, `audit`, `train [--stage --models --seed --repeats --device --no-ablations]`, `predict`, `ask`, `serve-chat`. Command table: [RUNBOOK.md](RUNBOOK.md), section 2.
 
 ### II.7.3 Configuration
 `training:` (seed, folds, repeats, `min_class_size`, `min_state_fish`, `vehicle_compound`, `camera_epochs`, `use_ntt`/`use_depth`/`use_demographics`, `gold_source`, flags, and `mlp:`) and `chat:` (`model`, `temperature`, `max_tool_rounds`, `timeout_s`, `allow_remote`); the chat server's address is machine-specific and comes only from `DCS_CHAT_BASE_URL` in `.env` or the environment (D-075). Values read from the real data (vehicle name, camera epochs, duration range) go in the owner's override file, never in the defaults. Unknown keys and wrong types are a `ConfigError` (D-023).
@@ -1424,7 +1424,7 @@ No new core dependency; the extra `train = ["torch>=2.4"]`. CI (Linux, Python 3.
 **What is still missing for an independent test.** Everything above is retrospective. The strongest check is prospective: record a small number of new fish of every compound (and vehicle) on the same new dates, with one camera setup, do not look at them while tuning, and score them once with the saved model. That also lifts the dose-date confound (all doses of a compound share dates). It needs the owner's recording plan; see III.1.
 
 ### II.9.2 Test approach
-Synthetic tables and synthetic gold data only; test first for every pure function. `pytest tests/dcs -q` for the fast loop, `pytest tests/ -q` before a pull request. Every implemented edge case has a test (map: the Tests table in [instructions.md](instructions.md)); EC-30 belongs to the not-started 1D-CNN. Edge cases added during the build: EC-27 index row without `date`; EC-28 workbook row missing, duplicated or disagreeing; EC-29 tracker evidence disagrees; EC-30 sequences of different lengths; EC-31 camera framing differs between dates.
+Synthetic tables and synthetic gold data only; test first for every pure function. `pytest tests/dcs -q` for the fast loop, `pytest tests/ -q` before a pull request. Every implemented edge case has a test (tests are under `backend/dcs/tests/`, one file per module); EC-30 belongs to the not-started 1D-CNN. Edge cases added during the build: EC-27 index row without `date`; EC-28 workbook row missing, duplicated or disagreeing; EC-29 tracker evidence disagrees; EC-30 sequences of different lengths; EC-31 camera framing differs between dates.
 
 ### II.9.3 Acceptance checklist
 - [x] AC-1 `audit` reports the II.2.3 statistics (synthetic and real unreviewed set)
@@ -1474,11 +1474,11 @@ Synthetic tables and synthetic gold data only; test first for every pure functio
 | Scope creep into video models, frontend or live use | Medium | Medium | Gates G2/G4; III.2 roadmap |
 
 ## II.12 Questions and decisions (owner answers, 2026-10-02 to 2026-10-08)
-Q1 tabular first, 1D-CNN second: yes. Q2 UToledo OneDrive approved. Q3 home PC Windows 11. Q4 drop every class lacking data (threshold 6). Q5 Stage 2 exploratory only. Q6 odd duration or low tracked share: keep and flag. Q7 no external LLM tools called by the agent. Q8 no torch in CI. Q9 tentatively no numeric target (revisit at G2). Q10 no deadline for this project (scope doc §9 targets the end of the current year for Phase 1). Q11 harness governance stays on. Q12 code in `backend/dcs/src/dcs`. Q13 classical tracker output is the training source. Q14 none Accepted yet. Q15 earlier sample for structure checks only. Q16 `min_state_fish` 10, configurable. Q17 until videos are Accepted, read the unreviewed output (D-033). C8: PyTorch (D-027). Every other decision is D-001..D-074 in [classifier_progress.md](classifier_progress.md).
+Q1 tabular first, 1D-CNN second: yes. Q2 UToledo OneDrive approved. Q3 home PC Windows 11. Q4 drop every class lacking data (threshold 6). Q5 Stage 2 exploratory only. Q6 odd duration or low tracked share: keep and flag. Q7 no external LLM tools called by the agent. Q8 no torch in CI. Q9 tentatively no numeric target (revisit at G2). Q10 no deadline for this project (scope doc §9 targets the end of the current year for Phase 1). Q11 harness governance stays on. Q12 code in `backend/dcs/src/dcs`. Q13 classical tracker output is the training source. Q14 none Accepted yet. Q15 earlier sample for structure checks only. Q16 `min_state_fish` 10, configurable. Q17 until videos are Accepted, read the unreviewed output (D-033). C8: PyTorch (D-027). Every other decision is D-001..D-074 in [classifier_progress.md](../backend/dcs/docs/classifier_progress.md).
 
 ## II.13 Glossary and runbook
 - **NTT:** Novel Tank Test, the workbook's per-trial movement summary (a different session from the video). **Scheme A / B:** date-held-out versus random validation. **Date effect:** score of B minus score of A. **Vehicle:** control fish exposed to the carrier only. **Baseline:** a simple model a fancier one must beat. **Camera epoch:** a period with one zoom/framing; the real set has three. **Temporarily accepted:** unreviewed Part I output used as training data until reviewers Accept videos.
-- **Runbook** (GB10 over SSH, retrieving and reloading a model, home-PC fallback): [instructions.md](instructions.md), "Training on the GB10" and "Predicting new fish". It replaces the former Appendix B.
+- **Runbook** (GB10 over SSH, retrieving and reloading a model, home-PC fallback): [RUNBOOK.md](RUNBOOK.md), "Training on the GB10 (from a clone)" and `predict` in section 5. It replaces the former Appendix B.
 
 ---
 
@@ -1494,11 +1494,11 @@ Everything deferred, accepted as a known limit, or waiting on someone, collected
 | W1 | **First real run on the GB10**: hardware record (T0.2-T0.4), `pytest tests/dcs`, `dcs audit`, `dcs train`; compare with the laptop results in II.2.3 (a difference means the box's preprocessing differs); cross-machine reload (T5.7, AC-9) and runbook walkthrough (AC-10) | Owner; gates G2, G4 |
 | W2 | **No video is Accepted.** Switch `gold_source: accepted` and re-run audit and train when enough are; re-read the G1 stop rule | Part I review (T085) |
 | W3 | **Real result is "not useful"**: behavior models do not beat the date-only baseline in scheme A; only vehicle-vs-drug carries signal (AUROC 0.68-0.70). Do not state drug identity from these results | New data (W5) and Accepted labels |
-| W4 | **Camera epochs**: set `training.camera_epochs` from the audit's framing table in the override file; file the upstream request so `prepds` records tracker, resolution and `camera_setup` | Owner ([upstream_request_prepds.md](upstream_request_prepds.md)) |
+| W4 | **Camera epochs**: set `training.camera_epochs` from the audit's framing table in the override file; file the upstream request so `prepds` records tracker, resolution and `camera_setup` | Owner ([upstream_request_prepds.md](../backend/prepds/docs/upstream_request_prepds.md)) |
 | W5 | **Dose is confounded with date.** Next recordings should put all doses of a compound, plus vehicle, on the same dates and one camera setup (also the prospective test of II.9.1) | Owner's recording plan |
 | W6 | Features of Listing/LORR, Dead and Surface Breach are dropped (fewer than 10 fish show them); revisit when reviewers label them | Reviewed labels |
 | W7 | `hist_gb` keeps scikit-learn's `min_samples_leaf = 20` and cannot split a training fold under 40 fish (D-053); real folds hold 180+ | Only matters on small sets |
-| W8 | **Chat**: choose and test the language model on the GB10 (tool-calling quality, speed; a 7-30B model is slow on CPU); the API has no authentication (loopback only); hosting decided later by the lab; a remote server needs `allow_remote` and approval under the data agreement | Owner |
+| W8 | **Chat**: model chosen and tested on the GB10 (2026-10-22): `qwen3:30b-a3b` in the Docker `model` service, 27/27 right tool and number on the eval, about 16-60 s per answer (D-077 to D-079). Still open: the API has no authentication (loopback only); a remote server needs `allow_remote` and approval under the data agreement | Owner review of real answers |
 | W9 | The pre-trained language model stays untrained; reconsider only if tool-use quality is poor and a larger or hosted model is allowed | After W8 |
 | W10 | 1D-CNN (FR-10) and `featurize --sequences` | Only after G4 |
 | W11 | Open questions: Q9 numeric target (advisor, at G2); Q10 deadline | Advisor |
@@ -1524,15 +1524,15 @@ Everything deferred, accepted as a known limit, or waiting on someone, collected
 
 ## III.2 Roadmap: lightweight reasoning now, a better vision model once there is more data
 1. **Now.** Tabular classifier plus a **lightweight, pre-trained, local language model** for reasoning and wording (II.8). No GPU is needed to train anything in `dcs`; the GPU helps the MLP and the chat model.
-2. **Next, on the GB10.** Real run (W1), pick the language model (W8), look at the first honest report with the owner at G2.
+2. **Next, on the GB10.** Real run (W1), look at the first honest report with the owner at G2. The language model is picked and running (W8).
 3. **When more data exists, a better vision model.** Trigger: enough reviewed (Accepted) videos and labeled frames, and recordings balanced across compounds, dates and cameras (W2, W5). Then, in this order: (a) more labeled frames for the fish detector, with no-fish and reflection frames, evaluated on a held-out set that no choice touched; (b) a **clip-level behavior model** trained on reviewed state seconds, the route left open for Listing/LORR and Surface Breach; (c) optionally a small vision-language model as one more chat tool ("what is happening in this frame?"), advisory only, since it would do worse than the dedicated classifier on ambiguous frames. The drug classifier keeps reading features computed from the reviewed tracks; a video model replaces the labeling stage, not the drug classifier, until G4 says otherwise.
-4. **After the chat is validated.** A thin web page over `dcs serve-chat` (the API exists), hosting decided by the lab. Live, real-time use is Phase 2 and needs a windowed redesign of the classifier plus a measured detector speed.
+4. **Chat in the app: done.** The FishLab chat panel talks to `dcs serve-chat`, hosted in Docker beside the app; the lab tunes its answers in `backend/dcs/config/chat_guidance.yaml`. Live, real-time use is Phase 2 and needs a windowed redesign of the classifier plus a measured detector speed.
 
 ## III.3 Repository layout and test policy (standing rules)
 Goal: a cleaner, safer, more professional repo where touching one backend unit never costs a run of everything.
-1. **One folder per backend unit.** `backend/prepds/` (preprocessing) and `backend/dcs/` (classifier and chat) each hold their own `src/`, `tests/`, `config/`, `docs/` (and `scripts/` for prepds). `backend/shared/` holds what both use: `tests/fixtures` (synthetic data only), `tests/deployment`, `scripts/docker_app.py`, `scripts/changed_tests.py`. Cross-unit docs (this PRD, `instructions.md`, `how-to-start.md`, scope) stay in root `docs/`; unit-specific progress logs live in `backend/<unit>/docs/`. `frontend/`, Docker files and `start.sh`/`stop.sh` stay at the root.
+1. **One folder per backend unit.** `backend/prepds/` (preprocessing) and `backend/dcs/` (classifier and chat) each hold their own `src/`, `tests/`, `config/`, `docs/` (and `scripts/` for prepds). `backend/shared/` holds what both use: `tests/fixtures` (synthetic data only), `tests/deployment`, `scripts/docker_app.py`, `scripts/changed_tests.py`. Cross-unit docs (this PRD, `RUNBOOK.md`, `how-to-start.md`, scope) stay in root `docs/`; unit-specific progress logs live in `backend/<unit>/docs/`. `frontend/`, Docker files and `start.sh`/`stop.sh` stay at the root.
 2. **Units stay independent.** `dcs` never imports `prepds` and the reverse (classifier NFR-6, D-013). Do not add a cross-unit import; share data through files, shared fixtures through `backend/shared`.
 3. **New code goes in its unit.** A new module, test, config file or doc is placed in the unit that owns it, never in a root `src/`, `tests/`, `scripts/` or `config/` (those no longer exist). Tests mirror the area they cover (`backend/prepds/tests/<ingest|vision|behavior|review|annotation|output>`). Reference files by their `backend/...` path in docs and comments.
 4. **Run only what changed.** Locally: `python backend/shared/scripts/changed_tests.py` (add `--all` for everything, extra args go to pytest). CI does the same on pull requests: a unit's tests run only if that unit changed. A change in `backend/shared`, `pyproject.toml`, `uv.lock`, Docker files or `.github` selects every unit; docs-only changes select none. Pushes to master run everything. `CI passed` fails only on a failed or cancelled job, never on a skipped one. If a new unit or shared path is added, update `changed_tests.py` and its test in the same change.
-5. **Quality gates.** Each unit keeps its own coverage floor (85%, currently prepds 95%, dcs 97%); raise it, never lower it. No restricted data, models or `.env` in git (`test_dcs_privacy` enforces it). Remove unused code and docs when a unit is done (see `dcs unit close-out` in `instructions.md`).
+5. **Quality gates.** Each unit keeps its own coverage floor (85%, currently prepds 95%, dcs 97%); raise it, never lower it. No restricted data, models or `.env` in git (`test_dcs_privacy` enforces it). Remove unused code and docs when a unit is done (D-041 in classifier_progress.md).
 6. **Moves are mechanical.** When relocating files, use `git mv`, fix path references in code, tests, Docker, CI and docs in the same branch, and run the full suite once (`--all`) before opening the pull request.

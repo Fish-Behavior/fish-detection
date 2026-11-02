@@ -41,5 +41,5 @@ docker compose config --quiet
 step="App shutdown"
 docker compose stop -t 300 app
 step="Compose shutdown"
-docker compose down -t 300
+COMPOSE_PROFILES=chat docker compose down -t 300
 printf '\nFishLab stopped.\n'

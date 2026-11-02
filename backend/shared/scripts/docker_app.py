@@ -24,7 +24,7 @@ from prepds.review_store import load_manifest
 CLASSIFIER_ROOT = Path(os.environ.get("FISHLAB_CLASSIFIER_ROOT", "/classifier"))
 FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend/dist"
 ARTIFACTS = ("manifest.json", "frames.parquet", "segments.csv", "strip.png")
-HOST_GATEWAY = "host.docker.internal"
+HOST_GATEWAY = os.environ.get("FISHLAB_MODEL_HOST", "").strip() or "host.docker.internal"
 
 
 def service(name: str) -> str:

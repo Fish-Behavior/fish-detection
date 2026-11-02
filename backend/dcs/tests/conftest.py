@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,23 @@ from dcs.synthetic import SynthResult, make_gold_dataset
 from backend.dcs.tests.synth_helpers import SMALL
 
 DCS_VARIABLES = (*PATH_VARIABLES.values(), ENV_CONFIG)
+
+
+@contextmanager
+def _isolated(folder: Path) -> Iterator[None]:
+    """Work from an empty folder with no DCS_* variables, then restore both (other test packages use relative paths)."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(folder)
+        for name in DCS_VARIABLES:
+            patch.delenv(name, raising=False)
+        yield
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolated_module(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """The same isolation for module-scoped fixtures, which are built before any per-test fixture runs."""
+    with _isolated(tmp_path_factory.mktemp("cwd")):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -46,5 +65,7 @@ def tiny_table(tiny_synth: SynthResult, tmp_path_factory: pytest.TempPathFactory
     """A synthetic training table and its schema: 24 fish, two compounds and vehicle, 8 each on 4 dates. Every
     dose class has 4 fish, so the dose stage cannot be built with min_class_size 6."""
     synth = tiny_synth
-    result = featurize(read_accepted(synth.accepted_dir), synth.workbook_path, load_settings().training)
+    with _isolated(tmp_path_factory.mktemp("cwd")):  # session fixtures are built before the module isolation
+        training = load_settings().training
+    result = featurize(read_accepted(synth.accepted_dir), synth.workbook_path, training)
     return write_outputs(result, tmp_path_factory.mktemp("tiny_table") / "training_table.parquet")[0]
