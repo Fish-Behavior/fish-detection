@@ -32,8 +32,9 @@ from prepds.config import ConfigError, Settings
 from prepds.consolidate import consolidate_states
 from prepds.features import compute_feature_validity, derive_features
 from prepds.labeling import classify_video
-from prepds.models import BehaviorState, FrameSource, MatchStatus, StateFrame, Track, Trial
-from prepds.pipeline import Outcome, RunConfig, process_trial, video_id
+from prepds.live import MAX_CAMERA_INDEX, LiveSession, list_cameras
+from prepds.models import BehaviorState, FrameSource, MatchStatus, StateFrame, Track, Trial, VideoAsset
+from prepds.pipeline import Outcome, RunConfig, finish_video, process_trial, unlabeled_trial, video_id
 from prepds.segments import DeadMonotonicityError, frames_to_segments
 from prepds.video_io import probe
 from prepds.webapp.schemas import Reviewer
@@ -96,6 +97,8 @@ class ReviewIn(Revision):
 
 class ProcessIn(Input):
     reviewer: Reviewer
+class LiveIn(Input):
+    camera: int = Field(ge=0, lt=MAX_CAMERA_INDEX, strict=True)
 
 
 class Message(Input):
@@ -223,7 +226,7 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
                 except (OSError, ValueError, KeyError, TypeError):
                     records[directory.name] = {'source': None, 'processed': True, 'error': 'Manifest is unreadable.'}
                     continue
-                source = _resolve_source(manifest.video_path, video_dir)
+                source = _resolve_source(manifest.video_path, video_dir, directory)
                 if source and source in by_source and by_source[source] != directory.name:
                     fail(409, 'duplicate_video', 'Multiple pipeline identities refer to one source video.')
                 records.setdefault(directory.name, {})
@@ -349,8 +352,8 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
             value = read_json(directory(vid) / 'review.json', {})
             e = value.get('edits', {})
             edited = any(e.get(key) for key in ('scene', 'frames', 'labels', 'finalResult'))
-            rows.append({'video_id': vid, 'name': r['source'].name if r['source'] else vid, 'processing_status': status,
-                         'processing_message': r.get('error') or state['message'], 'processable': bool(r.get('trial')),
+            rows.append({'video_id': vid, 'name': display_name(vid, r['source']), 'processing_status': status,
+                         'processing_message': r.get('error') or state['message'], 'processable': r.get('source') is not None,
                          'review_status': value.get('decision') or ('EDITED' if edited else 'PROCESSED_AUTO' if r['processed'] else 'NOT_PROCESSED'),
                          'edited': edited})
         return rows
@@ -418,13 +421,13 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
             warnings.append('Source duration differs from the pipeline output. Verify the source recording before editing.')
         if prediction_error:
             warnings.append(prediction_error)
-        return {'video_id': vid, 'name': a.path.name, 'video_url': f'/api/sessions/{vid}/video', 'duration': a.duration_s,
+        return {'video_id': vid, 'name': display_name(vid, a.path), 'video_url': f'/api/sessions/{vid}/video', 'duration': a.duration_s,
                 'frame_count': a.frame_count, 'scene': scene, 'overlay': overlay(vid, 0, min(30, a.duration_s)),
                 'segments': segments_of(frames) if frames is not None else [],
                 'reviewed_segments': derived['segments'] if derived else None,
                 'measurements': derived['measurements'] if derived else measurements_of(tracks_of(frames), scene['waterline']) if frames is not None else [],
                 'predictions': prediction, 'review': {k: v for k, v in value.items() if k != 'derived'}, 'baseline': value['baseline'],
-                'stale': stale(value), 'warnings': warnings, 'processing': job(vid), 'processable': bool(r.get('trial')),
+                'stale': stale(value), 'warnings': warnings, 'processing': job(vid), 'processable': r.get('source') is not None,
                 'has_tracking': frames is not None, 'chat_available': bool(chat_url),
                 'model_provenance': model_result and {'run': model_result['run'], 'baseline': model_result['baseline']}}
 
@@ -608,8 +611,6 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
         r = record(vid)
         if settings is None:
             fail(503, 'processing_unconfigured', 'Start prepds review with pipeline settings to enable analysis.')
-        if not r.get('trial'):
-            fail(409, 'unmatched_video', 'This recording has no unique matched trial. Run prepds catalog and resolve the workbook match.')
         asset(r)
         with locked(directory(vid)):
             saved = read_json(directory(vid) / 'review.json', {})
@@ -620,16 +621,113 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
                     fail(409, 'processing_busy', 'This recording is already being processed.')
                 active.add(vid)
             try:
-                from prepds import __version__
-                config = RunConfig(processed_dir, labeling_thresholds(settings.params), __version__,
-                                   str(settings.params['calibration_profile']['version']), clock())
+                config = run_config()
                 value = {'status': 'queued', 'message': '', 'reviewer': body.reviewer}
                 atomic_json(directory(vid) / 'processing.json', value)
             except Exception:
                 active.discard(vid)
                 raise
-            tasks.add_task(run_process, vid, replace(r['trial'], video_path=r['source']), config, body.reviewer)
+            # A recording without a workbook row (unmatched file, ended live session) goes through the same pipeline.
+            trial = replace(r['trial'], video_path=r['source']) if r.get('trial') else unlabeled_trial(vid, r['source'], config.processed_at.date())
+            tasks.add_task(run_process, vid, trial, config, body.reviewer)
         return value
+
+    def run_config():
+        from prepds import __version__
+        return RunConfig(processed_dir, labeling_thresholds(settings.params), __version__,
+                         str(settings.params['calibration_profile']['version']), clock())
+
+    def display_name(vid, source):
+        return vid if source is None or source.parent == directory(vid).resolve() else source.name
+
+    # --- live sessions: a camera is one more source. One session at a time (the tracker seeds OpenCV's global RNG).
+    live = {'session': None, 'vid': None, 'finish': None, 'message': ''}  # finish: None, finishing, finished, failed
+    live_lock = threading.Lock()
+
+    def live_status():
+        session = live['session']
+        if session is None:
+            return {'active': False}
+        status = session.status()
+        return {**status, 'active': live['finish'] not in ('finished', 'failed'), 'video_id': live['vid'],
+                'phase': live['finish'] or status['phase'], 'message': live['message'] or status['error'] or ''}
+
+    @router.get('/live/cameras')
+    def cameras():
+        with live_lock:
+            busy = live['session'] is not None and live['session'].is_alive()
+        if busy:
+            fail(409, 'live_busy', 'A live session is using a camera. End it before looking for cameras.')
+        return {'cameras': list_cameras()}
+
+    @router.get('/live')
+    def live_get():
+        with live_lock:
+            return live_status()
+
+    @router.post('/live', status_code=201)
+    def live_start(body: LiveIn):
+        if settings is None:
+            fail(503, 'processing_unconfigured', 'Start prepds review with pipeline settings to enable live sessions.')
+        thresholds = labeling_thresholds(settings.params)
+        with live_lock:
+            if live['session'] is not None and live['finish'] not in ('finished', 'failed') and live['session'].status()['phase'] != 'error':
+                fail(409, 'live_busy', 'A live session is already open. End it first.')
+            vid = f"live_{clock():%Y%m%dT%H%M%S}"
+            folder = directory(vid)
+            if folder.exists():
+                fail(409, 'live_exists', 'A live session with this name already exists. Retry in a second.')
+            folder.mkdir(parents=True)
+            session = LiveSession(body.camera, folder / 'recording', thresholds=thresholds)
+            live.update(session=session, vid=vid, finish=None, message='')
+            session.start()
+            return live_status()
+
+    @router.get('/live/preview')
+    def live_preview():
+        import cv2
+        from fastapi.responses import Response
+        with live_lock:
+            latest = live['session'].latest() if live['session'] is not None else None
+        if latest is None:
+            fail(404, 'no_preview', 'No live frame yet.')
+        frame, track = latest
+        image = frame.copy()
+        if track.detected:
+            cv2.drawMarker(image, (round(track.x), round(track.y)), (0, 255, 0), cv2.MARKER_CROSS, 14, 2)
+        _, jpeg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return Response(jpeg.tobytes(), media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
+
+    @router.post('/live/stop', status_code=202)
+    def live_stop(tasks: BackgroundTasks):
+        with live_lock:
+            session, vid = live['session'], live['vid']
+            if session is None or live['finish'] is not None:
+                fail(409, 'live_not_running', 'There is no open live session to end.')
+            live['finish'] = 'finishing'
+        session.stop()
+        session.join(timeout=30)
+        tasks.add_task(finish_live, session, vid)
+        with live_lock:
+            return live_status()
+
+    def finish_live(session, vid):
+        try:
+            if session.is_alive() or not session.tracks or session.video_path is None:
+                raise RuntimeError('the live session recorded nothing, or did not stop')
+            frame, _ = session.latest()
+            fps, n = session.status()['fps'], len(session.tracks)
+            asset = VideoAsset(path=session.video_path, duration_s=n / fps, fps=fps, frame_count=n,
+                               resolution=(int(frame.shape[1]), int(frame.shape[0])))
+            config = run_config()
+            with process_slot:
+                finish_video(unlabeled_trial(vid, session.video_path, config.processed_at.date()), asset, session.tracks, config)
+            outcome = ('finished', '')
+        except Exception:
+            LOG.exception('Finishing live session %s failed', vid)
+            outcome = ('failed', 'Saving the live session failed. Check the backend log.')
+        with live_lock:
+            live.update(finish=outcome[0], message=outcome[1])
 
     @router.post('/ask', response_model=Answer)
     def ask(body: Question):

@@ -57,7 +57,7 @@ _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 MAX_OVERLAY_WINDOW_S = 30.0
 MIN_DETECTION_SCORE = 0.3  # the model tracker's own score floor: weaker top-1 detections are not treated as the fish
 _KEYPOINTS = ("snout", "dorsal_fin_base", "ventral", "tail_base", "tail_tip")
-_VIDEO_SUFFIXES = frozenset({".mp4", ".m4v", ".mov", ".avi", ".mkv"})
+_VIDEO_SUFFIXES = frozenset({".mp4", ".m4v", ".mov", ".avi", ".mkv", ".webm"})  # .webm: live recordings without H.264
 
 
 def create_app(
@@ -209,7 +209,7 @@ def create_app(
             except (OSError, ValueError, KeyError) as error:  # an unreadable sidecar must not hide the track
                 detections_error = f"detections.parquet could not be read: {error}"
         if video_id not in sizes:
-            source = _resolve_source(manifest.video_path, video_dir)
+            source = _resolve_source(manifest.video_path, video_dir, directory)
             sizes[video_id] = _coded_size(source) if source is not None else None
         width, height = sizes[video_id] or (None, None)
         return OverlayWindow(fps=manifest.video_fps, width=width, height=height, t=[round(float(v), 4) for v in frames["t_sec"]], x=xs, y=ys,
@@ -272,7 +272,8 @@ def create_app(
 
     @app.get("/videos/{video_id}/video")
     def stream_video(video_id: str) -> FileResponse:
-        source = _resolve_source(manifest_of(video_path_of(video_id)).video_path, video_dir)
+        directory = video_path_of(video_id)
+        source = _resolve_source(manifest_of(directory).video_path, video_dir, directory)
         if source is None:
             raise HTTPException(404, "source video not found")
         return FileResponse(source, media_type=mimetypes.guess_type(source.name)[0] or "video/mp4")  # serves Range requests
@@ -352,8 +353,16 @@ def _conflict(code: str, error: Exception) -> HTTPException:
     return HTTPException(409, {"code": code, "message": str(error)})
 
 
-def _resolve_source(path: Path, video_dir: Path | None) -> Path | None:
-    """Resolve a video-folder or working-directory relative source, always contained by `video_dir`."""
+def _resolve_source(path: Path, video_dir: Path | None, session_dir: Path | None = None) -> Path | None:
+    """Resolve a video-folder or working-directory relative source, always contained by `video_dir`.
+
+    The one exception: a live session's recording, directly inside its own `session_dir` (relative to the working
+    directory, like every pipeline manifest path).
+    """
+    if session_dir is not None:
+        own = Path(path).resolve()
+        if own.parent == Path(session_dir).resolve() and own.suffix.lower() in _VIDEO_SUFFIXES and own.is_file():
+            return own
     if not path.is_absolute():
         if video_dir is None:
             return None

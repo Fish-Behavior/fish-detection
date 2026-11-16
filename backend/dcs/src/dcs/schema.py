@@ -176,6 +176,11 @@ WORKBOOK_HEADERS = (
 )
 
 
+# Compound of a recording with no workbook row (a camera session or an unmatched file), written by prepds
+# (`pipeline.UNLABELED`, same string). Such fish are predicted, never trained on.
+UNLABELED = "unknown"
+
+
 def video_id(sex: str, subject_id: str) -> str:
     """Gold folder name and index key, e.g. `F_0042`."""
     return f"{sex}_{subject_id}"

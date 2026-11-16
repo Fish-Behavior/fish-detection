@@ -11,7 +11,7 @@ mode: a camera as one more video source through the same pipeline.
 | I | `backend/prepds/src/prepds/` | Built; 328 of 352 trials processed; human review still to do |
 | II | `backend/dcs/src/dcs/` | Built and tested on synthetic data; first real run on the GPU box pending |
 | III | - | Living list; update it when an item closes |
-| IV | `backend/prepds/src/prepds/live.py` | U1 (live engine) built; U2-U3 to do |
+| IV | `backend/prepds/src/prepds/live.py`, review app `/api/live` | U1 (live engine) and U2 (shared finish, API) built; U3 (UI) to do |
 
 # Part I: Preprocessing Dataset System
 
@@ -1569,7 +1569,7 @@ only where the frames come from differs.
 | Unit | Scope | Status |
 |---|---|---|
 | U1 Live engine | `tracking.FishTracker` (the per-frame core of `track_video`; batch output identical, checked on a 35,824-frame real video); `live.OnlineLabeler` (current state from past frames only, IV.5); `live.list_cameras`; `live.LiveSession` (capture, track, label, record) | Built |
-| U2 Shared finish and API | Split `pipeline.process_trial` into "get tracks" and one shared finish step; a session without a workbook row (labels `unknown`) for files and cameras alike; endpoints to list cameras, start, poll status, preview and end a live session; classification through the existing predict path (check that `dcs featurize --videos` accepts unknown labels) | To do |
+| U2 Shared finish and API | `pipeline.finish_video`, the one finish step for files and live sessions; `pipeline.unlabeled_trial` for a recording with no workbook row (compound and dose `unknown`), so unmatched files are processable too; review-app endpoints `/api/live/cameras`, `/api/live` (start, status), `/api/live/preview`, `/api/live/stop`; an ended session is an ordinary session and is classified by the existing Predict (`dcs featurize --videos` accepts unknown labels); dcs drops unlabeled fish from training (D-080). Checked end to end on a real 20-minute recording: 35,824 frames captured in 35 s, finish about 1 s, Predict gives the same probabilities as the batch output for that fish | Built |
 | U3 UI | New session from a file or a camera; the same session page; live preview, current-state badge, per-second state strip; End, then the result with probabilities and the IV.5 caveats | To do |
 
 ## IV.5 Known limits
@@ -1578,3 +1578,5 @@ only where the frames come from differs.
 - **Pixel thresholds.** Tracking and labeling thresholds are in pixels, set on the lab's 320x240 footage; frames are scaled to 240 px high. A different camera or framing is a new camera epoch, and the classifier is unvalidated and camera-confounded (II.2.3): results from a new camera must say so.
 - **Recording format.** H.264 (`.mp4`) when OpenCV can write it, else VP8 (`.webm`), else `mp4v` (records, but browsers will not play it).
 - **One live session at a time.** The tracker seeds OpenCV's global random generator (NFR-002).
+- **Session names are UTC times** (`live_20261116T120000`); two starts in the same second are refused, not merged.
+- **The preview is a polled JPEG**, enough for a few frames per second; an MJPEG stream if it needs to be smoother.

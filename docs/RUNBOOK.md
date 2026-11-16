@@ -169,11 +169,25 @@ It stops at the first failed step and names it; details in `<PDS_OUTPUT_DIR>/doc
 | `export-index` | `dcs` reads the index, not the folders | Rebuilds `accepted_index.parquet` from ACCEPTED videos on disk |
 | `annotate` | Label frames for the detector | Frame-labeling page (box, 5 keypoints, Listing) over `outputs/phase15/` |
 
-**Live camera (in progress, PRD Part IV).** `prepds.live` holds the engine: `list_cameras()` lists the cameras that
-return a frame (an empty list means none), and `LiveSession` tracks, shows the current state and records one fish from
-a camera or a file. It uses the same tracker as `run`, so a file gives the same tracks either way
-(`backend/prepds/tests/vision/test_live.py` checks this and the live labels against the batch labels). There is no
-command or page for it yet; the API and the Live view come next.
+**Live camera and recordings without a workbook row (PRD Part IV).** A camera is one more video source. The review
+app (`prepds review`) has the live API; the Live view in the frontend comes next:
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/live/cameras` | Cameras that return a frame, as `{"cameras": [...]}`; an empty list means none was found (409 while a session uses one) |
+| `POST /api/live` `{"camera": 0}` | Starts a session `live_<UTC time>`: track, show the current state, record to `processed/<id>/recording.mp4` (`.webm` if the machine has no H.264 encoder). One at a time |
+| `GET /api/live` | Status: phase (`running`, `stopped` when the camera stops sending, `finishing`, `finished`, `failed`, `error`), current state, seconds, a per-second state strip |
+| `GET /api/live/preview` | The latest frame as a JPEG, with the fish marked; poll it for a preview |
+| `POST /api/live/stop` | **End**: the collected tracks go through the same labeling and export as a processed file. The session then appears in the session list like any video, and the usual Predict gives compound probabilities |
+
+A video file with no workbook row (dropped into the video folder) can now be analyzed too: its compound and dose are
+stored as `unknown`, and `dcs` never trains on such fish (D-080). On the lab computer the backend must be able to open
+the camera: Docker Desktop on macOS and Windows cannot pass a USB camera into the container (Windows: `usbipd-win` to
+attach it to WSL; Linux: `devices: [/dev/video0]` in Compose); how to run it there is still open (PRD IV.3).
+Tests: `backend/prepds/tests/vision/test_live.py` (live file = batch tracks; live labels against batch) and
+`backend/prepds/tests/review/test_live_api.py` (start, preview, busy rules, End, then an ordinary session; files
+without a workbook row; error cases). If a live session ends as `failed`, nothing was recorded or saving failed: the
+backend log has the reason, and a new session can start right away.
 
 Settings come from environment, then `.env`, then defaults. Main ones: `PDS_VIDEO_DIR`, `PDS_DB_PATH`,
 `PDS_OUTPUT_DIR` (default `outputs`), `PDS_ACCEPTED_DIR`, `PDS_WORKERS`, `PDS_CONFIG` (a thresholds/profile YAML).

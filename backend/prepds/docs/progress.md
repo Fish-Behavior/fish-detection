@@ -1432,3 +1432,17 @@ only; differs from batch by the freeze/listing confirmation delay, backward-only
 online labels = batch labels apart from the delay, camera listing with fakes, scaling and fps fallback, unopenable
 source, stop, breach/listing/frame gaps, codec fallback and duration cap). Full backend suite 1,616 passed (5 sandbox-blocked tests passed outside the sandbox). No unused code
 left: the old inline loop in `track_video` was replaced, not kept.
+
+### Phase 16 U2: shared finish and live API (2026-11-16)
+
+PRD Part IV. `pipeline.finish_video` is the one finish step (label, flag, export) that `process_trial` and an ended
+live session both call; `pipeline.unlabeled_trial` gives a recording with no workbook row a trial whose compound and
+dose are `unknown` (sex and subject_id split the video id, so dcs' folder-name check holds). Review app: `process` no
+longer requires a workbook match (unmatched files are analyzable; `processable` = has a source); new `/api/live/*`
+endpoints (cameras, start, status, preview, stop) inside `install_workspace`, sharing its settings and processing slot;
+a live recording lives in its session folder (`_resolve_source(..., session_dir)` allows exactly that); `.webm`
+accepted. dcs: gold training readers drop `unknown`-compound fish (D-080). Frontend: the "not processable" hint now
+says the source file is missing. Tests: `tests/review/test_live_api.py` (5), dcs gold test (1). End to end on F_277:
+live capture 35 s for 35,824 frames, finish about 1 s, Predict 200 with the batch output's probabilities (top class
+0.234 vs 0.2338). Full backend suite 1,623 passed (5 sandbox-blocked passed outside it); frontend 17 passed. Removed:
+the `unmatched_video` 409 and an unreachable JPEG-encode guard.

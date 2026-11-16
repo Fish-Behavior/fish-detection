@@ -775,7 +775,7 @@ function Workspace({ session: initialSession, sessions, selectSession, refresh, 
             {!hasTracking && <div className="processing-controls">
               <label>Reviewer <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} maxLength={100} /></label>
               <button onClick={() => void processVideo()} disabled={!session.processable}>Run analysis</button>
-              {!session.processable && <p className="muted">This video is not linked to a trial in the experiment workbook yet, so it cannot be analyzed.</p>}
+              {!session.processable && <p className="muted">The source video file is missing, so it cannot be analyzed.</p>}
             </div>}
             {error && (
               <p className="inline-error" role="alert">
