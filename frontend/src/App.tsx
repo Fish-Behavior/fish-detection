@@ -7,6 +7,7 @@ import {
 import type { SetStateAction } from 'react'
 import {
   COLORS,
+  autoPredictReviewer,
   effectiveSegments,
   emptyEdits,
   frameAt,
@@ -79,10 +80,8 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [selected, setSelected] = useState('')
   const [view, setView] = useState<'recordings' | 'live'>('recordings')
-  // After an analysis (a processed file or an ended live session) the drug prediction runs once, as this reviewer.
-  const [autoPredict, setAutoPredict] = useState<{ videoId: string; reviewer: string } | null>(null)
-  const analyzed = (videoId: string, reviewer: string) => {
-    if (reviewer) setAutoPredict({ videoId, reviewer })
+  // After an analysis (a processed file or an ended live session) open that session; its prediction then runs by itself.
+  const analyzed = (videoId: string) => {
     setView('recordings')
     void reload(videoId)
   }
@@ -116,7 +115,7 @@ export default function App() {
     <header className={`brand-header${load.status === 'ready' && load.session ? ' main-shell' : ''}`}>
       <img src={utLogo} alt="The University of Toledo" width="723" height="276" />
       <div className="header-actions">
-        <button className={view === 'live' ? 'primary' : ''} onClick={() => setView('live')} title="Record and analyze a fish from a camera">
+        <button className={view === 'live' ? 'primary' : ''} onClick={() => { if (pendingCount.current && !window.confirm('Autosave is unavailable in this browser. Discard unsaved review edits and open the live camera?')) return; setView('live') }} title="Record and analyze a fish from a camera">
           <Icon name="camera" />
           Live camera
         </button>
@@ -129,15 +128,13 @@ export default function App() {
     {view === 'live' ? <LiveView onFinished={analyzed} onClose={() => setView('recordings')} /> : load.status === 'loading' ? <Empty title="Loading…" /> : load.status === 'error'
       ? <Empty title={load.stage === 'connection' ? 'Could not connect to the analysis server' : load.stage === 'inventory' ? 'Could not load the recording list' : 'Could not load this recording'} message={load.message} /> : !load.session
       ? <Empty title="No recordings yet" message="Add recordings to the configured video folder and press Refresh, or record one with Live camera." />
-      : <Workspace key={load.session.video_id + ':' + load.session.review?.revision} session={load.session} sessions={sessions} selectSession={(id) => void reload(id)} onPendingChange={(count) => { pendingCount.current = count }}
-        autoPredict={autoPredict?.videoId === load.session.video_id ? autoPredict.reviewer : undefined}
-        onAutoPredictStarted={() => setAutoPredict(null)} onAnalyzed={analyzed} />}
+      : <Workspace key={load.session.video_id + ':' + load.session.review?.revision} session={load.session} sessions={sessions} selectSession={(id) => void reload(id)} onPendingChange={(count) => { pendingCount.current = count }} onAnalyzed={analyzed} />}
   </>
 }
 
-function Workspace({ session: initialSession, sessions, selectSession, onPendingChange, autoPredict, onAutoPredictStarted, onAnalyzed }: {
+function Workspace({ session: initialSession, sessions, selectSession, onPendingChange, onAnalyzed }: {
   session: SessionData; sessions: SessionSummary[]; selectSession: (id: string) => void; onPendingChange: (count: number) => void
-  autoPredict?: string; onAutoPredictStarted: () => void; onAnalyzed: (videoId: string, reviewer: string) => void
+  onAnalyzed: (videoId: string) => void
 }) {
   const [session, setSession] = useState(initialSession)
   const [review, setReview] = useState<ReviewData>(session.review!)
@@ -459,7 +456,7 @@ function Workspace({ session: initialSession, sessions, selectSession, onPending
       processingStatus(session.video_id).then((value) => {
         if (!alive) return
         setProcessing(value)
-        if (value.status === 'processed') onAnalyzed(session.video_id, reviewer.trim())
+        if (value.status === 'processed') onAnalyzed(session.video_id)
         if (['failed', 'interrupted'].includes(value.status)) setError(value.message)
       }, (e) => { if (alive) { setError(e.message); setProcessing({ status: 'interrupted', message: e.message }) } })
     }, 2000)
@@ -489,11 +486,11 @@ function Workspace({ session: initialSession, sessions, selectSession, onPending
   }
   // Same for every source: once a recording is analyzed, its drug prediction runs without another click.
   useEffect(() => {
-    if (!autoPredict || !session.has_tracking || !session.inference_available || session.predictions) return
-    onAutoPredictStarted()
-    setReviewer(autoPredict)
+    const by = pendingTotal ? null : autoPredictReviewer(session, hasEdits(edits))
+    if (!by) return
+    setReviewer(by)
     announce('Running the drug prediction…')
-    void predictCompound(autoPredict)
+    void predictCompound(by)
   }, [])
   const changeTab = (next: 'dashboard' | 'review') => {
     setTab(next)

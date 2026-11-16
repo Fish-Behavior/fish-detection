@@ -21,6 +21,7 @@ import {
   secondRuns,
   sessionName,
   sessionStamp,
+  autoPredictReviewer,
 } from './model.ts'
 import type { Behavior, SessionData } from './model.ts'
 
@@ -293,4 +294,14 @@ test('sessionName keeps what the backend accepts and sessionStamp matches its lo
   assert.equal(sessionName('___'), '')
   assert.equal(sessionName('a'.repeat(50)).length, 40)
   assert.equal(sessionStamp(new Date(2026, 10, 16, 9, 5, 7)), '2026-11-16_09-05-07')
+})
+
+test('autoPredictReviewer runs the prediction once per app analysis, as the reviewer the server kept', () => {
+  const ready = { processing: { status: 'processed', message: '', reviewer: ' Ann ' }, has_tracking: true, inference_available: true, predictions: null }
+  assert.equal(autoPredictReviewer(ready, false), 'Ann')
+  assert.equal(autoPredictReviewer(ready, true), null) // corrections: the reviewer reruns it by hand
+  assert.equal(autoPredictReviewer({ ...ready, predictions: { video_id: 'v', predicted: 'VEH', 'p:VEH': 1 } }, false), null) // once
+  assert.equal(autoPredictReviewer({ ...ready, inference_available: false }, false), null)
+  assert.equal(autoPredictReviewer({ ...ready, processing: { status: 'running', message: '', reviewer: 'Ann' } }, false), null)
+  assert.equal(autoPredictReviewer({ ...ready, processing: { status: 'processed', message: '' } }, false), null) // batch run: no reviewer
 })

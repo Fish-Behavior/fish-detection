@@ -1465,3 +1465,18 @@ Follow-up (owner): live sessions are named by the user when starting, `<name>_<l
 and dashes (the frontend's `sessionName` cleans what is typed and previews the id). The camera caveat now reads the
 backend's `live_recording` flag instead of an id prefix. Browser-checked: "Tank A dose 1" gave
 `Tank-A-dose-1_2026-11-16_11-11-13`, then the next suggestion was `Video2`.
+
+### Phase 16: cross-provider review fixes (2026-11-16)
+
+Codex (gpt-6-astra) reviewed PR #28 over three rounds; every finding was checked against the code before fixing.
+Fixed: `LiveSession`'s stop flag renamed to `_stop_event` (`_stop` shadowed a `Thread` method on Python 3.11/3.12,
+so End crashed there; reproduced on 3.12); a live session cannot be replaced while it is being saved or while its
+capture thread is still alive, and a stale save never overwrites a newer session; Freezing/Listing timers reset at a
+frame gap; a capture error mid-recording fails the session with its cause instead of saving it; the Live camera
+button asks before discarding unsaved review edits; the Live view looks for cameras again after a resumed session
+ends; looking for cameras and starting a recording never overlap (one camera lock, checked under the live lock).
+The automatic drug prediction is now driven by server state: the analysis record (`processing.json`, also written
+when a live session is saved) keeps who started it, and opening a session the app analyzed but has not predicted
+runs the prediction as that reviewer (`model.autoPredictReviewer`), so a reload or leaving the page never loses it.
+Tests added in `test_live.py`, `test_live_api.py` and `model.test.ts`. Full backend suite 1,625 passed (5
+port-dependent tests deselected in the sandbox); frontend 20 passed.

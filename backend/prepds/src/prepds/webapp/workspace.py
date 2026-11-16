@@ -101,6 +101,7 @@ class LiveIn(Input):
     camera: int = Field(ge=0, lt=MAX_CAMERA_INDEX, strict=True)
     # The session is named `<name>_<local date>_<time>`; no underscore in `name`, so the id splits into it and the time.
     name: Annotated[str, Field(min_length=1, max_length=40, pattern=r'^[A-Za-z0-9][A-Za-z0-9-]*$')] | None = None
+    reviewer: Reviewer | None = None  # recorded with the saved session, as for a file's analysis
 
 
 class Message(Input):
@@ -657,8 +658,10 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
         return f'Video{recorded + 1}'
 
     # --- live sessions: a camera is one more source. One session at a time (the tracker seeds OpenCV's global RNG).
-    live = {'session': None, 'vid': None, 'finish': None, 'message': ''}  # finish: None, finishing, finished, failed
+    live = {'session': None, 'vid': None, 'finish': None, 'message': '', 'reviewer': None}  # finish: None, finishing, finished, failed
     live_lock = threading.Lock()
+    # Held while camera indices are probed. Taken and checked under live_lock, so probing and starting a capture never overlap.
+    camera_lock = threading.Lock()
 
     def live_status():
         session = live['session']
@@ -671,10 +674,14 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
     @router.get('/live/cameras')
     def cameras():
         with live_lock:
-            busy = live['session'] is not None and live['session'].is_alive()
-        if busy:
-            fail(409, 'live_busy', 'A live session is using a camera. End it before looking for cameras.')
-        return {'cameras': list_cameras()}
+            if live['session'] is not None and live['session'].is_alive():
+                fail(409, 'live_busy', 'A live session is using a camera. End it before looking for cameras.')
+            if not camera_lock.acquire(blocking=False):
+                fail(409, 'camera_busy', 'Already looking for cameras. Try again in a moment.')
+        try:
+            return {'cameras': list_cameras()}
+        finally:
+            camera_lock.release()
 
     @router.get('/live')
     def live_get():
@@ -687,7 +694,15 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
             fail(503, 'processing_unconfigured', 'Start prepds review with pipeline settings to enable live sessions.')
         thresholds = labeling_thresholds(settings.params)
         with live_lock:
-            if live['session'] is not None and live['finish'] not in ('finished', 'failed') and live['session'].status()['phase'] != 'error':
+            if camera_lock.locked():
+                fail(409, 'camera_busy', 'Looking for cameras right now. Try again in a moment.')
+            # A capture thread that outlived its stop (a hung camera read) still holds the camera and the recording file.
+            if live['session'] is not None and live['session'].is_alive():  # never two threads on one camera
+                fail(409, 'live_busy', 'A live session is already open. End it first.' if live['finish'] is None
+                     else 'The previous live session is still releasing the camera. Try again in a moment.')
+            # Replaceable only once its finish is done, or it failed to capture and no finish is pending.
+            if live['session'] is not None and live['finish'] not in ('finished', 'failed') and not (
+                    live['finish'] is None and live['session'].status()['phase'] == 'error'):
                 fail(409, 'live_busy', 'A live session is already open. End it first.')
             vid = f"{body.name or suggested_name()}_{clock().astimezone():%Y-%m-%d_%H-%M-%S}"
             folder = directory(vid)
@@ -695,7 +710,7 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
                 fail(409, 'live_exists', f'A session named {vid} already exists. Choose another name, or retry in a second.')
             folder.mkdir(parents=True)
             session = LiveSession(body.camera, folder / 'recording', thresholds=thresholds)
-            live.update(session=session, vid=vid, finish=None, message='')
+            live.update(session=session, vid=vid, finish=None, message='', reviewer=body.reviewer)
             session.start()
             return live_status()
 
@@ -717,33 +732,41 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
     @router.post('/live/stop', status_code=202)
     def live_stop(tasks: BackgroundTasks):
         with live_lock:
-            session, vid = live['session'], live['vid']
+            session, vid, reviewer = live['session'], live['vid'], live['reviewer']
             if session is None or live['finish'] is not None:
                 fail(409, 'live_not_running', 'There is no open live session to end.')
             live['finish'] = 'finishing'
         session.stop()
         session.join(timeout=30)
-        tasks.add_task(finish_live, session, vid)
+        tasks.add_task(finish_live, session, vid, reviewer)
         with live_lock:
             return live_status()
 
-    def finish_live(session, vid):
+    def finish_live(session, vid, reviewer):
         try:
-            if session.is_alive() or not session.tracks or session.video_path is None:
-                raise RuntimeError('the live session recorded nothing, or did not stop')
-            frame, _ = session.latest()
-            fps, n = session.status()['fps'], len(session.tracks)
-            asset = VideoAsset(path=session.video_path, duration_s=n / fps, fps=fps, frame_count=n,
-                               resolution=(int(frame.shape[1]), int(frame.shape[0])))
-            config = run_config()
-            with process_slot:
-                finish_video(unlabeled_trial(vid, session.video_path, config.processed_at.date()), asset, session.tracks, config)
-            outcome = ('finished', '')
+            status = session.status()
+            if status['phase'] == 'error':  # a recording cut short by a capture error is never exported as complete
+                outcome = ('failed', f"The recording stopped with an error, so nothing was saved: {status['error']}")
+            else:
+                if session.is_alive() or not session.tracks or session.video_path is None:
+                    raise RuntimeError('the live session recorded nothing, or did not stop')
+                frame, _ = session.latest()
+                fps, n = session.status()['fps'], len(session.tracks)
+                asset = VideoAsset(path=session.video_path, duration_s=n / fps, fps=fps, frame_count=n,
+                                   resolution=(int(frame.shape[1]), int(frame.shape[0])))
+                config = run_config()
+                with process_slot:
+                    finish_video(unlabeled_trial(vid, session.video_path, config.processed_at.date()), asset, session.tracks, config)
+                # The same record a file's analysis leaves: the frontend runs the drug prediction from it, once.
+                atomic_json(directory(vid) / 'processing.json', {'status': 'processed', 'message': '', 'reviewer': reviewer,
+                                                                 'updated_at': clock().isoformat()})
+                outcome = ('finished', '')
         except Exception:
             LOG.exception('Finishing live session %s failed', vid)
             outcome = ('failed', 'Saving the live session failed. Check the backend log.')
         with live_lock:
-            live.update(finish=outcome[0], message=outcome[1])
+            if live['session'] is session:  # a stale finalizer never overwrites a newer session
+                live.update(finish=outcome[0], message=outcome[1])
 
     @router.post('/ask', response_model=Answer)
     def ask(body: Question):

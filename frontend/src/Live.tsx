@@ -9,7 +9,7 @@ const elapsed = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:$
 
 // A camera is one more video source: while recording only the current behavior is shown; End saves the session
 // through the same analysis as a video file, then the app opens it like any recording.
-export default function LiveView({ onFinished, onClose }: { onFinished: (videoId: string, reviewer: string) => void; onClose: () => void }) {
+export default function LiveView({ onFinished, onClose }: { onFinished: (videoId: string) => void; onClose: () => void }) {
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [cameras, setCameras] = useState<Camera[] | null>(null) // null while looking
   const [camera, setCamera] = useState(0)
@@ -44,14 +44,17 @@ export default function LiveView({ onFinished, onClose }: { onFinished: (videoId
     return () => clearInterval(poll)
   }, [session?.video_id, phase])
   useEffect(() => {
-    if (phase === 'finished' && following.current && session) { following.current = false; onFinished(session.video_id, reviewer.trim()) }
+    if (phase === 'finished' && following.current && session) { following.current = false; onFinished(session.video_id) }
+  }, [phase])
+  useEffect(() => { // a session resumed on mount skipped the camera search; run it once that session is over
+    if ((phase === 'failed' || phase === 'finished') && cameras === null) void findCameras()
   }, [phase])
 
   const start = async () => {
     try { validateReviewer(reviewer) } catch (e) { setError((e as Error).message); return }
     try { localStorage.setItem(REVIEWER_KEY, reviewer.trim()) } catch { /* private window: keep it for this visit only */ }
     setBusy(true); setError('')
-    try { setStatus(await startLive(camera, sessionName(name) || undefined)); following.current = true } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+    try { setStatus(await startLive(camera, reviewer.trim(), sessionName(name) || undefined)); following.current = true } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
   const end = async () => {
     setBusy(true); setError('')

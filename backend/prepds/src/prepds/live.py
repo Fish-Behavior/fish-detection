@@ -89,6 +89,7 @@ class OnlineLabeler:
     def update(self, track: Track) -> BehaviorState:
         if self._recent and track.frame_idx != self._recent[-1].frame_idx + 1:
             self._recent.clear()  # a frame_idx gap is never bridged, as in batch
+            self._freeze_since = self._listing_since = None  # nor does a bout continue across it
         self._recent.append(track)
         partner = self._recent[0]
         valid = (
@@ -156,14 +157,14 @@ class LiveSession(threading.Thread):
         self.max_duration_s, self._opener = max_duration_s, opener
         self.tracks: list[Track] = []
         self.video_path: Path | None = None
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()  # not `_stop`: Thread has a method of that name before Python 3.13
         self._lock = threading.Lock()
         self._latest: tuple[np.ndarray, Track] | None = None
         self._status = {"phase": "starting", "fps": None, "frame_count": 0, "t_sec": 0.0, "state": None,
                         "detected": False, "speed_px_per_s": None, "seconds": [], "error": None}
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def status(self) -> dict:
         with self._lock:
@@ -198,7 +199,7 @@ class LiveSession(threading.Thread):
                 self._status.update(phase="running", fps=fps)
             started, second, states = time.monotonic(), 0, Counter()
             frame_idx = 0
-            while not self._stop.is_set():
+            while not self._stop_event.is_set():
                 ok, frame = capture.read()
                 if not ok or frame is None:
                     break

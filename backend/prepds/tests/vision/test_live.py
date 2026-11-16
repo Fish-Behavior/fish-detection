@@ -158,6 +158,14 @@ def test_online_breach_listing_and_frame_gaps_follow_the_batch_rules() -> None:
     assert step(40) == BehaviorState.UNDETERMINED  # frame_idx gap: no partner, the bout clock restarts
 
 
+def test_a_listing_bout_never_bridges_a_frame_gap() -> None:
+    labeler = OnlineLabeler(FPS, listing_orientation_deviation_deg=30.0, min_listing_bout_s=1.0, **THRESHOLDS)
+    states = [labeler.update(Track(frame_idx=i, t_sec=i / FPS, x=50.0, y=120.0, orientation_deg=150.0,
+                                   y_from_frame_top=120.0, detected=True))
+              for i in (*range(0, 6), *range(40, 46))]
+    assert BehaviorState.LISTING_LORR not in states  # two 0.5 s runs, each under the 1 s bout, as in batch
+
+
 def test_codec_fallback_and_duration_cap(tmp_path, monkeypatch) -> None:
     import prepds.live as live
     from prepds.tracking import FishTracker

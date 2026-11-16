@@ -87,7 +87,7 @@ export interface SessionData {
   stale?: ReturnType<typeof staleFor>
   reviewed_segments?: Segment[] | null
   warnings?: string[]
-  processing?: { status: string; message: string }
+  processing?: { status: string; message: string; reviewer?: string | null }
   processable?: boolean
   has_tracking?: boolean
   chat_available?: boolean
@@ -489,4 +489,12 @@ export function sessionName(raw: string): string {
 export function sessionStamp(date: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`
+}
+
+// Who the drug prediction runs as, by itself, when a session opens: once the app has analyzed it (a file's Run
+// analysis or an ended live session) and no prediction exists yet. The server keeps that reviewer in the processing
+// record, so a reload or leaving the page during the analysis never loses the prediction. null: nothing to run.
+export function autoPredictReviewer(session: Pick<SessionData, 'processing' | 'has_tracking' | 'inference_available' | 'predictions'>, edited: boolean): string | null {
+  const by = session.processing?.status === 'processed' ? session.processing.reviewer?.trim() ?? '' : ''
+  return by && session.has_tracking && session.inference_available && !session.predictions && !edited ? by : null
 }
