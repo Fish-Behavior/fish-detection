@@ -91,6 +91,9 @@ export interface SessionData {
   processable?: boolean
   has_tracking?: boolean
   chat_available?: boolean
+  inference_available?: boolean
+  live_recording?: boolean
+  model_verdict?: string | null
   scene: Scene
   overlay: OverlayWindow
   segments: Segment[]
@@ -143,6 +146,30 @@ export interface SecondExplanation {
   votes: Record<string, number>
   rules: { state: string; frames: number; wins: boolean; detail: string }[]
 }
+export interface Camera {
+  index: number
+  name: string
+  width: number
+  height: number
+}
+// Mirrors GET /api/live. phase: starting, running, stopped (the camera stopped sending), error, then after End
+// finishing, finished or failed. `seconds` holds the most frequent live state of each finished second.
+export type LiveStatus =
+  | { active: false; phase?: undefined; suggested_name: string }
+  | {
+      active: boolean
+      video_id: string
+      phase: 'starting' | 'running' | 'stopped' | 'error' | 'finishing' | 'finished' | 'failed'
+      fps: number | null
+      frame_count: number
+      t_sec: number
+      state: Behavior | null
+      detected: boolean
+      speed_px_per_s: number | null
+      seconds: Behavior[]
+      message: string
+      suggested_name: string
+    }
 export interface SessionSummary {
   video_id: string
   name: string
@@ -440,4 +467,26 @@ export function parseDraft(raw: string | null, baseline: string | null): ReviewD
   } catch {
     return null
   }
+}
+
+// Live strip: [A, A, B] -> [{ start: 0, end: 2, state: A }, { start: 2, end: 3, state: B }] (seconds).
+export function secondRuns(seconds: Behavior[]): { start: number; end: number; state: Behavior }[] {
+  const runs: { start: number; end: number; state: Behavior }[] = []
+  seconds.forEach((state, i) => {
+    const last = runs[runs.length - 1]
+    if (last && last.state === state) last.end = i + 1
+    else runs.push({ start: i, end: i + 1, state })
+  })
+  return runs
+}
+
+// What the user types as a live session name -> what the backend accepts (letters, digits, dashes; 40 at most).
+// "Tank A / dose_1" -> "Tank-A-dose1"
+export function sessionName(raw: string): string {
+  return raw.trim().replace(/\s+/g, '-').replace(/[^A-Za-z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-+/, '').slice(0, 40)
+}
+// The local time part of a session id, as the backend writes it: 2026-11-16_10-52-38
+export function sessionStamp(date: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`
 }

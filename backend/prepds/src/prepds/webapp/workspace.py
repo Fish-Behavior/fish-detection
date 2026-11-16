@@ -99,6 +99,8 @@ class ProcessIn(Input):
     reviewer: Reviewer
 class LiveIn(Input):
     camera: int = Field(ge=0, lt=MAX_CAMERA_INDEX, strict=True)
+    # The session is named `<name>_<local date>_<time>`; no underscore in `name`, so the id splits into it and the time.
+    name: Annotated[str, Field(min_length=1, max_length=40, pattern=r'^[A-Za-z0-9][A-Za-z0-9-]*$')] | None = None
 
 
 class Message(Input):
@@ -191,6 +193,12 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
     from prepds.webapp.app import _ID, _VIDEO_SUFFIXES, _resolve_source
 
     router = APIRouter(prefix='/api')
+    # The trained model's own cross-validation verdict (useful / not useful / undecided), shown beside its percentages.
+    try:
+        model_info = json.loads((model_run / 'model/model_info.json').read_text(encoding='utf-8')) if model_run else {}
+    except (OSError, ValueError):
+        model_info = {}  # predict reports a broken model run itself
+    model_verdict = model_info.get('verdict') if isinstance(model_info, dict) and isinstance(model_info.get('verdict'), str) else None
     active: set[str] = set()
     active_lock = threading.Lock()
     process_slot = threading.Semaphore(1)
@@ -428,7 +436,8 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
                 'measurements': derived['measurements'] if derived else measurements_of(tracks_of(frames), scene['waterline']) if frames is not None else [],
                 'predictions': prediction, 'review': {k: v for k, v in value.items() if k != 'derived'}, 'baseline': value['baseline'],
                 'stale': stale(value), 'warnings': warnings, 'processing': job(vid), 'processable': r.get('source') is not None,
-                'has_tracking': frames is not None, 'chat_available': bool(chat_url),
+                'has_tracking': frames is not None, 'chat_available': bool(chat_url), 'live_recording': is_live_recording(vid, a.path),
+                'inference_available': bool(classifier_root and model_run), 'model_verdict': model_verdict,
                 'model_provenance': model_result and {'run': model_result['run'], 'baseline': model_result['baseline']}}
 
     def check_revision(vid, r, body):
@@ -637,8 +646,15 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
         return RunConfig(processed_dir, labeling_thresholds(settings.params), __version__,
                          str(settings.params['calibration_profile']['version']), clock())
 
+    def is_live_recording(vid, source):
+        return source is not None and source.parent == directory(vid).resolve()  # a camera recording lives in its session folder
+
     def display_name(vid, source):
-        return vid if source is None or source.parent == directory(vid).resolve() else source.name
+        return 'Live camera recording' if is_live_recording(vid, source) else source.name if source else vid
+
+    def suggested_name():
+        recorded = sum(1 for d in processed_dir.iterdir() if d.is_dir() and any(d.glob('recording.*'))) if processed_dir.is_dir() else 0
+        return f'Video{recorded + 1}'
 
     # --- live sessions: a camera is one more source. One session at a time (the tracker seeds OpenCV's global RNG).
     live = {'session': None, 'vid': None, 'finish': None, 'message': ''}  # finish: None, finishing, finished, failed
@@ -647,9 +663,9 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
     def live_status():
         session = live['session']
         if session is None:
-            return {'active': False}
+            return {'active': False, 'suggested_name': suggested_name()}
         status = session.status()
-        return {**status, 'active': live['finish'] not in ('finished', 'failed'), 'video_id': live['vid'],
+        return {**status, 'suggested_name': suggested_name(), 'active': live['finish'] not in ('finished', 'failed'), 'video_id': live['vid'],
                 'phase': live['finish'] or status['phase'], 'message': live['message'] or status['error'] or ''}
 
     @router.get('/live/cameras')
@@ -673,10 +689,10 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
         with live_lock:
             if live['session'] is not None and live['finish'] not in ('finished', 'failed') and live['session'].status()['phase'] != 'error':
                 fail(409, 'live_busy', 'A live session is already open. End it first.')
-            vid = f"live_{clock():%Y%m%dT%H%M%S}"
+            vid = f"{body.name or suggested_name()}_{clock().astimezone():%Y-%m-%d_%H-%M-%S}"
             folder = directory(vid)
             if folder.exists():
-                fail(409, 'live_exists', 'A live session with this name already exists. Retry in a second.')
+                fail(409, 'live_exists', f'A session named {vid} already exists. Choose another name, or retry in a second.')
             folder.mkdir(parents=True)
             session = LiveSession(body.camera, folder / 'recording', thresholds=thresholds)
             live.update(session=session, vid=vid, finish=None, message='')

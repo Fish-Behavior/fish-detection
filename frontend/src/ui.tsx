@@ -12,6 +12,7 @@ const paths = {
   reset: 'M4 10a8 8 0 1 1 2 8M4 4v6h6',
   close: 'm6 6 12 12M6 18 18 6',
   info: 'M12 11v6M12 7h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  camera: 'M3 8h4l2-3h6l2 3h4v11H3V8ZM12 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z',
 } as const
 export function Icon({
   name,

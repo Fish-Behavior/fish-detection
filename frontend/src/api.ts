@@ -1,4 +1,4 @@
-import type { ChatAnswer, ChatQuestion, Edits, OverlayWindow, ReviewData, ReviewToolsData, SecondExplanation, SessionData, SessionSummary } from './model.ts'
+import type { Camera, ChatAnswer, ChatQuestion, Edits, LiveStatus, OverlayWindow, ReviewData, ReviewToolsData, SecondExplanation, SessionData, SessionSummary } from './model.ts'
 
 export class ApiError extends Error {
   status: number
@@ -43,3 +43,9 @@ export const predict = (session: SessionData, review: ReviewData, reviewer: stri
 export const startProcessing = (id: string, reviewer: string) => request<{ status: string; message: string }>(`${path(id)}/process`, { method: 'POST', body: JSON.stringify({ reviewer }) })
 export const processingStatus = (id: string) => request<{ status: string; message: string }>(`${path(id)}/processing`)
 export const askChat = (q: ChatQuestion) => request<ChatAnswer>('/api/ask', { method: 'POST', body: JSON.stringify(q) }, 250000)  // a local model answering with 2-3 tool rounds can take minutes; the backend gives up at 240 s
+// Live camera sessions (backend /api/live): a camera is one more video source; End turns it into an ordinary session.
+export const listCameras = () => request<{ cameras: Camera[] }>('/api/live/cameras', {}, 60000)  // probing each camera index can take seconds
+export const liveStatus = () => request<LiveStatus>('/api/live')
+export const startLive = (camera: number, name?: string) => request<LiveStatus>('/api/live', { method: 'POST', body: JSON.stringify(name ? { camera, name } : { camera }) })
+export const endLive = () => request<LiveStatus>('/api/live/stop', { method: 'POST' }, 60000)
+export const livePreviewUrl = (n: number) => `/api/live/preview?n=${n}`

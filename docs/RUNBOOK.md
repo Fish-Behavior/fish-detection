@@ -68,6 +68,26 @@ If unsure what the fish is doing: do not accept, reject and note video, time and
 video is worse than a missing one. The tracking tools (waterline, ROI, tracking point, boxes, keypoints) are for
 developers; ignore them. Watch for the fish's reflection at the surface, which the tracker can follow instead.
 
+### Analyzing a new fish: a video file or the live camera
+
+Both go through the same analysis and end on the same Dashboard; no workbook entry is needed.
+
+- **A video file:** put it in the video folder, press **Refresh**, pick it in the list, type your name and press
+  **Run analysis**. When the analysis finishes, the drug prediction runs by itself.
+- **The live camera:** press **Live camera** (top right). Pick the camera (**No cameras detected** means the backend
+  computer cannot open one: connect it, then **Look again**), optionally give the session a **Session name** (it is saved
+  as that name plus the date and time, e.g. `TankA_2026-11-16_10-52-38`; left empty it becomes `Video1_...`,
+  `Video2_...`), type your name, press **Start recording**. While it
+  records you see the camera, the fish marked with a green cross, the **current behavior** and a strip of the
+  behavior per second. Press **End and analyze** when you are done: the recording is analyzed like a video file,
+  then the app opens it on the Dashboard as **Live camera recording** and runs the drug prediction.
+
+The live behavior is a preview: a state such as Freezing/Drift shows once it has lasted its minimum time, and the
+saved labels are worked out again from the whole recording when you end. Under the percentages, **Model check**
+says how the model did in its own cross-validation; today it says "no better than simple baselines", so the
+percentages are not validated. A live recording also carries a reminder that the model learned from the lab's own
+20-minute recordings: another camera, framing or a shorter session can shift the result.
+
 ---
 
 ## 2. Command cheat sheet
@@ -175,7 +195,7 @@ app (`prepds review`) has the live API; the Live view in the frontend comes next
 | Endpoint | What it does |
 |---|---|
 | `GET /api/live/cameras` | Cameras that return a frame, as `{"cameras": [...]}`; an empty list means none was found (409 while a session uses one) |
-| `POST /api/live` `{"camera": 0}` | Starts a session `live_<UTC time>`: track, show the current state, record to `processed/<id>/recording.mp4` (`.webm` if the machine has no H.264 encoder). One at a time |
+| `POST /api/live` `{"camera": 0, "name": "TankA"}` | Starts a session `<name>_<local date>_<time>` (e.g. `TankA_2026-11-16_10-52-38`; without a name `Video<N>`, numbered after the camera sessions so far; letters, digits and dashes): track, show the current state, record to `processed/<id>/recording.mp4` (`.webm` if the machine has no H.264 encoder). One at a time |
 | `GET /api/live` | Status: phase (`running`, `stopped` when the camera stops sending, `finishing`, `finished`, `failed`, `error`), current state, seconds, a per-second state strip |
 | `GET /api/live/preview` | The latest frame as a JPEG, with the fish marked; poll it for a preview |
 | `POST /api/live/stop` | **End**: the collected tracks go through the same labeling and export as a processed file. The session then appears in the session list like any video, and the usual Predict gives compound probabilities |

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import itertools
+import re
 import shutil
 import time
 from pathlib import Path
@@ -58,13 +59,13 @@ def _wait(client, condition, timeout=10.0):
 def test_live_session_runs_ends_and_becomes_an_ordinary_session(app):
     make, processed, _, opened = app
     client = make()
-    assert client.get("/api/live").json() == {"active": False}
+    assert client.get("/api/live").json() == {"active": False, "suggested_name": "Video1"}
     assert client.get("/api/live/cameras").json()["cameras"][0]["name"] == "Camera 0"
 
     started = client.post("/api/live", json={"camera": 0})
     assert started.status_code == 201 and opened == [0]
     vid = started.json()["video_id"]
-    assert vid.startswith("live_20261116T1200")
+    assert re.fullmatch(r"Video1_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d", vid)  # default name, local date and time
     running = _wait(client, lambda s: s["frame_count"] > 15)
     assert running["phase"] == "running" and running["active"] and running["state"]
     preview = client.get("/api/live/preview")
@@ -80,12 +81,15 @@ def test_live_session_runs_ends_and_becomes_an_ordinary_session(app):
     assert client.post("/api/live/stop").status_code == 409
 
     row = next(row for row in client.get("/api/sessions").json() if row["video_id"] == vid)
-    assert row["name"] == vid and row["processing_status"] == "processed" and row["processable"]
+    assert row["name"] == "Live camera recording" and row["processing_status"] == "processed" and row["processable"]
     session = client.get(f"/api/sessions/{vid}").json()
-    assert session["has_tracking"] and session["segments"] and session["name"] == vid
+    assert session["has_tracking"] and session["segments"] and session["name"] == "Live camera recording"
+    assert session["inference_available"] is False and session["model_verdict"] is None  # no classifier configured here
     assert client.get(session["video_url"]).status_code == 200
     manifest = review_store.load_manifest(processed / vid)
-    assert (manifest.compound, manifest.concentration_mM, manifest.sex) == (UNLABELED, UNLABELED, "live")
+    assert (manifest.compound, manifest.concentration_mM, manifest.sex) == (UNLABELED, UNLABELED, "Video1")
+    assert session["live_recording"] is True
+    assert client.get("/api/live").json()["suggested_name"] == "Video2"  # numbered after the camera sessions so far
     assert manifest.video_path.parent.name == vid and manifest.video_path.stem == "recording"
 
 
@@ -129,3 +133,35 @@ def test_unlabeled_trial_round_trips_the_video_id():
     assert (trial.sex, trial.subject_id, trial.compound) == ("raw", "ab12", UNLABELED)
     with pytest.raises(ValueError):
         unlabeled_trial("nounderscore", Path("x.mp4"), dt.date(2026, 11, 16))
+
+
+def test_session_reports_the_configured_models_own_verdict(tmp_path):
+    processed, sources = tmp_path / "processed", tmp_path / "videos"
+    processed.mkdir(); sources.mkdir()
+    shutil.copy(SYNTH, sources / "fish.mp4")
+    root, run = tmp_path / "dcs", tmp_path / "run"
+    (root / "src/dcs").mkdir(parents=True); (run / "model").mkdir(parents=True)
+    (run / "model/model_info.json").write_text('{"verdict": "not useful"}')
+    client = TestClient(create_app(processed, tmp_path / "accepted", video_dir=sources, classifier_root=root, model_run=run,
+                                   allowed_hosts=("testserver",)))
+    vid = client.get("/api/sessions").json()[0]["video_id"]
+    session = client.get(f"/api/sessions/{vid}").json()
+    assert session["inference_available"] is True and session["model_verdict"] == "not useful"
+    (run / "model/model_info.json").write_text("{broken")
+    broken = TestClient(create_app(processed, tmp_path / "accepted", video_dir=sources, classifier_root=root, model_run=run,
+                                   allowed_hosts=("testserver",)))
+    assert broken.get(f"/api/sessions/{vid}").json()["model_verdict"] is None  # an unreadable run never blocks startup
+
+
+def test_the_user_names_a_live_session_and_bad_names_are_refused(app):
+    make, _, _, _ = app
+    client = make()
+    for bad in ("Tank_A", "Tank A", "-tank", "x" * 41, ""):
+        assert client.post("/api/live", json={"camera": 0, "name": bad}).status_code == 422, bad
+    vid = client.post("/api/live", json={"camera": 0, "name": "TankA-dose1"}).json()["video_id"]
+    assert vid.startswith("TankA-dose1_")
+    _wait(client, lambda s: s["frame_count"] > 0)
+    client.post("/api/live/stop")
+    assert _wait(client, lambda s: s["phase"] in ("finished", "failed"))["phase"] == "finished"
+    session = client.get(f"/api/sessions/{vid}").json()
+    assert session["live_recording"] is True and session["name"] == "Live camera recording"

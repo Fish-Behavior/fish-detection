@@ -11,7 +11,7 @@ mode: a camera as one more video source through the same pipeline.
 | I | `backend/prepds/src/prepds/` | Built; 328 of 352 trials processed; human review still to do |
 | II | `backend/dcs/src/dcs/` | Built and tested on synthetic data; first real run on the GPU box pending |
 | III | - | Living list; update it when an item closes |
-| IV | `backend/prepds/src/prepds/live.py`, review app `/api/live` | U1 (live engine) and U2 (shared finish, API) built; U3 (UI) to do |
+| IV | `backend/prepds/src/prepds/live.py`, review app `/api/live`, `frontend/src/Live.tsx` | Built (U1-U3); camera on the lab computer to test (IV.3) |
 
 # Part I: Preprocessing Dataset System
 
@@ -1570,7 +1570,7 @@ only where the frames come from differs.
 |---|---|---|
 | U1 Live engine | `tracking.FishTracker` (the per-frame core of `track_video`; batch output identical, checked on a 35,824-frame real video); `live.OnlineLabeler` (current state from past frames only, IV.5); `live.list_cameras`; `live.LiveSession` (capture, track, label, record) | Built |
 | U2 Shared finish and API | `pipeline.finish_video`, the one finish step for files and live sessions; `pipeline.unlabeled_trial` for a recording with no workbook row (compound and dose `unknown`), so unmatched files are processable too; review-app endpoints `/api/live/cameras`, `/api/live` (start, status), `/api/live/preview`, `/api/live/stop`; an ended session is an ordinary session and is classified by the existing Predict (`dcs featurize --videos` accepts unknown labels); dcs drops unlabeled fish from training (D-080). Checked end to end on a real 20-minute recording: 35,824 frames captured in 35 s, finish about 1 s, Predict gives the same probabilities as the batch output for that fish | Built |
-| U3 UI | New session from a file or a camera; the same session page; live preview, current-state badge, per-second state strip; End, then the result with probabilities and the IV.5 caveats | To do |
+| U3 UI | **Live camera** view (`frontend/src/Live.tsx`): camera list ("No cameras detected" when empty), live preview with the fish marked, current-state badge, per-second state strip, **End and analyze**; the ended session opens on the ordinary Dashboard. For files and camera sessions alike the drug prediction runs once the analysis finishes. The prediction card shows the model's own cross-validation verdict and, for a camera session, the camera and session-length caveat. Checked in a browser with a real recording replayed as the camera, and with an unmatched file | Built |
 
 ## IV.5 Known limits
 - **Live states are display-only.** `OnlineLabeler` cannot look ahead, so a sustained state (Freezing/Drift, Listing/LORR) appears once its minimum bout has elapsed, not from the bout's first frame; speed uses only the earlier partner frame; Dead is never shown. The saved labels and the classification always come from `classify_video` on the collected tracks.
@@ -1578,5 +1578,5 @@ only where the frames come from differs.
 - **Pixel thresholds.** Tracking and labeling thresholds are in pixels, set on the lab's 320x240 footage; frames are scaled to 240 px high. A different camera or framing is a new camera epoch, and the classifier is unvalidated and camera-confounded (II.2.3): results from a new camera must say so.
 - **Recording format.** H.264 (`.mp4`) when OpenCV can write it, else VP8 (`.webm`), else `mp4v` (records, but browsers will not play it).
 - **One live session at a time.** The tracker seeds OpenCV's global random generator (NFR-002).
-- **Session names are UTC times** (`live_20261116T120000`); two starts in the same second are refused, not merged.
+- **Session names** are `<name>_<local date>_<time>` (e.g. `TankA_2026-11-16_10-52-38`); the user names the session when starting it (default `Video<N>`). Renaming after recording is not offered: it would move the session folder and rewrite its manifest and review. Two starts with the same name in the same second are refused, not merged.
 - **The preview is a polled JPEG**, enough for a few frames per second; an MJPEG stream if it needs to be smoother.

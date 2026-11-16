@@ -1446,3 +1446,22 @@ says the source file is missing. Tests: `tests/review/test_live_api.py` (5), dcs
 live capture 35 s for 35,824 frames, finish about 1 s, Predict 200 with the batch output's probabilities (top class
 0.234 vs 0.2338). Full backend suite 1,623 passed (5 sandbox-blocked passed outside it); frontend 17 passed. Removed:
 the `unmatched_video` 409 and an unreachable JPEG-encode guard.
+
+### Phase 16 U3: Live camera view (2026-11-16)
+
+PRD Part IV. Frontend: `Live.tsx` (camera list with an empty state, reviewer, start; preview polled as JPEG with the
+fish marked; current-state badge; per-second strip from `model.secondRuns`; End and analyze; resumes an open session
+after a page reload), a **Live camera** header button usable with no recordings, and one rule for both sources: when
+an analysis finishes (a processed file or an ended live session) the app reloads that session and runs the drug
+prediction once, as the reviewer who started it. The prediction card shows the model's verdict and a live-camera
+caveat. Backend: the session payload gains `inference_available` and `model_verdict` (read once at startup, an
+unreadable run gives none); a live session's display name is "Live camera recording". Tests: review API 165 passed,
+frontend 18 (new `secondRuns` test), type check and build clean. Browser check (Playwright, scratch server on a temp
+output folder): no-camera state; a real recording replayed as the camera, 3 min 42 s, End, Dashboard with all stages
+done and the prediction about 7 s later; an unmatched file through Run analysis to the same automatic prediction
+(23%, the same as batch). Headless polling looks frozen only while the test browser sits idle between steps.
+Follow-up (owner): live sessions are named by the user when starting, `<name>_<local date>_<time>`, default
+`Video<N>` numbered after the camera sessions so far (`suggested_name` in `GET /api/live`); names are letters, digits
+and dashes (the frontend's `sessionName` cleans what is typed and previews the id). The camera caveat now reads the
+backend's `live_recording` flag instead of an id prefix. Browser-checked: "Tank A dose 1" gave
+`Tank-A-dose-1_2026-11-16_11-11-13`, then the next suggestion was `Video2`.
