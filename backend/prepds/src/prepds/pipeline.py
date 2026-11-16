@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 import multiprocessing
 import os
 import time
@@ -24,7 +25,7 @@ from prepds.consolidate import consolidate_states
 from prepds.export import export_video
 from prepds.features import derive_features
 from prepds.labeling import classify_video
-from prepds.models import ManifestRecord, Track, Trial
+from prepds.models import ManifestRecord, MatchStatus, Track, Trial, VideoAsset
 from prepds.review_flags import terminal_no_action_flag
 from prepds.review_store import load_manifest, should_process
 from prepds.tracking import track_video
@@ -32,6 +33,8 @@ from prepds.video_io import probe
 
 LOGGER = logging.getLogger(__name__)
 Tracker = Callable[[Path], list[Track]]
+# Workbook fields of a recording with no workbook row. dcs `schema.UNLABELED` must be the same string.
+UNLABELED = "unknown"
 
 
 class Outcome(str, Enum):
@@ -86,32 +89,56 @@ def process_trial(trial: Trial, config: RunConfig, *, tracker: Tracker = track_v
             return VideoResult(vid, Outcome.SKIPPED, "already processed or reviewed (use --force to regenerate)")
         asset = probe(trial.video_path)
         tracks = tracker(trial.video_path)
-        states = consolidate_states(classify_video(tracks, **config.thresholds))
-        flag = terminal_no_action_flag(
-            tracks,
-            freeze_speed_floor_px_per_s=config.thresholds["freeze_speed_floor_px_per_s"],
-            speed_lag_s=config.thresholds.get("speed_lag_s", 1.0),
-        )
-        (config.out_dir / vid / "detections.parquet").unlink(missing_ok=True)  # never beside artifacts of another run
-        export_video(
-            config.out_dir / vid,
-            trial=trial,
-            asset=asset,
-            tracks=tracks,
-            features=derive_features(tracks),
-            states=states,
-            pipeline_version=config.pipeline_version,
-            calibration_profile_version=config.calibration_profile_version,
-            processed_at=config.processed_at,
-            review_flags=(flag,) if flag else (),
-            undetermined_color_hex=config.undetermined_color_hex,
-            overwrite=config.force,
-        )
-        _write_detections(config.out_dir / vid, getattr(tracker, "last_detections", None))
+        finish_video(trial, asset, tracks, config, detections=getattr(tracker, "last_detections", None))
     except Exception as error:  # noqa: BLE001 - FR-004: any per-video failure is reported, the batch goes on
         LOGGER.warning("%s failed: %s", vid, error)
         return VideoResult(vid, Outcome.FAILED, f"{type(error).__name__}: {error}", time.perf_counter() - started)
     return VideoResult(vid, Outcome.PROCESSED, "", time.perf_counter() - started)
+
+
+def finish_video(trial: Trial, asset: VideoAsset, tracks: list[Track], config: RunConfig, *, detections=None) -> Path:
+    """Label, flag and export one video's tracks into `<out_dir>/<video_id>/`; returns that folder.
+
+    The one finish step for every source: a file once tracked (`process_trial`), a live session when it ends.
+    """
+    out = config.out_dir / video_id(trial)
+    states = consolidate_states(classify_video(tracks, **config.thresholds))
+    flag = terminal_no_action_flag(
+        tracks,
+        freeze_speed_floor_px_per_s=config.thresholds["freeze_speed_floor_px_per_s"],
+        speed_lag_s=config.thresholds.get("speed_lag_s", 1.0),
+    )
+    (out / "detections.parquet").unlink(missing_ok=True)  # never beside artifacts of another run
+    export_video(
+        out,
+        trial=trial,
+        asset=asset,
+        tracks=tracks,
+        features=derive_features(tracks),
+        states=states,
+        pipeline_version=config.pipeline_version,
+        calibration_profile_version=config.calibration_profile_version,
+        processed_at=config.processed_at,
+        review_flags=(flag,) if flag else (),
+        undetermined_color_hex=config.undetermined_color_hex,
+        overwrite=config.force,
+    )
+    _write_detections(out, detections)
+    return out
+
+
+def unlabeled_trial(vid: str, video_path: Path, date: dt.date) -> Trial:
+    """The trial of a recording with no workbook row: a camera session, or a file that matches none.
+
+    Its compound is what the classifier predicts, so the workbook fields are `UNLABELED` (dcs drops such fish from
+    training). `vid` is `<prefix>_<rest>`, split into sex and subject_id so `video_id()` gives it back.
+    """
+    sex, _, subject_id = vid.partition("_")
+    if not sex or not subject_id:
+        raise ValueError(f"video id {vid!r} must look like <prefix>_<rest>")
+    return Trial(subject_id=subject_id, sex=sex, strain=UNLABELED, age=None, compound=UNLABELED,
+                 concentration_mM=UNLABELED, date=date, agent_exposure_min=math.nan, video_path=video_path,
+                 match_status=MatchStatus.NO_TRIAL_ROW)
 
 
 def _write_detections(video_dir: Path, detections) -> None:

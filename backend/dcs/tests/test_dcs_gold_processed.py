@@ -164,6 +164,23 @@ def test_video_without_catalog_row_stops_with_the_fix(tmp_path: Path) -> None:
     assert victim["video_id"] in str(caught.value)
 
 
+def test_recording_without_a_workbook_row_is_predicted_but_never_trained_on(tmp_path: Path) -> None:
+    """A camera session or unmatched file (prepds writes compound `unknown`) is dropped from training, not an error."""
+    from dcs.gold import DROP_UNLABELED, read_videos
+
+    result, out = _fresh(tmp_path)
+    source = _folder(out, result.truth.iloc[0]["video_id"])
+    live = _folder(out, "live_20261116T120000")
+    shutil.copytree(source, live)
+    set_manifest(live, sex="live", subject_id="20261116T120000", compound=schema.UNLABELED, concentration_mM=schema.UNLABELED)
+    gold = read_processed(out)
+    assert "live_20261116T120000" not in gold.video_ids and len(gold.video_ids) == len(result.truth)
+    assert dropped_reasons(gold)["live_20261116T120000"] == DROP_UNLABELED
+    videos = tmp_path / "videos"
+    shutil.copytree(live, videos / live.name)
+    assert read_videos(videos).video_ids == ("live_20261116T120000",)
+
+
 def test_repeated_catalog_subject_is_an_error(tmp_path: Path) -> None:
     _, out = _fresh(tmp_path)
     rewrite_table(out / schema.CATALOG_FILE, lambda table: pd.concat([table, table.iloc[[1]]]))

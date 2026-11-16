@@ -141,33 +141,68 @@ def track_video(
     NOT thread-safe with respect to other concurrent OpenCV RNG use in the
     same process - acceptable for Phase 12's per-video sequential batch
     model, but a real constraint if that ever changes.
+
+    The per-frame work is `FishTracker.step`, shared with live capture.
     """
     asset = probe(video_path)  # raises ValueError early for a bad file
-    cv2.setRNGSeed(random_seed)
-    subtractor = cv2.createBackgroundSubtractorKNN(
-        history=knn_history, dist2Threshold=knn_dist2_threshold, detectShadows=False
+    tracker = FishTracker(
+        asset.fps,
+        min_area_px2=min_area_px2,
+        max_area_px2=max_area_px2,
+        max_jump_px=max_jump_px,
+        knn_history=knn_history,
+        knn_dist2_threshold=knn_dist2_threshold,
+        max_consecutive_misses_before_reacquire=max_consecutive_misses_before_reacquire,
+        random_seed=random_seed,
     )
+    return [tracker.step(frame_idx, frame) for frame_idx, frame in frames(video_path, stride=1)]
 
-    tracks: list[Track] = []
-    last_detected_xy: tuple[float, float] | None = None
-    consecutive_misses = 0
-    for frame_idx, frame in frames(video_path, stride=1):
-        foreground_mask = subtractor.apply(frame)
-        centroid, orientation_deg = _detect_fish(
-            foreground_mask, min_area_px2=min_area_px2, max_area_px2=max_area_px2
+
+class FishTracker:
+    """The per-frame tracking core, one frame at a time: `track_video` feeds it a file, live capture a camera.
+
+    Causal (each frame uses only earlier frames), so the same frames give the same tracks from either source.
+    Construction reseeds OpenCV's global RNG (see `DEFAULT_TRACKING_RANDOM_SEED`): one tracker per video, and
+    not two running in one process at the same time if their output must be reproducible.
+    """
+
+    def __init__(
+        self,
+        fps: float,
+        *,
+        min_area_px2: float = DEFAULT_MIN_CONTOUR_AREA_PX2,
+        max_area_px2: float = DEFAULT_MAX_CONTOUR_AREA_PX2,
+        max_jump_px: float = DEFAULT_MAX_JUMP_PX,
+        knn_history: int = DEFAULT_KNN_HISTORY,
+        knn_dist2_threshold: float = DEFAULT_KNN_DIST2_THRESHOLD,
+        max_consecutive_misses_before_reacquire: int = DEFAULT_MAX_CONSECUTIVE_MISSES_BEFORE_REACQUIRE,
+        random_seed: int = DEFAULT_TRACKING_RANDOM_SEED,
+    ) -> None:
+        if not fps > 0:
+            raise ValueError(f"fps must be positive, got {fps}")
+        self.fps = fps
+        self._min_area, self._max_area, self._max_jump = min_area_px2, max_area_px2, max_jump_px
+        self._max_misses = max_consecutive_misses_before_reacquire
+        cv2.setRNGSeed(random_seed)
+        self._subtractor = cv2.createBackgroundSubtractorKNN(
+            history=knn_history, dist2Threshold=knn_dist2_threshold, detectShadows=False
         )
+        self._last_detected_xy: tuple[float, float] | None = None
+        self._consecutive_misses = 0
+
+    def step(self, frame_idx: int, frame: np.ndarray) -> Track:
+        foreground_mask = self._subtractor.apply(frame)
+        centroid, orientation_deg = _detect_fish(foreground_mask, min_area_px2=self._min_area, max_area_px2=self._max_area)
         detected = False
         x = y = 0.0
         if centroid is not None:
             cx, cy = centroid
-            jump_ok = last_detected_xy is None or math.hypot(
-                cx - last_detected_xy[0], cy - last_detected_xy[1]
-            ) <= max_jump_px
-            if jump_ok:
+            last = self._last_detected_xy
+            if last is None or math.hypot(cx - last[0], cy - last[1]) <= self._max_jump:
                 x, y = cx, cy
                 detected = True
-                last_detected_xy = (cx, cy)
-                consecutive_misses = 0
+                self._last_detected_xy = (cx, cy)
+                self._consecutive_misses = 0
             # An implausible jump is treated as a bad detection (glare/
             # occlusion artifact), not real motion - orientation_deg is
             # discarded too in that case, since it came from the same
@@ -176,27 +211,24 @@ def track_video(
                 orientation_deg = None
 
         if not detected:
-            consecutive_misses += 1
-            if consecutive_misses >= max_consecutive_misses_before_reacquire:
+            self._consecutive_misses += 1
+            if self._consecutive_misses >= self._max_misses:
                 # A long-enough gap means the anchor is no longer meaningful
                 # - drop it so the next found contour is trusted outright,
                 # rather than rejecting every real detection after a real
                 # occlusion/stillness gap because it's "too far" from a
                 # stale position.
-                last_detected_xy = None
+                self._last_detected_xy = None
 
-        tracks.append(
-            Track(
-                frame_idx=frame_idx,
-                t_sec=frame_idx / asset.fps,
-                x=x,
-                y=y,
-                orientation_deg=orientation_deg if detected else None,
-                y_from_frame_top=y if detected else None,  # see TrackResult docstring
-                detected=detected,
-            )
+        return Track(
+            frame_idx=frame_idx,
+            t_sec=frame_idx / self.fps,
+            x=x,
+            y=y,
+            orientation_deg=orientation_deg if detected else None,
+            y_from_frame_top=y if detected else None,  # see TrackResult docstring
+            detected=detected,
         )
-    return tracks
 
 
 def track_video_with_context(

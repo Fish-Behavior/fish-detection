@@ -3,13 +3,15 @@
 This is the single product requirements document. **Part I** is the preprocessing dataset system (`prepds`: tracking,
 features, behavior-state labels, review app, gold dataset). **Part II** is the compound/dose classifier and research
 chat (`dcs`), merged in on 2026-10-08 from the former `classifier_PRD.md`. **Part III** collects the watch list and the
-model roadmap (lightweight reasoning model now, a better vision model once there is more data).
+model roadmap (lightweight reasoning model now, a better vision model once there is more data). **Part IV** is live
+mode: a camera as one more video source through the same pipeline.
 
 | Part | Package | Status |
 |---|---|---|
 | I | `backend/prepds/src/prepds/` | Built; 328 of 352 trials processed; human review still to do |
 | II | `backend/dcs/src/dcs/` | Built and tested on synthetic data; first real run on the GPU box pending |
 | III | - | Living list; update it when an item closes |
+| IV | `backend/prepds/src/prepds/live.py`, review app `/api/live`, `frontend/src/Live.tsx` | Built (U1-U3); camera on the lab computer to test (IV.3) |
 
 # Part I: Preprocessing Dataset System
 
@@ -196,7 +198,7 @@ project, per `docs/zebrafish_drug_detection_scope.md`):
   produces the single-subject building block.
 - Processing Novel Tank Test (10-minute, rectangular-tank) footage — no such videos
   are available to this project.
-- Live camera / real-time / streaming inference.
+- Live camera / real-time / streaming inference (now Part IV).
 - Multi-user access, authentication, or networked deployment.
 - Any modification of `src/fishbehavior/` — this is a new, independent top-level
   package that may later be integrated, but integration is not part of this PRD.
@@ -1254,7 +1256,7 @@ No quantitative evidence for drug-identity estimation, so later anomaly detectio
 | FR-12 | Research chat: English questions answered from query tools by a local language model (terminal and loopback API) | P1 (owner addition 2026-10-08) | Built (U19-U20); first real model run pending |
 
 ### II.3.2 Out of scope
-- Anomaly detection and report generation (scope doc §4.3-4.4); a **web frontend** (the chat API is ready for one; III.2); **live camera and real-time inference** (Phase 2). The classifier's unit is a whole recording, so it cannot run on a live stream without a windowed redesign.
+- Anomaly detection and report generation (scope doc §4.3-4.4); a **web frontend** (the chat API is ready for one; III.2); **live camera and real-time inference** (Phase 2, now Part IV). The classifier's unit is a whole recording, so it cannot run on a live stream without a windowed redesign; Part IV therefore classifies only when a live session ends.
 - Detecting LORR or Dead from video (reviewers label them in Part I).
 - Training or fine-tuning a language model (a few hundred fish cannot teach it facts; tool answers can be checked, D-071).
 - Any change to `prepds` or its outputs.
@@ -1526,7 +1528,7 @@ Everything deferred, accepted as a known limit, or waiting on someone, collected
 1. **Now.** Tabular classifier plus a **lightweight, pre-trained, local language model** for reasoning and wording (II.8). No GPU is needed to train anything in `dcs`; the GPU helps the MLP and the chat model.
 2. **Next, on the GB10.** Real run (W1), look at the first honest report with the owner at G2. The language model is picked and running (W8).
 3. **When more data exists, a better vision model.** Trigger: enough reviewed (Accepted) videos and labeled frames, and recordings balanced across compounds, dates and cameras (W2, W5). Then, in this order: (a) more labeled frames for the fish detector, with no-fish and reflection frames, evaluated on a held-out set that no choice touched; (b) a **clip-level behavior model** trained on reviewed state seconds, the route left open for Listing/LORR and Surface Breach; (c) optionally a small vision-language model as one more chat tool ("what is happening in this frame?"), advisory only, since it would do worse than the dedicated classifier on ambiguous frames. The drug classifier keeps reading features computed from the reviewed tracks; a video model replaces the labeling stage, not the drug classifier, until G4 says otherwise.
-4. **Chat in the app: done.** The FishLab chat panel talks to `dcs serve-chat`, hosted in Docker beside the app; the lab tunes its answers in `backend/dcs/config/chat_guidance.yaml`. Live, real-time use is Phase 2 and needs a windowed redesign of the classifier plus a measured detector speed.
+4. **Chat in the app: done.** The FishLab chat panel talks to `dcs serve-chat`, hosted in Docker beside the app; the lab tunes its answers in `backend/dcs/config/chat_guidance.yaml`. Live, real-time use is Part IV: states live, classification when the session ends.
 
 ## III.3 Repository layout and test policy (standing rules)
 Goal: a cleaner, safer, more professional repo where touching one backend unit never costs a run of everything.
@@ -1536,3 +1538,46 @@ Goal: a cleaner, safer, more professional repo where touching one backend unit n
 4. **Run only what changed.** Locally: `python backend/shared/scripts/changed_tests.py` (add `--all` for everything, extra args go to pytest). CI does the same on pull requests: a unit's tests run only if that unit changed. A change in `backend/shared`, `pyproject.toml`, `uv.lock`, Docker files or `.github` selects every unit; docs-only changes select none. Pushes to master run everything. `CI passed` fails only on a failed or cancelled job, never on a skipped one. If a new unit or shared path is added, update `changed_tests.py` and its test in the same change.
 5. **Quality gates.** Each unit keeps its own coverage floor (85%, currently prepds 95%, dcs 97%); raise it, never lower it. No restricted data, models or `.env` in git (`test_dcs_privacy` enforces it). Remove unused code and docs when a unit is done (D-041 in classifier_progress.md).
 6. **Moves are mechanical.** When relocating files, use `git mv`, fix path references in code, tests, Docker, CI and docs in the same branch, and run the full suite once (`--all`) before opening the pull request.
+
+# Part IV: Live mode (Phase 2)
+
+## IV.1 Goal
+After handover the platform is trained and ready: it takes any fish, from a video file or a camera, and gives the
+result (behavior states, then compound probabilities). No workbook, catalog or other document is needed at that stage;
+the workbook and the matched videos are for training only (owner, 2026-11-16).
+
+## IV.2 One pipeline, two sources
+A camera is one more frame source, not a separate feature. The UI and the backend follow the same process for both;
+only where the frames come from differs.
+
+| Step | Video file | Camera |
+|---|---|---|
+| Frames | read from the file | read from the camera, recorded as they arrive |
+| Tracking | `FishTracker.step`, every frame | the same, one frame at a time |
+| While running | progress | the same page, plus the current state (Controlled Swim, Erratic Movement, Freezing/Drift...) |
+| Finish | the last frame | the user clicks **End** |
+| Labels and output | `classify_video`, then export to `processed/<id>/` | the same function on the tracks collected so far, with the recording as the video |
+| Afterwards | session list, Dashboard, Review, classification with probabilities | identical |
+
+## IV.3 Decisions (owner, 2026-11-16)
+1. **Camera:** a USB camera plugged into the machine that runs the backend. Cameras are listed by index ("Camera 0", OpenCV cannot read device names); an empty list shows "No cameras detected".
+2. **Tracker:** the classical tracker. The fine-tuned detector is deferred; it plugs into the same per-frame step once validated data or its weights are available.
+3. **While streaming:** only the current behavior state is shown, no interim classification. **On End:** the session is classified from the data collected so far, with probabilities.
+4. **Docker and cameras: on hold.** Docker Desktop (macOS, Windows) cannot pass a USB camera into a Linux container (Windows needs `usbipd-win` to attach it to WSL; Linux works with `devices: [/dev/video0]`). How the system runs on the lab computer with a camera is decided later; nothing Mac-specific is built.
+
+## IV.4 Units
+| Unit | Scope | Status |
+|---|---|---|
+| U1 Live engine | `tracking.FishTracker` (the per-frame core of `track_video`; batch output identical, checked on a 35,824-frame real video); `live.OnlineLabeler` (current state from past frames only, IV.5); `live.list_cameras`; `live.LiveSession` (capture, track, label, record) | Built |
+| U2 Shared finish and API | `pipeline.finish_video`, the one finish step for files and live sessions; `pipeline.unlabeled_trial` for a recording with no workbook row (compound and dose `unknown`), so unmatched files are processable too; review-app endpoints `/api/live/cameras`, `/api/live` (start, status), `/api/live/preview`, `/api/live/stop`; an ended session is an ordinary session and is classified by the existing Predict (`dcs featurize --videos` accepts unknown labels); dcs drops unlabeled fish from training (D-080). Checked end to end on a real 20-minute recording: 35,824 frames captured in 35 s, finish about 1 s, Predict gives the same probabilities as the batch output for that fish | Built |
+| U3 UI | **Live camera** view (`frontend/src/Live.tsx`): camera list ("No cameras detected" when empty), live preview with the fish marked, current-state badge, per-second state strip, **End and analyze**; the ended session opens on the ordinary Dashboard. For files and camera sessions alike the drug prediction runs once the analysis finishes. The prediction card shows the model's own cross-validation verdict and, for a camera session, the camera and session-length caveat. Checked in a browser with a real recording replayed as the camera, and with an unmatched file | Built |
+
+## IV.5 Known limits
+- **Live states are display-only.** `OnlineLabeler` cannot look ahead, so a sustained state (Freezing/Drift, Listing/LORR) appears once its minimum bout has elapsed, not from the bout's first frame; speed uses only the earlier partner frame; Dead is never shown. The saved labels and the classification always come from `classify_video` on the collected tracks.
+- **Frame timing.** Time is `frame_idx / fps`; webcams often report 0 or a nominal fps (fallback 30). `LiveSession(fps=...)` is the knob once a rig's real rate is measured.
+- **Pixel thresholds.** Tracking and labeling thresholds are in pixels, set on the lab's 320x240 footage; frames are scaled to 240 px high. A different camera or framing is a new camera epoch, and the classifier is unvalidated and camera-confounded (II.2.3): results from a new camera must say so.
+- **Recording format.** H.264 (`.mp4`) when OpenCV can write it, else VP8 (`.webm`), else `mp4v` (records, but browsers will not play it).
+- **One live session at a time.** The tracker seeds OpenCV's global random generator (NFR-002).
+- **A camera lost mid-recording** (OpenCV returns no frame; it does not raise) keeps what was recorded: End saves and analyzes it, and the session carries "The camera stopped sending frames at mm:ss" beside its result (owner, 2026-11-16). An internal error (recording file or tracker failing) saves nothing.
+- **Session names** are `<name>_<local date>_<time>` (e.g. `TankA_2026-11-16_10-52-38`); the user names the session when starting it (default `Video<N>`). Renaming after recording is not offered: it would move the session folder and rewrite its manifest and review. Two starts with the same name in the same second are refused, not merged.
+- **The preview is a polled JPEG**, enough for a few frames per second; an MJPEG stream if it needs to be smoother.

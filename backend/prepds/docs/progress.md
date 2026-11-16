@@ -1420,3 +1420,69 @@ the app starts; human acceptance and gold-index export remain separate workflows
 `./stop.sh` stops the app, verifies a private dated archive of saved outputs, accepted
 data and configuration, then removes Compose containers. Raw source data and unsaved
 browser drafts remain outside that archive.
+
+### Phase 16 U1: live engine (2026-11-16)
+
+PRD Part IV. A camera is one more frame source through the same pipeline. `tracking.FishTracker` is the per-frame core
+pulled out of `track_video`; `track_video` now calls it, and its output is identical to master's on a 35,824-frame real
+video (F_277, 18.9 s, about 1,900 fps). New `live.py`: `list_cameras`, `OnlineLabeler` (current state from past frames
+only; differs from batch by the freeze/listing confirmation delay, backward-only speed, no Dead), `LiveSession`
+(capture, scale to 240 px high, track, label, record H.264 > VP8 > mp4v, per-second state strip, thread-safe status).
+`tests/vision/test_live.py`: 10 tests, live.py 99% covered (live file = batch tracks and every frame recorded, online speed = batch speed,
+online labels = batch labels apart from the delay, camera listing with fakes, scaling and fps fallback, unopenable
+source, stop, breach/listing/frame gaps, codec fallback and duration cap). Full backend suite 1,616 passed (5 sandbox-blocked tests passed outside the sandbox). No unused code
+left: the old inline loop in `track_video` was replaced, not kept.
+
+### Phase 16 U2: shared finish and live API (2026-11-16)
+
+PRD Part IV. `pipeline.finish_video` is the one finish step (label, flag, export) that `process_trial` and an ended
+live session both call; `pipeline.unlabeled_trial` gives a recording with no workbook row a trial whose compound and
+dose are `unknown` (sex and subject_id split the video id, so dcs' folder-name check holds). Review app: `process` no
+longer requires a workbook match (unmatched files are analyzable; `processable` = has a source); new `/api/live/*`
+endpoints (cameras, start, status, preview, stop) inside `install_workspace`, sharing its settings and processing slot;
+a live recording lives in its session folder (`_resolve_source(..., session_dir)` allows exactly that); `.webm`
+accepted. dcs: gold training readers drop `unknown`-compound fish (D-080). Frontend: the "not processable" hint now
+says the source file is missing. Tests: `tests/review/test_live_api.py` (5), dcs gold test (1). End to end on F_277:
+live capture 35 s for 35,824 frames, finish about 1 s, Predict 200 with the batch output's probabilities (top class
+0.234 vs 0.2338). Full backend suite 1,623 passed (5 sandbox-blocked passed outside it); frontend 17 passed. Removed:
+the `unmatched_video` 409 and an unreachable JPEG-encode guard.
+
+### Phase 16 U3: Live camera view (2026-11-16)
+
+PRD Part IV. Frontend: `Live.tsx` (camera list with an empty state, reviewer, start; preview polled as JPEG with the
+fish marked; current-state badge; per-second strip from `model.secondRuns`; End and analyze; resumes an open session
+after a page reload), a **Live camera** header button usable with no recordings, and one rule for both sources: when
+an analysis finishes (a processed file or an ended live session) the app reloads that session and runs the drug
+prediction once, as the reviewer who started it. The prediction card shows the model's verdict and a live-camera
+caveat. Backend: the session payload gains `inference_available` and `model_verdict` (read once at startup, an
+unreadable run gives none); a live session's display name is "Live camera recording". Tests: review API 165 passed,
+frontend 18 (new `secondRuns` test), type check and build clean. Browser check (Playwright, scratch server on a temp
+output folder): no-camera state; a real recording replayed as the camera, 3 min 42 s, End, Dashboard with all stages
+done and the prediction about 7 s later; an unmatched file through Run analysis to the same automatic prediction
+(23%, the same as batch). Headless polling looks frozen only while the test browser sits idle between steps.
+Follow-up (owner): live sessions are named by the user when starting, `<name>_<local date>_<time>`, default
+`Video<N>` numbered after the camera sessions so far (`suggested_name` in `GET /api/live`); names are letters, digits
+and dashes (the frontend's `sessionName` cleans what is typed and previews the id). The camera caveat now reads the
+backend's `live_recording` flag instead of an id prefix. Browser-checked: "Tank A dose 1" gave
+`Tank-A-dose-1_2026-11-16_11-11-13`, then the next suggestion was `Video2`.
+
+### Phase 16: cross-provider review fixes (2026-11-16)
+
+Codex (gpt-6-astra) reviewed PR #28 over three rounds; every finding was checked against the code before fixing.
+Fixed: `LiveSession`'s stop flag renamed to `_stop_event` (`_stop` shadowed a `Thread` method on Python 3.11/3.12,
+so End crashed there; reproduced on 3.12); a live session cannot be replaced while it is being saved or while its
+capture thread is still alive, and a stale save never overwrites a newer session; Freezing/Listing timers reset at a
+frame gap; a capture error mid-recording fails the session with its cause instead of saving it; the Live camera
+button asks before discarding unsaved review edits; the Live view looks for cameras again after a resumed session
+ends; looking for cameras and starting a recording never overlap (one camera lock, checked under the live lock).
+The automatic drug prediction is now driven by server state: the analysis record (`processing.json`, also written
+when a live session is saved) keeps who started it, and opening a session the app analyzed but has not predicted
+runs the prediction as that reviewer (`model.autoPredictReviewer`), so a reload or leaving the page never loses it.
+Tests added in `test_live.py`, `test_live_api.py` and `model.test.ts`. Full backend suite 1,625 passed (5
+port-dependent tests deselected in the sandbox); frontend 20 passed.
+Review with gpt-6.1-sol after these fixes: one HIGH, a camera unplugged mid-recording (OpenCV returns no frame
+rather than raising) was saved as a complete recording. Owner ruled: keep what was recorded, with a warning. The
+session's status gains `ended_early` ("The camera stopped sending frames at mm:ss, so this recording is shorter than
+planned."), set only for a camera source that stops without End; the saved analysis record carries it, and the
+Dashboard shows it next to the result. A file's end is not a warning. Tests: `test_live.py` (camera vs file),
+`test_live_api.py` (`_LostCamera`: 40 frames then no frame; saved, warning on the session).

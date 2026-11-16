@@ -68,6 +68,28 @@ If unsure what the fish is doing: do not accept, reject and note video, time and
 video is worse than a missing one. The tracking tools (waterline, ROI, tracking point, boxes, keypoints) are for
 developers; ignore them. Watch for the fish's reflection at the surface, which the tracker can follow instead.
 
+### Analyzing a new fish: a video file or the live camera
+
+Both go through the same analysis and end on the same Dashboard; no workbook entry is needed.
+
+- **A video file:** put it in the video folder, press **Refresh**, pick it in the list, type your name and press
+  **Run analysis**. When the analysis finishes, the drug prediction runs by itself.
+- **The live camera:** press **Live camera** (top right). Pick the camera (**No cameras detected** means the backend
+  computer cannot open one: connect it, then **Look again**), optionally give the session a **Session name** (it is saved
+  as that name plus the date and time, e.g. `TankA_2026-11-16_10-52-38`; left empty it becomes `Video1_...`,
+  `Video2_...`), type your name, press **Start recording**. While it
+  records you see the camera, the fish marked with a green cross, the **current behavior** and a strip of the
+  behavior per second. Press **End and analyze** when you are done: the recording is analyzed like a video file,
+  then the app opens it on the Dashboard as **Live camera recording** and runs the drug prediction. If the camera
+  is unplugged or stops sending frames, the Live view says when; **End** still saves what was recorded, and the
+  Dashboard keeps the warning "The camera stopped sending frames at mm:ss" next to the result.
+
+The live behavior is a preview: a state such as Freezing/Drift shows once it has lasted its minimum time, and the
+saved labels are worked out again from the whole recording when you end. Under the percentages, **Model check**
+says how the model did in its own cross-validation; today it says "no better than simple baselines", so the
+percentages are not validated. A live recording also carries a reminder that the model learned from the lab's own
+20-minute recordings: another camera, framing or a shorter session can shift the result.
+
 ---
 
 ## 2. Command cheat sheet
@@ -168,6 +190,26 @@ It stops at the first failed step and names it; details in `<PDS_OUTPUT_DIR>/doc
 | `review` | Human check | Review web app; refuses non-loopback hosts (no login) |
 | `export-index` | `dcs` reads the index, not the folders | Rebuilds `accepted_index.parquet` from ACCEPTED videos on disk |
 | `annotate` | Label frames for the detector | Frame-labeling page (box, 5 keypoints, Listing) over `outputs/phase15/` |
+
+**Live camera and recordings without a workbook row (PRD Part IV).** A camera is one more video source. The review
+app (`prepds review`) has the live API; the Live view in the frontend comes next:
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/live/cameras` | Cameras that return a frame, as `{"cameras": [...]}`; an empty list means none was found (409 while a session uses one) |
+| `POST /api/live` `{"camera": 0, "name": "TankA"}` | Starts a session `<name>_<local date>_<time>` (e.g. `TankA_2026-11-16_10-52-38`; without a name `Video<N>`, numbered after the camera sessions so far; letters, digits and dashes): track, show the current state, record to `processed/<id>/recording.mp4` (`.webm` if the machine has no H.264 encoder). One at a time |
+| `GET /api/live` | Status: phase (`running`, `stopped` when the camera stops sending, `finishing`, `finished`, `failed`, `error`), current state, seconds, a per-second state strip |
+| `GET /api/live/preview` | The latest frame as a JPEG, with the fish marked; poll it for a preview |
+| `POST /api/live/stop` | **End**: the collected tracks go through the same labeling and export as a processed file. The session then appears in the session list like any video, and the usual Predict gives compound probabilities |
+
+A video file with no workbook row (dropped into the video folder) can now be analyzed too: its compound and dose are
+stored as `unknown`, and `dcs` never trains on such fish (D-080). On the lab computer the backend must be able to open
+the camera: Docker Desktop on macOS and Windows cannot pass a USB camera into the container (Windows: `usbipd-win` to
+attach it to WSL; Linux: `devices: [/dev/video0]` in Compose); how to run it there is still open (PRD IV.3).
+Tests: `backend/prepds/tests/vision/test_live.py` (live file = batch tracks; live labels against batch) and
+`backend/prepds/tests/review/test_live_api.py` (start, preview, busy rules, End, then an ordinary session; files
+without a workbook row; error cases). If a live session ends as `failed`, nothing was recorded or saving failed: the
+backend log has the reason, and a new session can start right away.
 
 Settings come from environment, then `.env`, then defaults. Main ones: `PDS_VIDEO_DIR`, `PDS_DB_PATH`,
 `PDS_OUTPUT_DIR` (default `outputs`), `PDS_ACCEPTED_DIR`, `PDS_WORKERS`, `PDS_CONFIG` (a thresholds/profile YAML).

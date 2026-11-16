@@ -7,6 +7,7 @@ import {
 import type { SetStateAction } from 'react'
 import {
   COLORS,
+  autoPredictReviewer,
   effectiveSegments,
   emptyEdits,
   frameAt,
@@ -40,6 +41,7 @@ import Editors, { LabelEditor } from './Editors.tsx'
 import { Ethogram, StateSummary, Traces } from './Charts.tsx'
 import Chat from './Chat.tsx'
 import ReviewTools from './ReviewTools.tsx'
+import LiveView from './Live.tsx'
 import utLogo from './assets/ut-logo.png'
 
 // Plain words for the stored review and processing codes.
@@ -53,6 +55,12 @@ const PROCESSING_LABELS: Record<string, string> = {
 }
 const plain = (labels: Record<string, string>, code: string) => labels[code] ?? code.replaceAll('_', ' ').toLowerCase()
 // 1200.9 -> "20 min 1 s"
+// The model's own cross-validation verdict (dcs evaluate.py), in plain words beside its percentages.
+const VERDICTS: Record<string, string> = {
+  useful: 'Model check: in cross-validation this model beat simple baselines.',
+  'not useful': 'Model check: in cross-validation this model did no better than simple baselines, so treat these percentages as unvalidated.',
+  undecided: 'Model check: cross-validation could not tell whether this model beats simple baselines, so treat these percentages as unvalidated.',
+}
 const minutes = (seconds: number) => seconds >= 60 ? `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s` : `${seconds.toFixed(1)} s`
 
 function Empty({ title, message }: { title: string; message?: string }) {
@@ -71,6 +79,12 @@ function Empty({ title, message }: { title: string; message?: string }) {
 export default function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [selected, setSelected] = useState('')
+  const [view, setView] = useState<'recordings' | 'live'>('recordings')
+  // After an analysis (a processed file or an ended live session) open that session; its prediction then runs by itself.
+  const analyzed = (videoId: string) => {
+    setView('recordings')
+    void reload(videoId)
+  }
   const generation = useRef(0)
   const pendingCount = useRef(0)
   const [load, setLoad] = useState<
@@ -100,19 +114,28 @@ export default function App() {
   return <>
     <header className={`brand-header${load.status === 'ready' && load.session ? ' main-shell' : ''}`}>
       <img src={utLogo} alt="The University of Toledo" width="723" height="276" />
-      <button onClick={() => void reload()} title="Load the latest recordings and results">
-        <Icon name="reset" />
-        Refresh
-      </button>
+      <div className="header-actions">
+        <button className={view === 'live' ? 'primary' : ''} onClick={() => { if (pendingCount.current && !window.confirm('Autosave is unavailable in this browser. Discard unsaved review edits and open the live camera?')) return; setView('live') }} title="Record and analyze a fish from a camera">
+          <Icon name="camera" />
+          Live camera
+        </button>
+        <button onClick={() => { setView('recordings'); void reload() }} title="Load the latest recordings and results">
+          <Icon name="reset" />
+          Refresh
+        </button>
+      </div>
     </header>
-    {load.status === 'loading' ? <Empty title="Loading…" /> : load.status === 'error'
+    {view === 'live' ? <LiveView onFinished={analyzed} onClose={() => setView('recordings')} /> : load.status === 'loading' ? <Empty title="Loading…" /> : load.status === 'error'
       ? <Empty title={load.stage === 'connection' ? 'Could not connect to the analysis server' : load.stage === 'inventory' ? 'Could not load the recording list' : 'Could not load this recording'} message={load.message} /> : !load.session
-      ? <Empty title="No recordings yet" message="Add recordings to the configured video folder, then press Refresh." />
-      : <Workspace key={load.session.video_id + ':' + load.session.review?.revision} session={load.session} sessions={sessions} selectSession={(id) => void reload(id)} refresh={() => void reload()} onPendingChange={(count) => { pendingCount.current = count }} />}
+      ? <Empty title="No recordings yet" message="Add recordings to the configured video folder and press Refresh, or record one with Live camera." />
+      : <Workspace key={load.session.video_id + ':' + load.session.review?.revision} session={load.session} sessions={sessions} selectSession={(id) => void reload(id)} onPendingChange={(count) => { pendingCount.current = count }} onAnalyzed={analyzed} />}
   </>
 }
 
-function Workspace({ session: initialSession, sessions, selectSession, refresh, onPendingChange }: { session: SessionData; sessions: SessionSummary[]; selectSession: (id: string) => void; refresh: () => void; onPendingChange: (count: number) => void }) {
+function Workspace({ session: initialSession, sessions, selectSession, onPendingChange, onAnalyzed }: {
+  session: SessionData; sessions: SessionSummary[]; selectSession: (id: string) => void; onPendingChange: (count: number) => void
+  onAnalyzed: (videoId: string) => void
+}) {
   const [session, setSession] = useState(initialSession)
   const [review, setReview] = useState<ReviewData>(session.review!)
   const [busy, setBusy] = useState(false)
@@ -433,7 +456,7 @@ function Workspace({ session: initialSession, sessions, selectSession, refresh, 
       processingStatus(session.video_id).then((value) => {
         if (!alive) return
         setProcessing(value)
-        if (value.status === 'processed') refresh()
+        if (value.status === 'processed') onAnalyzed(session.video_id)
         if (['failed', 'interrupted'].includes(value.status)) setError(value.message)
       }, (e) => { if (alive) { setError(e.message); setProcessing({ status: 'interrupted', message: e.message }) } })
     }, 2000)
@@ -449,18 +472,26 @@ function Workspace({ session: initialSession, sessions, selectSession, refresh, 
     } catch (e) { setNotice(''); setError((e as Error).message) }
     finally { busyRef.current = false; setBusy(false) }
   }
-  const predictCompound = async () => {
+  const predictCompound = async (name = reviewer) => {
     if (pendingTotal) { setError('Save or discard your unsaved corrections first.'); return }
     if (busyRef.current) return
     busyRef.current = true; setBusy(true)
     try {
-      validateReviewer(reviewer)
-      const updated = await predict(session, review, reviewer.trim())
+      validateReviewer(name)
+      const updated = await predict(session, review, name.trim())
       setSession({ ...updated, overlay: session.overlay }); setReview(updated.review!)
       announce('Drug prediction updated.')
     } catch (e) { setNotice(''); setError((e as Error).message) }
     finally { busyRef.current = false; setBusy(false) }
   }
+  // Same for every source: once a recording is analyzed, its drug prediction runs without another click.
+  useEffect(() => {
+    const by = pendingTotal ? null : autoPredictReviewer(session, hasEdits(edits))
+    if (!by) return
+    setReviewer(by)
+    announce('Running the drug prediction…')
+    void predictCompound(by)
+  }, [])
   const changeTab = (next: 'dashboard' | 'review') => {
     setTab(next)
     setTool('inspect')
@@ -527,9 +558,11 @@ function Workspace({ session: initialSession, sessions, selectSession, refresh, 
         </>
       ) : (
         <p className="muted small">
-          No drug prediction for this recording yet.
+          {busy ? 'Running the drug prediction…' : 'No drug prediction for this recording yet.'}
         </p>
       )}
+      {predictions && session.model_verdict && <p className="small muted model-check">{VERDICTS[session.model_verdict] ?? `Model check: ${session.model_verdict}.`}</p>}
+      {predictions && session.live_recording && <p className="small muted model-check">Recorded with a live camera. The model learned from the lab's own 20-minute recordings, so a different camera, framing or a shorter session can shift these percentages.</p>}
       <div className="dose-status">
         <span>Dose</span>
         <b>Not estimated by this model</b>
@@ -775,7 +808,7 @@ function Workspace({ session: initialSession, sessions, selectSession, refresh, 
             {!hasTracking && <div className="processing-controls">
               <label>Reviewer <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} maxLength={100} /></label>
               <button onClick={() => void processVideo()} disabled={!session.processable}>Run analysis</button>
-              {!session.processable && <p className="muted">This video is not linked to a trial in the experiment workbook yet, so it cannot be analyzed.</p>}
+              {!session.processable && <p className="muted">The source video file is missing, so it cannot be analyzed.</p>}
             </div>}
             {error && (
               <p className="inline-error" role="alert">

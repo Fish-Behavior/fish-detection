@@ -54,6 +54,7 @@ from dcs.gold_rules import (
 __all__ = [
     "DROP_MISSING_FILE",
     "DROP_OTHER_PROFILE",
+    "DROP_UNLABELED",
     "DROP_STATUS",
     "DROP_UNREADABLE",
     "SOURCE_ACCEPTED",
@@ -75,6 +76,7 @@ TRACKER_CLASSICAL = "classical"
 TRACKER_MODEL = "model"
 DROP_STATUS = "review_status"  # REJECTED or NOT_PROCESSED in the unreviewed output
 DROP_OTHER_PROFILE = "other_profile"  # not the calibration profile selected in ReadOptions
+DROP_UNLABELED = "unlabeled"  # no workbook row (schema.UNLABELED): recorded for prediction, not training
 DEFAULT_MARKER = "-model"  # same as backend/dcs/config/default_training.yaml (a test keeps them equal)
 DEFAULT_FPS_TOLERANCE = 0.01
 KEPT_STATUSES = (schema.REVIEW_PROCESSED_AUTO, schema.REVIEW_EDITED, schema.REVIEW_ACCEPTED)
@@ -343,6 +345,10 @@ def _assemble(
     need_dates: bool = True,
 ) -> GoldSet:
     """Set-level rules in order: one profile (EC-21), something left, dates (EC-27), tracker (EC-29), fps (EC-26)."""
+    if source != SOURCE_VIDEOS:  # training sources: a fish without a workbook label has nothing to teach
+        unlabeled = [row for row in rows if row.get("compound") == schema.UNLABELED]
+        dropped.extend((row["video_id"], DROP_UNLABELED, "no workbook row (camera session or unmatched file)") for row in unlabeled)
+        rows = [row for row in rows if row.get("compound") != schema.UNLABELED]
     videos = pd.DataFrame(rows, columns=list(VIDEO_COLUMNS))
     profile = chosen_profile(seen, Counter(videos["calibration_profile_version"]), options.profile)
     if videos.empty:
