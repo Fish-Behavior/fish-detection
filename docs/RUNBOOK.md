@@ -169,6 +169,12 @@ It stops at the first failed step and names it; details in `<PDS_OUTPUT_DIR>/doc
 | `export-index` | `dcs` reads the index, not the folders | Rebuilds `accepted_index.parquet` from ACCEPTED videos on disk |
 | `annotate` | Label frames for the detector | Frame-labeling page (box, 5 keypoints, Listing) over `outputs/phase15/` |
 
+**Live camera (in progress, PRD Part IV).** `prepds.live` holds the engine: `list_cameras()` lists the cameras that
+return a frame (an empty list means none), and `LiveSession` tracks, shows the current state and records one fish from
+a camera or a file. It uses the same tracker as `run`, so a file gives the same tracks either way
+(`backend/prepds/tests/vision/test_live.py` checks this and the live labels against the batch labels). There is no
+command or page for it yet; the API and the Live view come next.
+
 Settings come from environment, then `.env`, then defaults. Main ones: `PDS_VIDEO_DIR`, `PDS_DB_PATH`,
 `PDS_OUTPUT_DIR` (default `outputs`), `PDS_ACCEPTED_DIR`, `PDS_WORKERS`, `PDS_CONFIG` (a thresholds/profile YAML).
 

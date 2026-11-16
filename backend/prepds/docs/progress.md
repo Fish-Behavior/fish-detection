@@ -1420,3 +1420,15 @@ the app starts; human acceptance and gold-index export remain separate workflows
 `./stop.sh` stops the app, verifies a private dated archive of saved outputs, accepted
 data and configuration, then removes Compose containers. Raw source data and unsaved
 browser drafts remain outside that archive.
+
+### Phase 16 U1: live engine (2026-11-16)
+
+PRD Part IV. A camera is one more frame source through the same pipeline. `tracking.FishTracker` is the per-frame core
+pulled out of `track_video`; `track_video` now calls it, and its output is identical to master's on a 35,824-frame real
+video (F_277, 18.9 s, about 1,900 fps). New `live.py`: `list_cameras`, `OnlineLabeler` (current state from past frames
+only; differs from batch by the freeze/listing confirmation delay, backward-only speed, no Dead), `LiveSession`
+(capture, scale to 240 px high, track, label, record H.264 > VP8 > mp4v, per-second state strip, thread-safe status).
+`tests/vision/test_live.py`: 10 tests, live.py 99% covered (live file = batch tracks and every frame recorded, online speed = batch speed,
+online labels = batch labels apart from the delay, camera listing with fakes, scaling and fps fallback, unopenable
+source, stop, breach/listing/frame gaps, codec fallback and duration cap). Full backend suite 1,616 passed (5 sandbox-blocked tests passed outside the sandbox). No unused code
+left: the old inline loop in `track_video` was replaced, not kept.
