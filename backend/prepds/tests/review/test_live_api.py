@@ -307,3 +307,28 @@ def test_looking_for_cameras_and_starting_a_recording_never_overlap(app, monkeyp
         release.set()
         lookup.join(timeout=10)
     assert client.post("/api/live", json={"camera": 0}).status_code == 201  # free once the lookup is done
+
+
+class _LostCamera(_UnpluggedCamera):
+    """A few real frames, then OpenCV's way of reporting a disconnected camera: no frame, no exception."""
+
+    def read(self):
+        if self.frames <= 0:
+            return False, None
+        self.frames -= 1
+        return self.capture.read()
+
+
+def test_a_camera_lost_mid_recording_saves_what_was_recorded_with_a_warning(app, monkeypatch):
+    make, processed, _, _ = app
+    monkeypatch.setattr(workspace, "LiveSession", lambda camera, recording, **kw: LiveSession(
+        0, recording, opener=lambda source: _LostCamera(frames=40), **kw))
+    client = make()
+    vid = client.post("/api/live", json={"camera": 0, "reviewer": "Ann"}).json()["video_id"]
+    stopped = _wait(client, lambda s: s["phase"] == "stopped")
+    assert stopped["frame_count"] == 40 and "camera stopped sending frames" in stopped["ended_early"]
+    assert client.post("/api/live/stop").status_code == 202
+    assert _wait(client, lambda s: s["phase"] in ("finished", "failed"))["phase"] == "finished"
+    session = client.get(f"/api/sessions/{vid}").json()
+    assert session["processing"]["status"] == "processed" and "shorter than planned" in session["processing"]["message"]
+    assert (processed / vid / "manifest.json").is_file()

@@ -169,6 +169,7 @@ export type LiveStatus =
       seconds: Behavior[]
       message: string
       suggested_name: string
+      ended_early: string | null // set when a camera stopped sending frames before End
     }
 export interface SessionSummary {
   video_id: string

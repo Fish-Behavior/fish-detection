@@ -80,7 +80,9 @@ Both go through the same analysis and end on the same Dashboard; no workbook ent
   `Video2_...`), type your name, press **Start recording**. While it
   records you see the camera, the fish marked with a green cross, the **current behavior** and a strip of the
   behavior per second. Press **End and analyze** when you are done: the recording is analyzed like a video file,
-  then the app opens it on the Dashboard as **Live camera recording** and runs the drug prediction.
+  then the app opens it on the Dashboard as **Live camera recording** and runs the drug prediction. If the camera
+  is unplugged or stops sending frames, the Live view says when; **End** still saves what was recorded, and the
+  Dashboard keeps the warning "The camera stopped sending frames at mm:ss" next to the result.
 
 The live behavior is a preview: a state such as Freezing/Drift shows once it has lasted its minimum time, and the
 saved labels are worked out again from the whole recording when you end. Under the percentages, **Model check**

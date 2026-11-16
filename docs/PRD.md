@@ -1578,5 +1578,6 @@ only where the frames come from differs.
 - **Pixel thresholds.** Tracking and labeling thresholds are in pixels, set on the lab's 320x240 footage; frames are scaled to 240 px high. A different camera or framing is a new camera epoch, and the classifier is unvalidated and camera-confounded (II.2.3): results from a new camera must say so.
 - **Recording format.** H.264 (`.mp4`) when OpenCV can write it, else VP8 (`.webm`), else `mp4v` (records, but browsers will not play it).
 - **One live session at a time.** The tracker seeds OpenCV's global random generator (NFR-002).
+- **A camera lost mid-recording** (OpenCV returns no frame; it does not raise) keeps what was recorded: End saves and analyzes it, and the session carries "The camera stopped sending frames at mm:ss" beside its result (owner, 2026-11-16). An internal error (recording file or tracker failing) saves nothing.
 - **Session names** are `<name>_<local date>_<time>` (e.g. `TankA_2026-11-16_10-52-38`); the user names the session when starting it (default `Video<N>`). Renaming after recording is not offered: it would move the session folder and rewrite its manifest and review. Two starts with the same name in the same second are refused, not merged.
 - **The preview is a polled JPEG**, enough for a few frames per second; an MJPEG stream if it needs to be smoother.

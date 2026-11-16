@@ -161,7 +161,8 @@ class LiveSession(threading.Thread):
         self._lock = threading.Lock()
         self._latest: tuple[np.ndarray, Track] | None = None
         self._status = {"phase": "starting", "fps": None, "frame_count": 0, "t_sec": 0.0, "state": None,
-                        "detected": False, "speed_px_per_s": None, "seconds": [], "error": None}
+                        "detected": False, "speed_px_per_s": None, "seconds": [], "error": None,
+                        "ended_early": None}  # set when a camera stops sending frames before End
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -202,6 +203,13 @@ class LiveSession(threading.Thread):
             while not self._stop_event.is_set():
                 ok, frame = capture.read()
                 if not ok or frame is None:
+                    # A file simply ends; a camera that stops returning frames (OpenCV does not raise when one is
+                    # unplugged) ended the recording early, which the saved session must say.
+                    if isinstance(source, int) and not self._stop_event.is_set():
+                        at = self.tracks[-1].t_sec if self.tracks else 0.0
+                        with self._lock:
+                            self._status["ended_early"] = (f"The camera stopped sending frames at {int(at // 60):02d}:"
+                                                           f"{int(at % 60):02d}, so this recording is shorter than planned.")
                     break
                 frame = self._resize(frame)
                 if writer is None:

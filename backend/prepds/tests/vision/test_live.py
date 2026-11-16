@@ -50,6 +50,7 @@ def test_live_file_source_gives_the_batch_tracks_and_records_every_frame(tmp_pat
     capture.release()
     status = session.status()
     assert status["frame_count"] == 150 and len(status["seconds"]) == 4  # 5 s: seconds 0-3 closed, 4 still open
+    assert status["ended_early"] is None  # a file simply ends
 
 
 def test_online_speed_equals_batch_speed_wherever_the_earlier_partner_exists() -> None:
@@ -126,6 +127,7 @@ def test_camera_frames_are_scaled_to_the_tracker_height_and_unknown_fps_falls_ba
     session = _run(LiveSession(0, tmp_path / "rec", opener=lambda source: _FakeCamera(40), thresholds=THRESHOLDS))
     status = session.status()
     assert status["phase"] == "stopped" and status["fps"] == 30.0 and len(session.tracks) == 40
+    assert "camera stopped sending frames at 00:01" in status["ended_early"]  # 40 frames at 30 fps: lost at 1.3 s
     frame, _track = session.latest()
     assert frame.shape == (240, 426, 3)  # 1280x720 -> height 240, even width
 

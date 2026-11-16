@@ -1480,3 +1480,9 @@ when a live session is saved) keeps who started it, and opening a session the ap
 runs the prediction as that reviewer (`model.autoPredictReviewer`), so a reload or leaving the page never loses it.
 Tests added in `test_live.py`, `test_live_api.py` and `model.test.ts`. Full backend suite 1,625 passed (5
 port-dependent tests deselected in the sandbox); frontend 20 passed.
+Review with gpt-6.1-sol after these fixes: one HIGH, a camera unplugged mid-recording (OpenCV returns no frame
+rather than raising) was saved as a complete recording. Owner ruled: keep what was recorded, with a warning. The
+session's status gains `ended_early` ("The camera stopped sending frames at mm:ss, so this recording is shorter than
+planned."), set only for a camera source that stops without End; the saved analysis record carries it, and the
+Dashboard shows it next to the result. A file's end is not a warning. Tests: `test_live.py` (camera vs file),
+`test_live_api.py` (`_LostCamera`: 40 frames then no frame; saved, warning on the session).

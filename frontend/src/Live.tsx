@@ -123,7 +123,7 @@ export default function LiveView({ onFinished, onClose }: { onFinished: (videoId
             <svg className="live-strip" viewBox={`0 0 ${width} 10`} preserveAspectRatio="none" role="img" aria-label="Behavior per second so far">
               {runs.map((r) => <rect key={r.start} x={r.start} width={r.end - r.start} y={0} height={10} fill={COLORS[r.state]}><title>{`${elapsed(r.start)}–${elapsed(r.end)} ${r.state}`}</title></rect>)}
             </svg>
-            {phase === 'stopped' && <p className="notice">The camera stopped sending frames. End the session to save what was recorded.</p>}
+            {phase === 'stopped' && <p className="notice">{session.ended_early ?? 'The camera stopped sending frames.'} End the session to save what was recorded; the warning stays with the result.</p>}
             {phase === 'error' && <p className="inline-error">{session.message} End the session to close it.</p>}
             {phase === 'finishing'
               ? <p className="notice">Saving the session and running the analysis…</p>

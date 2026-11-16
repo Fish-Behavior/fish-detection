@@ -758,7 +758,8 @@ def install_workspace(app, processed_dir: Path, *, video_dir: Path | None, profi
                 with process_slot:
                     finish_video(unlabeled_trial(vid, session.video_path, config.processed_at.date()), asset, session.tracks, config)
                 # The same record a file's analysis leaves: the frontend runs the drug prediction from it, once.
-                atomic_json(directory(vid) / 'processing.json', {'status': 'processed', 'message': '', 'reviewer': reviewer,
+                # A camera lost mid-recording still saves what was recorded, with that warning shown beside the result.
+                atomic_json(directory(vid) / 'processing.json', {'status': 'processed', 'message': status['ended_early'] or '', 'reviewer': reviewer,
                                                                  'updated_at': clock().isoformat()})
                 outcome = ('finished', '')
         except Exception:
